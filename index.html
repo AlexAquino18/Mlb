@@ -1551,10 +1551,12 @@ async function getPitcherData(id, season) {
   // Hand + current team
   let hand = "R";
   let currentTeamAbbr = null;
+  let currentTeamId   = null;
   if (personData.status === "fulfilled") {
     const person = personData.value?.people?.[0];
     hand = person?.pitchHand?.code || "R";
     currentTeamAbbr = person?.currentTeam?.abbreviation?.toUpperCase() || null;
+    currentTeamId   = person?.currentTeam?.id || null;
   }
 
   // Season stats (prior regular season)
@@ -1631,7 +1633,7 @@ async function getPitcherData(id, season) {
     recentERA, recentK9, recentStarts, gameLog,
     springERA, springK9, springKPct, springIP, springStarts,
     stRecentERA, stRecentK9,
-    currentTeamAbbr,
+    currentTeamAbbr, currentTeamId,
   };
   _pitcher[key] = result;
   return result;
@@ -2308,11 +2310,25 @@ async function getPitcherCurrentTeamAbbr(playerId) {
   if (!playerId) return null;
   if (_pitcherTeamCache[playerId] !== undefined) return _pitcherTeamCache[playerId];
   try {
-    const d = await mlbGet(`/people/${playerId}`);
-    const abbr = d?.people?.[0]?.currentTeam?.abbreviation?.toUpperCase() || null;
+    // Request specific fields to guarantee currentTeam is returned
+    const d = await mlbGet(`/people/${playerId}?fields=people,id,fullName,currentTeam,id,abbreviation`);
+    const person = d?.people?.[0];
+    const abbr = person?.currentTeam?.abbreviation?.toUpperCase() || null;
     _pitcherTeamCache[playerId] = abbr;
     return abbr;
   } catch { _pitcherTeamCache[playerId] = null; return null; }
+}
+
+async function getPitcherCurrentTeamId(playerId) {
+  if (!playerId) return null;
+  const cacheKey = `id_${playerId}`;
+  if (_pitcherTeamCache[cacheKey] !== undefined) return _pitcherTeamCache[cacheKey];
+  try {
+    const d = await mlbGet(`/people/${playerId}?fields=people,id,currentTeam,id`);
+    const teamId = d?.people?.[0]?.currentTeam?.id || null;
+    _pitcherTeamCache[cacheKey] = teamId;
+    return teamId;
+  } catch { _pitcherTeamCache[cacheKey] = null; return null; }
 }
 
 const _fullRosterCache = {};
@@ -2378,14 +2394,28 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) 
   // 2. PP team map: find the PP entry for this team, then look up the MLB ID by name
   const ppEntries = getPPForTeam(mlbTeam);
   const expectedAbbr2 = mlbTeam?.abbreviation?.toUpperCase();
+  const expectedTeamId = mlbTeam?.id;
   if (ppEntries && ppEntries.length > 0) {
     for (const ppE of ppEntries) {
+      // Fast check: if this player is in ppHitterLines for a different team, skip them
+      const hE = ppHitterLines[normName(ppE.rawName)];
+      if (hE?.team && hE.team.toUpperCase() !== expectedAbbr2) {
+        console.warn(`[MLB] PP fallback skip (batter team): ${ppE.rawName} is ${hE.team} batter ≠ ${expectedAbbr2}`);
+        continue;
+      }
+
       const mlbId = await findMLBId(ppE.rawName);
       if (!mlbId) continue;
-      // Verify this pitcher actually plays for the expected team via MLB people API
-      const currentTeam = await getPitcherCurrentTeamAbbr(mlbId);
-      if (currentTeam && expectedAbbr2 && currentTeam !== expectedAbbr2) {
-        console.warn(`[MLB] PP fallback skip: ${ppE.rawName} currentTeam=${currentTeam} ≠ ${expectedAbbr2}`);
+
+      // Verify via MLB people API — try abbreviation first, then team ID
+      const [currentAbbr, currentTeamId] = await Promise.all([
+        getPitcherCurrentTeamAbbr(mlbId),
+        getPitcherCurrentTeamId(mlbId),
+      ]);
+      const abbrMismatch = currentAbbr && expectedAbbr2 && currentAbbr !== expectedAbbr2;
+      const idMismatch   = currentTeamId && expectedTeamId && currentTeamId !== expectedTeamId;
+      if (abbrMismatch || idMismatch) {
+        console.warn(`[MLB] PP fallback skip: ${ppE.rawName} currentTeam=${currentAbbr||currentTeamId} ≠ ${expectedAbbr2||expectedTeamId}`);
         continue;
       }
       return { prob: { id: mlbId, fullName: ppE.rawName }, src: "pp-sourced" };
@@ -2422,8 +2452,12 @@ async function buildSO(games, season) {
     for (const e of entries) {
       let p = e.prob ? await getPitcherData(e.prob.id, season) : AVG_PITCHER;
       // Team validation: if /people/{id} confirms wrong team, reset to TBD
-      if (e.prob && p.currentTeamAbbr && p.currentTeamAbbr !== e.pitchTeam.abbreviation?.toUpperCase()) {
-        console.warn(`[MLB] SO: ${e.prob.fullName} currentTeam=${p.currentTeamAbbr} ≠ ${e.pitchTeam.abbreviation} — resetting to TBD`);
+      const soExpAbbr = e.pitchTeam?.abbreviation?.toUpperCase();
+      const soExpId   = e.pitchTeam?.id;
+      const soAbbrBad = p.currentTeamAbbr && soExpAbbr && p.currentTeamAbbr !== soExpAbbr;
+      const soIdBad   = p.currentTeamId   && soExpId   && p.currentTeamId   !== soExpId;
+      if (e.prob && (soAbbrBad || soIdBad)) {
+        console.warn(`[MLB] SO: ${e.prob.fullName} currentTeam=${p.currentTeamAbbr||p.currentTeamId} ≠ ${soExpAbbr||soExpId} — resetting to TBD`);
         e.prob = null;
         p = AVG_PITCHER;
       }
