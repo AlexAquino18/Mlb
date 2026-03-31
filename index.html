@@ -3007,8 +3007,9 @@ function extractPPHitterLines(allProj, playerMap) {
     tb:   ["total bases"],
     hr:   ["home runs", "home run"],
     bb:   ["walks", "base on balls"],
+    runs: ["runs scored", "runs"],
     rbi:  ["rbis", "rbi", "runs batted in"],
-    hrr:  ["hits+runs+rbis", "h+r+rbi"],
+    hrr:  ["hits+runs+rbis", "h+r+rbi", "hits + runs + rbis"],
     sb:   ["stolen bases", "stolen base"],
   };
   for (const proj of allProj) {
@@ -3037,7 +3038,7 @@ function extractPPHitterLines(allProj, playerMap) {
 async function getHitterStats(playerId, season) {
   const key = `h_${playerId}_${season}`;
   if (_hitterStats[key]) return _hitterStats[key];
-  const DEF = { bats:"R", avg:0.255, obp:0.320, slg:0.415, ops:0.735, pa:450, ab:400, hits:102, hr:12, bb:38, tb:167, rbi:52, sb:5 };
+  const DEF = { bats:"R", avg:0.255, obp:0.320, slg:0.415, ops:0.735, pa:450, ab:400, hits:102, hr:12, bb:38, tb:167, rbi:52, runs:65, sb:5 };
   try {
     const [cur, prev, person] = await Promise.allSettled([
       mlbGet(`/people/${playerId}/stats?stats=season&group=hitting&gameType=R&season=${season}`),
@@ -3051,7 +3052,7 @@ async function getHitterStats(playerId, season) {
       return { bats, avg:parseFloat(s.avg)||0.255, obp:parseFloat(s.obp)||0.320,
         slg:parseFloat(s.slg)||0.415, ops:parseFloat(s.ops)||0.735,
         pa:s.plateAppearances||0, ab:s.atBats||0, hits:s.hits||0, hr:s.homeRuns||0,
-        bb:s.baseOnBalls||0, tb:s.totalBases||0, rbi:s.rbi||0, sb:s.stolenBases||0 };
+        bb:s.baseOnBalls||0, tb:s.totalBases||0, rbi:s.rbi||0, runs:s.runs||0, sb:s.stolenBases||0 };
     };
     const c = parse(cur), p = parse(prev);
     let result;
@@ -3183,6 +3184,13 @@ async function buildHitters(games, season) {
         // Umpire: tight zone (negative runsAdj) slightly reduces hits/BB
         const umpMult = 1 + umpRunsAdj * 0.04;
         const pBB   = bbR * PA * Math.max(0.80, umpMult);
+        // Runs and RBIs: per-PA rates from season stats scaled to today's PAs
+        const runsR = stats.pa > 0 ? stats.runs / stats.pa : 0.14;
+        const rbiR  = stats.pa > 0 ? stats.rbi  / stats.pa : 0.12;
+        const pRuns = runsR * PA * Math.max(0.80, umpMult);
+        const pRBI  = rbiR  * PA * hrFactor;  // park HR factor lightly affects RBI too
+        // Hits+Runs+RBIs combo
+        const pHRR  = pHits + pRuns + pRBI;
 
         const edgeOf = (proj, entry) => entry ? parseFloat((proj - entry.line).toFixed(2)) : null;
         const propList = [
@@ -3190,6 +3198,10 @@ async function buildHitters(games, season) {
           ppE?.tb   && { stat:"TB",    line:ppE.tb.line,   proj:pTB,   edge:edgeOf(pTB,   ppE.tb)   },
           ppE?.hr   && { stat:"HR",    line:ppE.hr.line,   proj:pHR,   edge:edgeOf(pHR,   ppE.hr)   },
           ppE?.bb   && { stat:"Walks", line:ppE.bb.line,   proj:pBB,   edge:edgeOf(pBB,   ppE.bb)   },
+          ppE?.runs && { stat:"Runs",  line:ppE.runs.line, proj:pRuns, edge:edgeOf(pRuns, ppE.runs) },
+          ppE?.rbi  && { stat:"RBI",   line:ppE.rbi.line,  proj:pRBI,  edge:edgeOf(pRBI,  ppE.rbi)  },
+          ppE?.hrr  && { stat:"H+R+RBI", line:ppE.hrr.line, proj:pHRR, edge:edgeOf(pHRR, ppE.hrr)  },
+          ppE?.sb   && { stat:"SB",    line:ppE.sb.line,   proj:stats.pa>0?stats.sb/stats.pa*PA:0.12, edge:edgeOf(stats.pa>0?stats.sb/stats.pa*PA:0.12, ppE.sb) },
         ].filter(Boolean);
 
         const bestProp = propList.length
@@ -3208,7 +3220,7 @@ async function buildHitters(games, season) {
 
         return { id:b.id, name:b.name, pos:b.pos, order:idx+1,
           bats:stats.bats, stats, h2h, ppEntry:ppE, platoon, platoonLabel,
-          proj:{hits:pHits, tb:pTB, hr:pHR, bb:pBB},
+          proj:{hits:pHits, tb:pTB, hr:pHR, bb:pBB, runs:pRuns, rbi:pRBI, hrr:pHRR},
           propList, bestProp, conf, oppPitcherName:oppName, oppHand };
       }));
     };
@@ -3280,7 +3292,7 @@ function renderHitterCard(g) {
           + `<span style="color:#64748b">· proj ${bestProp.proj.toFixed(1)}</span> `
           + `<span style="background:${cc}22;border:1px solid ${cc}55;border-radius:4px;padding:1px 6px;font-size:10px">${conf}%</span>`
           + `</span>`
-        : `<span style="color:#4a5568;font-size:11px">proj ${b.proj.hits.toFixed(1)}H / ${b.proj.tb.toFixed(1)}TB</span>`;
+        : `<span style="color:#4a5568;font-size:11px">proj ${b.proj.hits.toFixed(1)}H / ${b.proj.runs.toFixed(1)}R / ${b.proj.rbi.toFixed(1)}RBI</span>`;
 
       // Platoon split chip
       let platoonHtml = "";
@@ -3305,7 +3317,7 @@ function renderHitterCard(g) {
             <div>${bestStr}</div>
           </div>
           <div class="batter-stats-line">
-            .${avg3(stats.avg)} AVG · .${avg3(stats.slg)} SLG · ${stats.hr} HR · ${stats.bb} BB (${stats.pa} PA)
+            .${avg3(stats.avg)} AVG · .${avg3(stats.slg)} SLG · ${stats.hr} HR · ${stats.runs} R · ${stats.rbi} RBI · ${stats.bb} BB (${stats.pa} PA)
             &nbsp;·&nbsp; ${h2hHtml}
           </div>
           ${platoonHtml ? `<div style="margin-top:4px">${platoonHtml}</div>` : ""}
