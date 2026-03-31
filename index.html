@@ -13,7 +13,10 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Bebas+Neue&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0a0e1a; font-family: 'IBM Plex Mono', 'Courier New', monospace; color: #e2e8f0; min-height: 100vh; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    body { background: #0a0e1a; font-family: 'IBM Plex Mono', 'Courier New', monospace; color: #e2e8f0; min-height: 100vh; -webkit-overflow-scrolling: touch; overflow-scrolling: touch; }
+    /* Tap targets: remove iOS 300ms delay */
+    button, .tab-btn, .filter-btn, .card-hd, .batter-row, a { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: #0a0e1a; }
     ::-webkit-scrollbar-thumb { background: #1e2d45; border-radius: 3px; }
@@ -128,6 +131,17 @@
     /* ── LINE MOVEMENT ──────────────────────────────────────────────────── */
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
     .line-moved { animation:pulse 1.8s ease-in-out 4; }
+    /* ── SAFARI / OLDER iOS: flex gap fallback (gap in flex requires Safari 14.1+) ── */
+    @supports not (gap: 1px) {
+      #header-inner > * + * { margin-left: 12px; }
+      #header-right > * + * { margin-left: 8px; }
+      #tabs > * + * { margin-left: 4px; }
+      #filters > * + * { margin-left: 8px; }
+      #loader > * + * { margin-top: 12px; }
+      .pitcher-line > * + * { margin-left: 6px; }
+      .lineup-list > * + * { margin-top: 3px; }
+      .pitcher-row > * + * { margin-top: 3px; }
+    }
     /* ── MOBILE ──────────────────────────────────────────────────────────── */
     @media (max-width: 600px) {
       #header { padding: 12px 14px; }
@@ -413,6 +427,25 @@ function getUmpZone(umpName) {
     if (k.split(" ").pop() === last) return v;
   }
   return null;
+}
+
+// ─── MOBILE DETECTION ─────────────────────────────────────────────────────────
+const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+// Run async tasks with a concurrency limit — prevents iOS from killing the tab
+// with too many simultaneous requests (use Promise.all on desktop, batched on mobile)
+async function mapConcurrent(items, fn, limit = IS_MOBILE ? 4 : 30) {
+  const results = new Array(items.length);
+  let idx = 0;
+  async function worker() {
+    while (idx < items.length) {
+      const i = idx++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
+  await Promise.all(workers);
+  return results;
 }
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
@@ -1964,7 +1997,7 @@ async function buildNRFI(games, season) {
   // Load CrowdsLine pitcher NRFI records (fails silently within 6s timeout)
   await loadCrowdsLineData();
   const results = [];
-  await Promise.all(games.map(async g => {
+  await mapConcurrent(games, async g => {
     const aw = g.teams.away, hm = g.teams.home;
 
     // Step 1: get boxscore/lineup data (also surfaces confirmed starters for live games)
@@ -2464,7 +2497,7 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) 
 async function buildSO(games, season) {
   setStatus(`Building strikeout model for ${games.length} games…`);
   const results = [];
-  await Promise.all(games.map(async g => {
+  await mapConcurrent(games, async g => {
     const aw = g.teams.away, hm = g.teams.home;
 
     // Resolve pitchers — MLB schedule first, then PP team map fallback
@@ -3353,7 +3386,7 @@ async function getTeamRoster(teamId, season) {
 async function buildHitters(games, season) {
   setStatus(`Building hitter matchups for ${games.length} games…`);
   const results = [];
-  await Promise.all(games.map(async g => {
+  await mapConcurrent(games, async g => {
     const aw = g.teams.away, hm = g.teams.home;
     const gameInfo = await getGameInfo(g.gamePk);
     const [awRes, hmRes] = await Promise.all([
