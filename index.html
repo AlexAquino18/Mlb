@@ -1347,16 +1347,24 @@ async function getUmpireForGame(gamePk) {
     if (!hp || !hp.official) { _umpData[gamePk] = fallback; return fallback; }
 
     const fullName = hp.official.fullName || hp.official.name || "";
-    const normFull = normUmpName(fullName);
+    const normFull = normUmpName(fullName); // "bill miller" (first last)
 
-    // Try exact match
+    // UMP_DATA keys are stored as "last first" — try reversed order first
     let entry = UMP_DATA[normFull];
-
-    // Try last-name only match
     if (!entry) {
-      const lastName = normFull.split(" ").pop();
+      const parts = normFull.split(" ");
+      if (parts.length >= 2) {
+        // "bill miller" → "miller bill"
+        const reversed = parts.slice(1).join(" ") + " " + parts[0];
+        entry = UMP_DATA[reversed];
+      }
+    }
+
+    // Last-name only fallback: first word of UMP_DATA key = last name (e.g. "miller bill" → "miller")
+    if (!entry) {
+      const lastName = normFull.split(" ").slice(-1)[0]; // last word of "first last" = last name
       for (const [k, v] of Object.entries(UMP_DATA)) {
-        if (k.split(" ").pop() === lastName) { entry = v; break; }
+        if (k.split(" ")[0] === lastName) { entry = v; break; } // first word of "last first" = last name
       }
     }
 
