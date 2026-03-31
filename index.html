@@ -3129,6 +3129,25 @@ async function getHitterGameLog(playerId, season) {
   } catch(_) { _hitterStats[key] = []; return []; }
 }
 
+// Fetch active roster for a team — used as fallback when lineup isn't posted
+const _rosterCache = {};
+async function getTeamRoster(teamId, season) {
+  const key = `roster_${teamId}_${season}`;
+  if (_rosterCache[key]) return _rosterCache[key];
+  try {
+    const d = await mlbGet(`/teams/${teamId}/roster?rosterType=active&season=${season}`);
+    const players = (d?.roster || [])
+      .map(p => ({
+        id:   p.person?.id,
+        name: p.person?.fullName || "",
+        pos:  p.position?.abbreviation || "?",
+      }))
+      .filter(p => p.id && p.name);
+    _rosterCache[key] = players;
+    return players;
+  } catch(_) { _rosterCache[key] = []; return []; }
+}
+
 async function buildHitters(games, season) {
   setStatus(`Building hitter matchups for ${games.length} games…`);
   const results = [];
@@ -3148,9 +3167,19 @@ async function buildHitters(games, season) {
     const ump = await getUmpireForGame(g.gamePk).catch(() => null);
     const umpRunsAdj = ump?.runsAdj || 0; // negative = pitcher-friendly
 
-    const buildSide = async (batters, oppPitcher, oppName, oppHand) => {
-      if (!batters || !batters.length) return [];
-      return await Promise.all(batters.slice(0,9).map(async (b, idx) => {
+    const buildSide = async (batters, oppPitcher, oppName, oppHand, teamId) => {
+      // If lineup not posted, fall back to active roster filtered to players with PP lines
+      let effectiveBatters = batters;
+      let fromRoster = false;
+      if (!effectiveBatters || !effectiveBatters.length) {
+        const roster = await getTeamRoster(teamId, season);
+        const ppRoster = roster.filter(p => ppHitterLines[normName(p.name)]);
+        if (!ppRoster.length) return [];
+        effectiveBatters = ppRoster;
+        fromRoster = true;
+      }
+      if (!effectiveBatters.length) return [];
+      return await Promise.all(effectiveBatters.slice(0,9).map(async (b, idx) => {
         const stats = await getHitterStats(b.id, season);
         const h2h   = oppPitcher ? await getH2H(b.id, oppPitcher.id) : null;
         const ppE   = ppHitterLines[normName(b.name)] || null;
@@ -3218,16 +3247,16 @@ async function buildHitters(games, season) {
         } else { conf = 44; }
         conf = Math.max(10, Math.min(92, Math.round(conf)));
 
-        return { id:b.id, name:b.name, pos:b.pos, order:idx+1,
+        return { id:b.id, name:b.name, pos:b.pos, order:fromRoster ? null : idx+1,
           bats:stats.bats, stats, h2h, ppEntry:ppE, platoon, platoonLabel,
           proj:{hits:pHits, tb:pTB, hr:pHR, bb:pBB, runs:pRuns, rbi:pRBI, hrr:pHRR},
-          propList, bestProp, conf, oppPitcherName:oppName, oppHand };
+          propList, bestProp, conf, oppPitcherName:oppName, oppHand, fromRoster };
       }));
     };
 
     const [awayData, homeData] = await Promise.all([
-      buildSide(gameInfo.away, hmProb, hmProb?.fullName||"TBD", hmProb?.hand||null),
-      buildSide(gameInfo.home, awProb, awProb?.fullName||"TBD", awProb?.hand||null),
+      buildSide(gameInfo.away, hmProb, hmProb?.fullName||"TBD", hmProb?.hand||null, aw.team.id),
+      buildSide(gameInfo.home, awProb, awProb?.fullName||"TBD", awProb?.hand||null, hm.team.id),
     ]);
 
     const allB = [...awayData, ...homeData];
@@ -3247,6 +3276,7 @@ async function buildHitters(games, season) {
       awayBatters:awayData, homeBatters:homeData,
       ppLineCount, topProps,
       hasLineup: gameInfo.away?.length > 0 || gameInfo.home?.length > 0,
+      rosterFallback: (!gameInfo.away?.length && awayData.length > 0) || (!gameInfo.home?.length && homeData.length > 0),
     });
   }));
   results.sort((a,b) => new Date(a.gameTime) - new Date(b.gameTime));
@@ -3263,9 +3293,13 @@ function renderHitterCard(g) {
   const renderSide = (batters, sideLabel, pitcherName, pitcherHand) => {
     if (!batters.length) return `
       <div class="info-row" style="text-align:center;padding:16px">
-        <div style="color:#64748b;font-size:12px">📋 ${sideLabel} lineup not yet posted</div>
+        <div style="color:#64748b;font-size:12px">📋 ${sideLabel} lineup not yet posted — no PP lines found</div>
       </div>`;
-    return batters.map(b => {
+    const fromRoster = batters.some(b => b.fromRoster);
+    const rosterNote = fromRoster
+      ? `<div style="font-size:10px;color:#ffd60a;font-weight:700;margin-bottom:8px">⚠ Lineup not posted — showing players with PP lines (no batting order)</div>`
+      : "";
+    return rosterNote + batters.map(b => {
       const { stats, h2h, propList, bestProp, conf, platoon, platoonLabel } = b;
       const cc = confColor(conf);
       const pitLast = (pitcherName||"TBD").split(" ").pop();
@@ -3310,7 +3344,7 @@ function renderHitterCard(g) {
         <div class="batter-row">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:4px;margin-bottom:4px">
             <div>
-              <span class="pitcher-name">#${b.order} ${b.name}</span>
+              <span class="pitcher-name">${b.order ? `#${b.order} ` : ""}${b.name}</span>
               <span class="stat-chip" style="margin-left:5px">${b.pos}</span>
               <span class="stat-chip" style="margin-left:3px">B:${b.bats}</span>
             </div>
@@ -3344,7 +3378,11 @@ function renderHitterCard(g) {
             ${g.ump ? `<span class="stat-chip">⚖️ ${g.ump.name.split(" ").pop()}</span>` : ""}
           </div>
           <div style="margin-top:7px;display:flex;gap:5px;flex-wrap:wrap">
-            ${topPreview || `<span style="color:#64748b;font-size:11px">Lineups pending — no PP lines yet</span>`}
+            ${topPreview
+              ? topPreview
+              : g.rosterFallback
+                ? `<span style="color:#ffd60a;font-size:11px">⚠ No lineup yet — showing PP-lined players</span>`
+                : `<span style="color:#64748b;font-size:11px">Lineups pending — no PP lines yet</span>`}
           </div>
         </div>
         <div class="card-right">
