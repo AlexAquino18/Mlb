@@ -101,3 +101,5 @@ if __name__ == "__main__":
     print(f"MLB Edge -> http://localhost:{PORT}")
     print("PrizePicks proxy: /.netlify/functions/pp  (Chrome TLS impersonation via curl_cffi)")
     app.run(host="0.0.0.0", port=PORT, debug=False)
+
+# Expose `app` for gunicorn: gunicorn server:app
