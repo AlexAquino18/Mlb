@@ -1548,10 +1548,13 @@ async function getPitcherData(id, season) {
   const settled = await Promise.allSettled(fetches);
   const [personData, statsData, logData, springStatsData, springLogData] = settled;
 
-  // Hand
+  // Hand + current team
   let hand = "R";
+  let currentTeamAbbr = null;
   if (personData.status === "fulfilled") {
-    hand = personData.value?.people?.[0]?.pitchHand?.code || "R";
+    const person = personData.value?.people?.[0];
+    hand = person?.pitchHand?.code || "R";
+    currentTeamAbbr = person?.currentTeam?.abbreviation?.toUpperCase() || null;
   }
 
   // Season stats (prior regular season)
@@ -1628,6 +1631,7 @@ async function getPitcherData(id, season) {
     recentERA, recentK9, recentStarts, gameLog,
     springERA, springK9, springKPct, springIP, springStarts,
     stRecentERA, stRecentK9,
+    currentTeamAbbr,
   };
   _pitcher[key] = result;
   return result;
@@ -1937,13 +1941,22 @@ async function buildNRFI(games, season) {
       resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team),
       resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team),
     ]);
-    const apProb = awRes.prob, hpProb = hmRes.prob;
+    let apProb = awRes.prob, hpProb = hmRes.prob;
     const apSrc  = awRes.src,  hpSrc  = hmRes.src;
 
     const [ap, hp] = await Promise.all([
       apProb ? getPitcherData(apProb.id, season) : Promise.resolve(AVG_PITCHER),
       hpProb ? getPitcherData(hpProb.id, season) : Promise.resolve(AVG_PITCHER),
     ]);
+    // Team validation via currentTeamAbbr from /people/{id} — catches bad schedule data
+    if (apProb && ap.currentTeamAbbr && ap.currentTeamAbbr !== aw.team.abbreviation?.toUpperCase()) {
+      console.warn(`[MLB] NRFI: ${apProb.fullName} currentTeam=${ap.currentTeamAbbr} ≠ ${aw.team.abbreviation} — resetting to TBD`);
+      apProb = null;
+    }
+    if (hpProb && hp.currentTeamAbbr && hp.currentTeamAbbr !== hm.team.abbreviation?.toUpperCase()) {
+      console.warn(`[MLB] NRFI: ${hpProb.fullName} currentTeam=${hp.currentTeamAbbr} ≠ ${hm.team.abbreviation} — resetting to TBD`);
+      hpProb = null;
+    }
 
     // Opponent hitting specifically vs pitcher's throwing hand
     const [awHit, hmHit] = await Promise.all([
@@ -2401,7 +2414,13 @@ async function buildSO(games, season) {
     ]);
 
     for (const e of entries) {
-      const p   = e.prob ? await getPitcherData(e.prob.id, season) : AVG_PITCHER;
+      let p = e.prob ? await getPitcherData(e.prob.id, season) : AVG_PITCHER;
+      // Team validation: if /people/{id} confirms wrong team, reset to TBD
+      if (e.prob && p.currentTeamAbbr && p.currentTeamAbbr !== e.pitchTeam.abbreviation?.toUpperCase()) {
+        console.warn(`[MLB] SO: ${e.prob.fullName} currentTeam=${p.currentTeamAbbr} ≠ ${e.pitchTeam.abbreviation} — resetting to TBD`);
+        e.prob = null;
+        p = AVG_PITCHER;
+      }
 
       // Get team fallback AND lineup-level K% (per-batter vs pitcher's hand)
       const oppLineupBatters = e.isHome ? gameInfo.away : gameInfo.home;
@@ -3255,8 +3274,25 @@ async function buildHitters(games, season) {
       resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team),
       resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team),
     ]);
-    const awProb = awRes.prob, hmProb = hmRes.prob;
+    let awProb = awRes.prob, hmProb = hmRes.prob;
     const homeAbbr = hm.team.abbreviation;
+
+    // Validate pitchers via currentTeamAbbr — catches bad MLB schedule data (e.g. Ohtani listed as PHI)
+    if (awProb || hmProb) {
+      const [awPD, hmPD] = await Promise.all([
+        awProb ? getPitcherData(awProb.id, season) : Promise.resolve(null),
+        hmProb ? getPitcherData(hmProb.id, season) : Promise.resolve(null),
+      ]);
+      if (awPD?.currentTeamAbbr && awPD.currentTeamAbbr !== aw.team.abbreviation?.toUpperCase()) {
+        console.warn(`[MLB] Hitters: ${awProb.fullName} currentTeam=${awPD.currentTeamAbbr} ≠ ${aw.team.abbreviation} — resetting to TBD`);
+        awProb = null;
+      }
+      if (hmPD?.currentTeamAbbr && hmPD.currentTeamAbbr !== hm.team.abbreviation?.toUpperCase()) {
+        console.warn(`[MLB] Hitters: ${hmProb.fullName} currentTeam=${hmPD.currentTeamAbbr} ≠ ${hm.team.abbreviation} — resetting to TBD`);
+        hmProb = null;
+      }
+    }
+
     const parkInfo = PARK_DIMS[homeAbbr] || {};
     const parkHit  = PARK_HIT_FACTOR[homeAbbr] || { hit:1.0, tb:1.0 };
     const hrFactor = parkInfo.hrFactor || 1.0;
