@@ -2344,7 +2344,6 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) 
       // Fast check A: PP K/outs line has this pitcher under a DIFFERENT team
       const ppEntry  = lookupPP(mlb.fullName);
       const ppLoaded = Object.keys(ppLines).length > 0;
-      console.log(`[MLB] resolvePitcher: ${mlb.fullName} expected=${expectedAbbr} ppEntry.team=${ppEntry?.team||"none"} ppLoaded=${ppLoaded}`);
       if (ppLoaded && ppEntry?.team && ppEntry.team.toUpperCase() !== expectedAbbr) {
         mismatchReason = `PP-K team=${ppEntry.team}`;
       }
@@ -2466,10 +2465,22 @@ async function buildSO(games, season) {
           : p.k9;
       })();
 
-      const pitcherName = e.prob?.fullName || "TBD";
-      const teamAbbr    = e.pitchTeam?.abbreviation || e.pitchTeam?.teamName || "";
-      const ppEntry     = lookupPP(pitcherName) || lookupPPByTeam(pitcherName, teamAbbr);
-      if (!ppEntry && pitcherName !== "TBD" && Object.keys(ppLines).length > 0) {
+      let pitcherName = e.prob?.fullName || "TBD";
+      const teamAbbr  = e.pitchTeam?.abbreviation || e.pitchTeam?.teamName || "";
+      let ppEntry = lookupPP(pitcherName) || lookupPPByTeam(pitcherName, teamAbbr);
+
+      // Definitive team check: if PP has this pitcher on a different team, reject them
+      const ppDataLoaded = Object.keys(ppLines).length > 0;
+      if (e.prob && ppDataLoaded && ppEntry?.team && ppEntry.team.toUpperCase() !== teamAbbr.toUpperCase()) {
+        console.warn(`[MLB] SO: ${pitcherName} is a ${ppEntry.team} pitcher, not ${teamAbbr} — resetting to TBD`);
+        e.prob = null; p = AVG_PITCHER; pitcherName = "TBD"; ppEntry = null;
+      } else if (e.prob && ppDataLoaded && !ppEntry && p.currentTeamAbbr && p.currentTeamAbbr !== teamAbbr.toUpperCase()) {
+        // PP has no line for them but MLB people API shows wrong team
+        console.warn(`[MLB] SO: ${pitcherName} currentTeam=${p.currentTeamAbbr} ≠ ${teamAbbr} — resetting to TBD`);
+        e.prob = null; p = AVG_PITCHER; pitcherName = "TBD"; ppEntry = null;
+      }
+
+      if (!ppEntry && pitcherName !== "TBD" && ppDataLoaded) {
         const body = document.getElementById("pp-debug-body");
         if (body) body.innerHTML += `<div style="color:#ffd60a">⚠ No PP match: "${pitcherName}" (${teamAbbr})</div>`;
       }
@@ -3277,21 +3288,20 @@ async function buildHitters(games, season) {
     let awProb = awRes.prob, hmProb = hmRes.prob;
     const homeAbbr = hm.team.abbreviation;
 
-    // Validate pitchers via currentTeamAbbr — catches bad MLB schedule data (e.g. Ohtani listed as PHI)
-    if (awProb || hmProb) {
-      const [awPD, hmPD] = await Promise.all([
-        awProb ? getPitcherData(awProb.id, season) : Promise.resolve(null),
-        hmProb ? getPitcherData(hmProb.id, season) : Promise.resolve(null),
-      ]);
-      if (awPD?.currentTeamAbbr && awPD.currentTeamAbbr !== aw.team.abbreviation?.toUpperCase()) {
-        console.warn(`[MLB] Hitters: ${awProb.fullName} currentTeam=${awPD.currentTeamAbbr} ≠ ${aw.team.abbreviation} — resetting to TBD`);
-        awProb = null;
+    // Validate pitchers: PP K-line team check (most reliable — uses cached PP data)
+    const ppDataLoaded = Object.keys(ppLines).length > 0;
+    const checkPitcherTeam = (prob, expectedAbbr) => {
+      if (!prob || !expectedAbbr) return prob;
+      const ppE = lookupPP(prob.fullName);
+      if (ppDataLoaded && ppE?.team && ppE.team.toUpperCase() !== expectedAbbr.toUpperCase()) {
+        console.warn(`[MLB] Hitters: ${prob.fullName} PP team=${ppE.team} ≠ ${expectedAbbr} — resetting to TBD`);
+        return null;
       }
-      if (hmPD?.currentTeamAbbr && hmPD.currentTeamAbbr !== hm.team.abbreviation?.toUpperCase()) {
-        console.warn(`[MLB] Hitters: ${hmProb.fullName} currentTeam=${hmPD.currentTeamAbbr} ≠ ${hm.team.abbreviation} — resetting to TBD`);
-        hmProb = null;
-      }
-    }
+      // Fallback: currentTeamAbbr from MLB people API (if available)
+      return prob;
+    };
+    awProb = checkPitcherTeam(awProb, aw.team.abbreviation);
+    hmProb = checkPitcherTeam(hmProb, hm.team.abbreviation);
 
     const parkInfo = PARK_DIMS[homeAbbr] || {};
     const parkHit  = PARK_HIT_FACTOR[homeAbbr] || { hit:1.0, tb:1.0 };
