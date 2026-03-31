@@ -1466,7 +1466,7 @@ function confColor(c) { return c>=70?"#00ff88":c>=50?"#ffd60a":"#ff4d6d"; }
 // ─── CACHES ───────────────────────────────────────────────────────────────────
 const _pitcher = {}, _teamAll = {}, _teamSplit = {}, _lineup = {}, _batterKPct = {}, _personBats = {};
 let ppHitterLines = {};
-const _hitterStats = {}, _h2hCache = {};
+const _hitterStats = {};
 
 // Fetch + cache a player's bat side (R/L/S) — used when schedule lineup has IDs but no bat side
 async function getPersonBatSide(id) {
