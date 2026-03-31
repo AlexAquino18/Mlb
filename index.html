@@ -2377,11 +2377,18 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) 
 
   // 2. PP team map: find the PP entry for this team, then look up the MLB ID by name
   const ppEntries = getPPForTeam(mlbTeam);
+  const expectedAbbr2 = mlbTeam?.abbreviation?.toUpperCase();
   if (ppEntries && ppEntries.length > 0) {
-    // If >1 pitcher for the team (split squad), just take the first
     for (const ppE of ppEntries) {
       const mlbId = await findMLBId(ppE.rawName);
-      if (mlbId) return { prob: { id: mlbId, fullName: ppE.rawName }, src: "pp-sourced" };
+      if (!mlbId) continue;
+      // Verify this pitcher actually plays for the expected team via MLB people API
+      const currentTeam = await getPitcherCurrentTeamAbbr(mlbId);
+      if (currentTeam && expectedAbbr2 && currentTeam !== expectedAbbr2) {
+        console.warn(`[MLB] PP fallback skip: ${ppE.rawName} currentTeam=${currentTeam} ≠ ${expectedAbbr2}`);
+        continue;
+      }
+      return { prob: { id: mlbId, fullName: ppE.rawName }, src: "pp-sourced" };
     }
   }
   return { prob: null, src: "est" };
