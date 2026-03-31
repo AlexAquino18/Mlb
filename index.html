@@ -462,10 +462,14 @@ async function ppGet(path) {
     urls.push(_proxyOverride.replace(/\/$/, "") + "?path=" + encodeURIComponent(path));
   }
 
-  // 2. Own edge function — Netlify (/netlify/functions/pp) or Vercel (/api/pp)
+  // 2. Own edge function — only try the one that matches the current host
   if (typeof location !== "undefined" && location.protocol !== "file:") {
-    urls.push(location.origin + netlifyQs);
-    urls.push(location.origin + "/api/pp?path=" + encodeURIComponent(path));
+    const host = location.hostname;
+    const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
+    const isVercel  = host.includes("vercel.app");
+    const isLocal   = host === "localhost" || host === "127.0.0.1";
+    if (isNetlify || isLocal) urls.push(location.origin + netlifyQs);
+    if (isVercel  || isLocal) urls.push(location.origin + "/api/pp?path=" + encodeURIComponent(path));
   }
 
   // 3. Local dev server (npm start → port 8080) or netlify dev (port 8888)
