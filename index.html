@@ -3155,7 +3155,7 @@ async function getTeamRoster(teamId, season) {
         name: p.person?.fullName || "",
         pos:  p.position?.abbreviation || "?",
       }))
-      .filter(p => p.id && p.name);
+      .filter(p => p.id && p.name && !["P","SP","RP","TWP"].includes(p.pos));
     _rosterCache[key] = players;
     return players;
   } catch(_) { _rosterCache[key] = []; return []; }
@@ -3317,15 +3317,20 @@ function renderHitterCard(g) {
       const cc = confColor(conf);
       const pitLast = (pitcherName||"TBD").split(" ").pop();
 
-      let h2hHtml = `<span style="color:#4a5568">vs ${pitLast}: —</span>`;
+      let h2hHtml = `<span style="color:#334155;font-size:11px">vs ${pitcherName||"TBD"}: no H2H data</span>`;
       if (h2h && h2h.ab >= 3) {
-        const hot = h2h.avg >= stats.avg + 0.050;
+        const hot  = h2h.avg >= stats.avg + 0.050;
         const cold = h2h.avg <= stats.avg - 0.050;
-        const cls = hot ? "h2h-hot" : cold ? "h2h-cold" : "";
-        h2hHtml = `<span style="color:#64748b">vs ${pitLast}:</span> `
-          + `<span class="${cls}">${h2h.hits}-${h2h.ab} (.${avg3(h2h.avg)})</span>`
+        const h2hColor = hot ? "#00ff88" : cold ? "#ff4d6d" : "#e2e8f0";
+        const trend = hot ? "🔥 HOT" : cold ? "🥶 COLD" : "";
+        h2hHtml = `<span style="color:#64748b;font-size:11px">vs ${pitcherName||"TBD"}:</span> `
+          + `<span style="font-weight:700;color:${h2hColor};font-size:12px">${h2h.hits}-${h2h.ab} (.${avg3(h2h.avg)})</span>`
+          + (trend ? ` <span style="font-size:10px;font-weight:700;color:${h2hColor}">${trend}</span>` : "")
           + (h2h.hr > 0 ? ` <span class="stat-chip good">${h2h.hr}HR</span>` : "")
-          + (h2h.bb > 0 ? ` <span class="stat-chip">${h2h.bb}BB</span>` : "");
+          + (h2h.bb > 0 ? ` <span class="stat-chip">${h2h.bb}BB</span>` : "")
+          + ` <span style="color:#475569;font-size:10px">(career)</span>`;
+      } else if (h2h && h2h.ab > 0) {
+        h2hHtml = `<span style="color:#475569;font-size:11px">vs ${pitcherName||"TBD"}: ${h2h.hits}-${h2h.ab} (small sample)</span>`;
       }
 
       const chips = propList.map(p => {
@@ -3355,7 +3360,7 @@ function renderHitterCard(g) {
 
       return `
         <div class="batter-row">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:4px;margin-bottom:4px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:4px;margin-bottom:3px">
             <div>
               <span class="pitcher-name">${b.order ? `#${b.order} ` : ""}${b.name}</span>
               <span class="stat-chip" style="margin-left:5px">${b.pos}</span>
@@ -3363,9 +3368,9 @@ function renderHitterCard(g) {
             </div>
             <div>${bestStr}</div>
           </div>
+          <div style="margin-bottom:4px;font-size:12px">${h2hHtml}</div>
           <div class="batter-stats-line">
             .${avg3(stats.avg)} AVG · .${avg3(stats.slg)} SLG · ${stats.hr} HR · ${stats.runs} R · ${stats.rbi} RBI · ${stats.bb} BB (${stats.pa} PA)
-            &nbsp;·&nbsp; ${h2hHtml}
           </div>
           ${platoonHtml ? `<div style="margin-top:4px">${platoonHtml}</div>` : ""}
           ${chips ? `<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">${chips}</div>` : ""}
