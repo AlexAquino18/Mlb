@@ -218,9 +218,14 @@ const PP     = "https://api.prizepicks.com";
 const PROXY  = "https://corsproxy.io/?url=";
 const PROXY2 = "https://api.allorigins.win/raw?url=";
 const PROXY3 = "https://api.codetabs.com/v1/proxy?quest=";
-// ↓ Paste your Render proxy URL here after deploying server.py (leave "" to skip)
-// Format: "https://YOUR-APP.onrender.com/.netlify/functions/pp"
-const CF_WORKER = "https://useful-cobra-84.alexaquino18.deno.net";
+// ↓ Add all your Deno proxy URLs here — the app rotates through them automatically.
+//   When one gets blocked, the next one is tried. Create new ones at dash.deno.com.
+const DENO_PROXIES = [
+  "https://epic-condor-69.alexaquino18.deno.net",
+  // "https://YOUR-SECOND-PROXY.deno.net",   ← paste a second one here
+  // "https://YOUR-THIRD-PROXY.deno.net",    ← paste a third one here
+];
+const CF_WORKER = DENO_PROXIES[0]; // kept for compatibility
 
 let activeTab    = "nrfi";
 let activeFilter = "all";
@@ -472,8 +477,10 @@ async function ppGet(path) {
   // Build ordered proxy list — own edge function is far most reliable
   const urls = [];
 
-  // 1a. Hardcoded Cloudflare Worker (set CF_WORKER constant at top of script)
-  if (CF_WORKER) urls.push(CF_WORKER.replace(/\/$/, "") + "?path=" + encodeURIComponent(path));
+  // 1a. All Deno proxies — tried in order, rotates automatically when one is blocked
+  for (const p of DENO_PROXIES) {
+    if (p) urls.push(p.replace(/\/$/, "") + "?path=" + encodeURIComponent(path));
+  }
 
   // 1b. Runtime override — window variable OR localStorage (survives refresh)
   const _proxyOverride = (typeof window !== "undefined" && window.MLB_EDGE_PP_PROXY)
