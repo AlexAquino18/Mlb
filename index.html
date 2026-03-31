@@ -1010,7 +1010,8 @@ function buildPPTeamMap() {
 // Given an MLB team object, return the PP entry for that team (if any)
 function getPPForTeam(mlbTeam) {
   const name  = (mlbTeam?.teamName || mlbTeam?.name || "").toLowerCase();
-  const abbr  = (mlbTeam?.abbreviation || "").toLowerCase();
+  // Use MLB_ID_TO_ABBR to get the real abbreviation (mlbTeam.abbreviation is absent in schedule data)
+  const abbr  = teamAbbr(mlbTeam).toLowerCase();
   for (const [kw, entries] of Object.entries(ppTeamMap)) {
     if (name.includes(kw) || abbr === kw) return entries;
   }
