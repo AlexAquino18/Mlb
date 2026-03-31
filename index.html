@@ -603,8 +603,8 @@ async function loadPPLines() {
     debugLines.push(`✓ Using league: ${leagueName} (ID ${leagueId})`);
 
     // ── Step 3: fetch ALL projections ─────────────────────────────────────────
-    // PP API caps per_page at 25. Try with include=new_player first, fall back plain.
-    const PER_PAGE = 25;
+    // Use 100 per page to reduce total requests and lower chance of being blocked.
+    const PER_PAGE = 100;
 
     let sampleResp = await ppGet(`/projections?league_id=${leagueId}&per_page=${PER_PAGE}&page=1&include=new_player`);
     if (!sampleResp?.data?.length) {
@@ -659,13 +659,14 @@ async function loadPPLines() {
         const url = workingUrl === "include"
           ? `/projections?league_id=${leagueId}&per_page=${PER_PAGE}&page=${page}&include=new_player`
           : `/projections?league_id=${leagueId}&per_page=${PER_PAGE}&page=${page}`;
+        await new Promise(r => setTimeout(r, 400 + Math.random() * 300)); // slight delay between pages
         const resp = await ppGet(url);
         if (!resp?.data?.length) break;
         allProj     = allProj.concat(resp.data);
         allIncluded = allIncluded.concat(resp.included || []);
         if (resp.data.length < PER_PAGE) break;  // last page
         page++;
-        if (page > 200) break;  // safety cap
+        if (page > 20) break;  // safety cap
       }
     }
     debugLines.push(`Total projections fetched: ${allProj.length}`);
