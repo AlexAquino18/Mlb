@@ -2366,7 +2366,7 @@ async function buildNRFI(games, season) {
       modelScore: nrfiScoreRaw,
       confidence, analysis,
     });
-  }));
+  });
   return results.sort((a,b) => Math.abs(b.confidence-50) - Math.abs(a.confidence-50));
 }
 
@@ -2733,7 +2733,7 @@ async function buildSO(games, season) {
         lineMov,
       });
     }
-  }));
+  });
   // PP line pitchers always sort to top
   return results.sort((a,b) => {
     const aPP = a.lineSrc === "prizepicks" ? 1 : 0;
@@ -3529,7 +3529,7 @@ async function buildHitters(games, season) {
       rosterFallback: (!gameInfo.away?.length && awayData.length > 0) || (!gameInfo.home?.length && homeData.length > 0),
       season,
     });
-  }));
+  });
   results.sort((a,b) => new Date(a.gameTime) - new Date(b.gameTime));
   return results;
 }
