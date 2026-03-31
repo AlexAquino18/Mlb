@@ -3159,10 +3159,12 @@ async function getHitterGameLog(playerId, season) {
 // Fetch active roster for a team — used as fallback when lineup isn't posted
 const _rosterCache = {};
 async function getTeamRoster(teamId, season) {
-  const key = `roster_${teamId}_${season}`;
+  // Always use current calendar year for active roster — season var may lag behind
+  const rosterYear = Math.max(season, new Date().getFullYear());
+  const key = `roster_${teamId}_${rosterYear}`;
   if (_rosterCache[key]) return _rosterCache[key];
   try {
-    const d = await mlbGet(`/teams/${teamId}/roster?rosterType=active&season=${season}`);
+    const d = await mlbGet(`/teams/${teamId}/roster?rosterType=active&season=${rosterYear}`);
     const players = (d?.roster || [])
       .map(p => ({
         id:   p.person?.id,
