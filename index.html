@@ -107,6 +107,14 @@
     .hitter-section-title { font-size: 12px; font-weight: 700; color: #94a3b8; margin: 14px 0 8px; letter-spacing: .04em; }
     .hand-tag { display: inline-block; background: rgba(100,116,139,.2); border: 1px solid rgba(100,116,139,.3); border-radius: 4px; padding: 1px 5px; font-size: 10px; color: #94a3b8; margin-left: 5px; }
     .divider { border: none; border-top: 1px solid #1e2d45; margin: 14px 0; }
+    .batter-row { cursor: pointer; }
+    .batter-row:hover { background: rgba(0,212,255,.03); border-radius: 6px; }
+    .hitter-gamelog { display:none; padding:8px 0 4px; }
+    .hitter-gamelog.open { display:block; }
+    .hgl-bars { display:flex; gap:4px; margin-bottom:6px; }
+    .hgl-bar-group { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; min-width:0; }
+    .hgl-bar-track { width:100%; background:#1e2d45; border-radius:3px 3px 0 0; display:flex; align-items:flex-end; }
+    .hgl-bar-fill  { width:100%; border-radius:3px 3px 0 0; min-height:3px; transition:height .35s ease; }
     #disclaimer { background: #111827; border: 1px solid #1e2d45; border-radius: 10px; padding: 16px; margin-top: 20px; color: #64748b; font-size: 11px; line-height: 1.6; }
 
     /* ── GAME LOG TABLE ──────────────────────────────────────────────────── */
@@ -286,6 +294,23 @@ const PARK_DIMS = {
   TEX:{ name:"Globe Life Field",    lf:329, cf:407, rf:326, wallHt:8,    hrFactor:1.03, surface:"Turf",  roof:true,  note:"Climate-controlled dome" },
   TOR:{ name:"Rogers Centre",       lf:328, cf:400, rf:328, wallHt:10,   hrFactor:1.07, surface:"Turf",  roof:true,  note:"Turf boosts offense, dome = neutral weather" },
   WSH:{ name:"Nationals Park",      lf:336, cf:402, rf:335, wallHt:8,    hrFactor:1.05, surface:"Grass", roof:false, note:"Hitter-friendly, hot summers" },
+};
+
+// ── PARK HIT / TB FACTORS ─────────────────────────────────────────────────
+// hit factor = park's effect on base hits (separate from HR factor)
+// tb  factor = effect on total bases (singles, doubles, triples, HR combined)
+// Sources: Baseball Reference multi-year park factors
+const PARK_HIT_FACTOR = {
+  ARI:{ hit:1.04, tb:1.05 }, ATL:{ hit:1.03, tb:1.03 }, BAL:{ hit:1.05, tb:1.06 },
+  BOS:{ hit:1.05, tb:1.02 }, CHC:{ hit:1.02, tb:1.02 }, CWS:{ hit:1.03, tb:1.04 },
+  CIN:{ hit:1.07, tb:1.08 }, CLE:{ hit:0.97, tb:0.97 }, COL:{ hit:1.15, tb:1.18 },
+  DET:{ hit:0.97, tb:0.96 }, HOU:{ hit:1.01, tb:1.01 }, KC: { hit:0.97, tb:0.96 },
+  LAA:{ hit:0.99, tb:0.99 }, LAD:{ hit:0.96, tb:0.95 }, MIA:{ hit:0.94, tb:0.92 },
+  MIL:{ hit:1.00, tb:1.01 }, MIN:{ hit:0.99, tb:0.99 }, NYM:{ hit:0.97, tb:0.97 },
+  NYY:{ hit:1.04, tb:1.07 }, ATH:{ hit:0.97, tb:0.97 }, PHI:{ hit:1.06, tb:1.07 },
+  PIT:{ hit:0.97, tb:0.96 }, SD: { hit:0.93, tb:0.91 }, SEA:{ hit:0.98, tb:0.97 },
+  SF: { hit:0.94, tb:0.93 }, STL:{ hit:0.97, tb:0.96 }, TB: { hit:1.00, tb:1.00 },
+  TEX:{ hit:1.02, tb:1.03 }, TOR:{ hit:1.04, tb:1.05 }, WSH:{ hit:1.03, tb:1.04 },
 };
 
 // ── CATCHER FRAMING DATA ──────────────────────────────────────────────────
@@ -2629,11 +2654,48 @@ function clNrfiChip(cl) {
 // ── GAME LOG RENDER ───────────────────────────────────────────────────────────
 function renderGameLog(gameLog, pitcherHand) {
   if (!gameLog || gameLog.length === 0) return "";
-  const avgK = gameLog.length ? (gameLog.reduce((a,s)=>a+s.k,0)/gameLog.length).toFixed(1) : "—";
+  const avgK = (gameLog.reduce((a,s)=>a+s.k,0)/gameLog.length).toFixed(1);
+  const avgER = (gameLog.reduce((a,s)=>a+s.er,0)/gameLog.length).toFixed(1);
+  const maxK  = Math.max(...gameLog.map(s=>s.k), 1);
+  const maxER = Math.max(...gameLog.map(s=>s.er), 1);
+
+  const kBars = gameLog.map(s => {
+    const pct   = Math.round(s.k / maxK * 100);
+    const color = s.k >= 8 ? "#00ff88" : s.k >= 5 ? "#ffd60a" : "#ff4d6d";
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;min-width:0">
+      <span style="font-size:10px;font-weight:700;color:${color}">${s.k}</span>
+      <div style="width:100%;background:#1e2d45;border-radius:3px 3px 0 0;height:44px;display:flex;align-items:flex-end">
+        <div style="width:100%;height:${Math.max(4,pct)}%;background:${color};border-radius:3px 3px 0 0;min-height:4px;transition:height .4s ease"></div>
+      </div>
+      <span style="font-size:9px;color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;text-align:center">${s.opp}</span>
+    </div>`;
+  }).join("");
+
+  const erBars = gameLog.map(s => {
+    const pct   = maxER > 0 ? Math.round(s.er / maxER * 100) : 0;
+    const color = s.er === 0 ? "#00ff88" : s.er >= 4 ? "#ff4d6d" : "#ffd60a";
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;min-width:0">
+      <span style="font-size:10px;font-weight:700;color:${color}">${s.er}</span>
+      <div style="width:100%;background:#1e2d45;border-radius:3px 3px 0 0;height:30px;display:flex;align-items:flex-end">
+        <div style="width:100%;height:${Math.max(pct>0?4:0,pct)}%;background:${color};border-radius:3px 3px 0 0;min-height:${s.er>0?4:0}px;transition:height .4s ease"></div>
+      </div>
+    </div>`;
+  }).join("");
+
   return `
   <div style="background:#0a0e1a;border-radius:8px;padding:11px 14px;margin-top:10px">
-    <div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.06em;margin-bottom:8px">
-      📋 LAST ${gameLog.length} STARTS — Avg K: <span style="color:#00ff88">${avgK}</span>
+    <div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.06em;margin-bottom:10px">
+      📋 LAST ${gameLog.length} STARTS
+      <span style="color:#00ff88;margin-left:8px">Avg ${avgK} K</span>
+      <span style="color:#94a3b8;margin-left:8px">Avg ${avgER} ER</span>
+    </div>
+    <div style="display:flex;gap:3px;padding-bottom:6px;border-bottom:1px solid #1e2d45;margin-bottom:6px">
+      <div style="font-size:9px;color:#64748b;writing-mode:horizontal-tb;width:22px;flex-shrink:0;padding-top:2px">K</div>
+      <div style="display:flex;gap:3px;flex:1">${kBars}</div>
+    </div>
+    <div style="display:flex;gap:3px;padding-bottom:8px;border-bottom:1px solid #1e2d45;margin-bottom:8px">
+      <div style="font-size:9px;color:#64748b;width:22px;flex-shrink:0;padding-top:2px">ER</div>
+      <div style="display:flex;gap:3px;flex:1">${erBars}</div>
     </div>
     <table class="game-log-table">
       <thead><tr>
@@ -3069,6 +3131,48 @@ async function getH2H(batterId, pitcherId) {
   } catch(_) { _h2hCache[key] = null; return null; }
 }
 
+// Fetch batter stats vs left or right-handed pitchers (platoon split)
+async function getHitterVsSplit(playerId, season, pitcherHand) {
+  const sitCode = pitcherHand === "L" ? "vl" : "vr";
+  const key = `split_${playerId}_${season}_${sitCode}`;
+  if (_hitterStats[key] !== undefined) return _hitterStats[key];
+  try {
+    const d = await mlbGet(`/people/${playerId}/stats?stats=statSplits&group=hitting&gameType=R&season=${season}&sitCodes=${sitCode}`);
+    const s = d?.stats?.[0]?.splits?.[0]?.stat;
+    if (!s || (s.plateAppearances || 0) < 20) { _hitterStats[key] = null; return null; }
+    _hitterStats[key] = {
+      avg: parseFloat(s.avg) || null,
+      slg: parseFloat(s.slg) || null,
+      obp: parseFloat(s.obp) || null,
+      pa:  s.plateAppearances || 0,
+      hits: s.hits || 0, hr: s.homeRuns || 0, bb: s.baseOnBalls || 0,
+    };
+    return _hitterStats[key];
+  } catch(_) { _hitterStats[key] = null; return null; }
+}
+
+// Fetch last 5 game log entries for a batter
+async function getHitterGameLog(playerId, season) {
+  const key = `hgl_${playerId}_${season}`;
+  if (_hitterStats[key] !== undefined) return _hitterStats[key];
+  try {
+    const d = await mlbGet(`/people/${playerId}/stats?stats=gameLog&group=hitting&gameType=R&season=${season}&limit=5`);
+    const splits = d?.stats?.[0]?.splits || [];
+    const result = splits.slice(0, 5).map(sp => ({
+      date: (sp.date || "").slice(5),
+      opp:  sp.opponent?.abbreviation || "?",
+      h:    sp.stat?.hits        || 0,
+      tb:   sp.stat?.totalBases  || 0,
+      hr:   sp.stat?.homeRuns    || 0,
+      bb:   sp.stat?.baseOnBalls || 0,
+      ab:   sp.stat?.atBats      || 0,
+      pa:   sp.stat?.plateAppearances || 0,
+    }));
+    _hitterStats[key] = result;
+    return result;
+  } catch(_) { _hitterStats[key] = []; return []; }
+}
+
 async function buildHitters(games, season) {
   setStatus(`Building hitter matchups for ${games.length} games…`);
   const results = [];
@@ -3080,29 +3184,50 @@ async function buildHitters(games, season) {
       resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team),
     ]);
     const awProb = awRes.prob, hmProb = hmRes.prob;
-    const parkInfo = PARK_DIMS[hm.team.abbreviation] || {};
+    const homeAbbr = hm.team.abbreviation;
+    const parkInfo = PARK_DIMS[homeAbbr] || {};
+    const parkHit  = PARK_HIT_FACTOR[homeAbbr] || { hit:1.0, tb:1.0 };
     const hrFactor = parkInfo.hrFactor || 1.0;
+    // Fetch umpire for park-adjusted walk and hit edge
+    const ump = await getUmpireForGame(g.gamePk).catch(() => null);
+    const umpRunsAdj = ump?.runsAdj || 0; // negative = pitcher-friendly
 
-    const buildSide = async (batters, oppPitcher, oppName) => {
+    const buildSide = async (batters, oppPitcher, oppName, oppHand) => {
       if (!batters || !batters.length) return [];
       return await Promise.all(batters.slice(0,9).map(async (b, idx) => {
         const stats = await getHitterStats(b.id, season);
         const h2h   = oppPitcher ? await getH2H(b.id, oppPitcher.id) : null;
         const ppE   = ppHitterLines[normName(b.name)] || null;
 
+        // Platoon split: fetch batter vs pitcher hand if we know the pitcher hand
+        const platoon = oppHand ? await getHitterVsSplit(b.id, season, oppHand) : null;
+        const platoonLabel = platoon ? `vs${oppHand}HP` : null;
+
         const PA   = 4.1;
         const bbR  = stats.pa > 0 ? Math.min(0.18, stats.bb / stats.pa) : 0.085;
         const abPG = PA * (1 - bbR);
         const hrR  = stats.ab > 0 ? Math.min(0.09, stats.hr / stats.ab) : 0.022;
 
-        let pAvg = stats.avg;
+        // Blend season avg with platoon split (60/40 if enough PAs)
+        let useAvg = stats.avg, useSlg = stats.slg;
+        if (platoon && platoon.pa >= 30) {
+          const w = Math.min(0.45, platoon.pa / 200);
+          useAvg = useAvg * (1-w) + (platoon.avg || useAvg) * w;
+          useSlg = useSlg * (1-w) + (platoon.slg || useSlg) * w;
+        }
+
+        // H2H adjustment on top of platoon-blended avg
+        let pAvg = useAvg;
         if (h2h && h2h.ab >= 10) pAvg = 0.55*pAvg + 0.45*h2h.avg;
         else if (h2h && h2h.ab >= 5) pAvg = 0.80*pAvg + 0.20*h2h.avg;
 
-        const pHits = pAvg * abPG;
-        const pTB   = stats.avg > 0 ? pHits * (stats.slg / stats.avg) : pHits * 1.55;
+        // Park hit/TB/HR factors
+        const pHits = pAvg * abPG * parkHit.hit;
+        const pTB   = (useAvg > 0 ? pHits * (useSlg / useAvg) : pHits * 1.55) * parkHit.tb;
         const pHR   = hrR * abPG * hrFactor;
-        const pBB   = bbR * PA;
+        // Umpire: tight zone (negative runsAdj) slightly reduces hits/BB
+        const umpMult = 1 + umpRunsAdj * 0.04;
+        const pBB   = bbR * PA * Math.max(0.80, umpMult);
 
         const edgeOf = (proj, entry) => entry ? parseFloat((proj - entry.line).toFixed(2)) : null;
         const propList = [
@@ -3121,20 +3246,21 @@ async function buildHitters(games, season) {
           conf += Math.min(20, Math.abs(bestProp.edge) * 12);
           if (h2h && h2h.ab >= 10) conf += 8;
           else if (h2h && h2h.ab >= 5) conf += 4;
+          if (platoon && platoon.pa >= 30) conf += 4;
           if (bestProp.edge < 0) conf -= 3;
         } else { conf = 44; }
         conf = Math.max(10, Math.min(92, Math.round(conf)));
 
         return { id:b.id, name:b.name, pos:b.pos, order:idx+1,
-          bats:stats.bats, stats, h2h, ppEntry:ppE,
+          bats:stats.bats, stats, h2h, ppEntry:ppE, platoon, platoonLabel,
           proj:{hits:pHits, tb:pTB, hr:pHR, bb:pBB},
-          propList, bestProp, conf, oppPitcherName:oppName };
+          propList, bestProp, conf, oppPitcherName:oppName, oppHand };
       }));
     };
 
     const [awayData, homeData] = await Promise.all([
-      buildSide(gameInfo.away, hmProb, hmProb?.fullName||"TBD"),
-      buildSide(gameInfo.home, awProb, awProb?.fullName||"TBD"),
+      buildSide(gameInfo.away, hmProb, hmProb?.fullName||"TBD", hmProb?.hand||null),
+      buildSide(gameInfo.home, awProb, awProb?.fullName||"TBD", awProb?.hand||null),
     ]);
 
     const allB = [...awayData, ...homeData];
@@ -3146,9 +3272,11 @@ async function buildHitters(games, season) {
       gamePk:g.gamePk, gameTime:g.gameDate, status:g.status?.detailedState||"",
       awayTeam:aw.team.abbreviation||aw.team.name,
       homeTeam:hm.team.abbreviation||hm.team.name,
-      awayPitcher:awProb?.fullName||"TBD",
-      homePitcher:hmProb?.fullName||"TBD",
+      awayPitcher:awProb?.fullName||"TBD", awayPitcherHand:awProb?.hand||"R",
+      homePitcher:hmProb?.fullName||"TBD", homePitcherHand:hmProb?.hand||"R",
       parkName:parkInfo.name||"", hrFactor,
+      hitFactor:parkHit.hit, tbFactor:parkHit.tb,
+      ump: ump && ump.src === "known" ? ump : null,
       awayBatters:awayData, homeBatters:homeData,
       ppLineCount, topProps,
       hasLineup: gameInfo.away?.length > 0 || gameInfo.home?.length > 0,
@@ -3158,19 +3286,54 @@ async function buildHitters(games, season) {
   return results;
 }
 
+function renderHitterGameLog(log, playerId) {
+  if (!log || !log.length) return `<div style="color:#4a5568;font-size:11px;padding:6px 0">No recent game data available</div>`;
+  const stats = ["h","tb","hr","bb"];
+  const labels = ["H","TB","HR","BB"];
+  const colors = ["#00d4ff","#a78bfa","#ff4d6d","#ffd60a"];
+  const maxes  = stats.map(k => Math.max(...log.map(g=>g[k]), 1));
+
+  const bars = log.map((g, gi) => {
+    const barCols = stats.map((k, si) => {
+      const pct = maxes[si] > 0 ? Math.round(g[k] / maxes[si] * 100) : 0;
+      return `<div class="hgl-bar-group">
+        <span style="font-size:9px;font-weight:700;color:${colors[si]}">${g[k]}</span>
+        <div class="hgl-bar-track" style="height:32px">
+          <div class="hgl-bar-fill" style="height:${Math.max(g[k]>0?3:0,pct)}%;background:${colors[si]}"></div>
+        </div>
+      </div>`;
+    }).join("");
+    return `<div style="flex:1;min-width:0">
+      <div class="hgl-bars">${barCols}</div>
+      <div style="font-size:9px;color:#475569;text-align:center">${g.opp||"?"}</div>
+      <div style="font-size:8px;color:#334155;text-align:center">${g.date||""}</div>
+    </div>`;
+  }).join(`<div style="width:1px;background:#1e2d45;flex-shrink:0"></div>`);
+
+  const legend = stats.map((k,i) =>
+    `<span style="font-size:9px;color:${colors[i]};font-weight:700">${labels[i]}</span>`
+  ).join(" · ");
+
+  return `
+  <div class="hitter-gamelog open" id="hgl-${playerId}">
+    <div style="font-size:9px;color:#475569;margin-bottom:4px;letter-spacing:.05em">LAST ${log.length} GAMES · ${legend}</div>
+    <div style="display:flex;gap:6px;align-items:flex-end">${bars}</div>
+  </div>`;
+}
+
 function renderHitterCard(g) {
   const time = g.gameTime
     ? new Date(g.gameTime).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZoneName:"short"})
     : "";
   const avg3 = v => Math.round(v*1000).toString().padStart(3,"0");
 
-  const renderSide = (batters, sideLabel, pitcherName) => {
+  const renderSide = (batters, sideLabel, pitcherName, pitcherHand) => {
     if (!batters.length) return `
       <div class="info-row" style="text-align:center;padding:16px">
         <div style="color:#64748b;font-size:12px">📋 ${sideLabel} lineup not yet posted</div>
       </div>`;
     return batters.map(b => {
-      const { stats, h2h, propList, bestProp, conf } = b;
+      const { stats, h2h, propList, bestProp, conf, platoon, platoonLabel } = b;
       const cc = confColor(conf);
       const pitLast = (pitcherName||"TBD").split(" ").pop();
 
@@ -3198,13 +3361,27 @@ function renderHitterCard(g) {
           + `</span>`
         : `<span style="color:#4a5568;font-size:11px">proj ${b.proj.hits.toFixed(1)}H / ${b.proj.tb.toFixed(1)}TB</span>`;
 
+      // Platoon split chip
+      let platoonHtml = "";
+      if (platoon && platoon.pa >= 20) {
+        const pitHand = pitcherHand || "?";
+        const advantage = (b.bats==="L"&&pitHand==="R")||(b.bats==="R"&&pitHand==="L");
+        const disadvantage = (b.bats==="L"&&pitHand==="L")||(b.bats==="R"&&pitHand==="R");
+        const splitColor = advantage?"#00ff88":disadvantage?"#ff4d6d":"#94a3b8";
+        const platoonAvg = platoon.avg ? `.${avg3(platoon.avg)}` : "—";
+        platoonHtml = `<span class="stat-chip" style="color:${splitColor};border-color:${splitColor}55;background:${splitColor}11">`
+          + `vs${pitHand}HP: ${platoonAvg} AVG (${platoon.pa} PA)</span>`;
+      }
+
+      const glId = `hgl-${b.id}`;
       return `
-        <div class="batter-row">
+        <div class="batter-row" onclick="toggleHitterLog('${b.id}', ${b.id}, '${g.gamePk}')">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:4px;margin-bottom:4px">
             <div>
               <span class="pitcher-name">#${b.order} ${b.name}</span>
               <span class="stat-chip" style="margin-left:5px">${b.pos}</span>
               <span class="stat-chip" style="margin-left:3px">B:${b.bats}</span>
+              <span style="font-size:9px;color:#334155;margin-left:5px">▾ L5</span>
             </div>
             <div>${bestStr}</div>
           </div>
@@ -3212,7 +3389,11 @@ function renderHitterCard(g) {
             .${avg3(stats.avg)} AVG · .${avg3(stats.slg)} SLG · ${stats.hr} HR · ${stats.bb} BB (${stats.pa} PA)
             &nbsp;·&nbsp; ${h2hHtml}
           </div>
+          ${platoonHtml ? `<div style="margin-top:4px">${platoonHtml}</div>` : ""}
           ${chips ? `<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">${chips}</div>` : ""}
+          <div class="hitter-gamelog" id="${glId}">
+            <div style="color:#4a5568;font-size:11px;padding:4px 0">Loading last 5 games…</div>
+          </div>
         </div>`;
     }).join("");
   };
@@ -3228,9 +3409,11 @@ function renderHitterCard(g) {
       <div class="card-hd" onclick="toggle('hg-${g.gamePk}')">
         <div>
           <div class="card-teams">${g.awayTeam} @ ${g.homeTeam}</div>
-          <div style="font-size:11px;color:#64748b;margin-top:3px">
-            ${time}${time?" · ":""}${g.awayPitcher} vs ${g.homePitcher}
-            ${g.hrFactor !== 1.0 ? `<span class="stat-chip" style="margin-left:6px">Park HR ×${g.hrFactor.toFixed(2)}</span>` : ""}
+          <div style="font-size:11px;color:#64748b;margin-top:3px;display:flex;flex-wrap:wrap;align-items:center;gap:5px">
+            <span>${time}${time?" · ":""}${g.awayPitcher} vs ${g.homePitcher}</span>
+            ${g.hrFactor !== 1.0 ? `<span class="stat-chip">Park HR ×${g.hrFactor.toFixed(2)}</span>` : ""}
+            ${g.hitFactor && g.hitFactor !== 1.0 ? `<span class="stat-chip ${g.hitFactor>1?"warn":""}">Hit ×${g.hitFactor.toFixed(2)}</span>` : ""}
+            ${g.ump ? `<span class="stat-chip">⚖️ ${g.ump.name.split(" ").pop()}</span>` : ""}
           </div>
           <div style="margin-top:7px;display:flex;gap:5px;flex-wrap:wrap">
             ${topPreview || `<span style="color:#64748b;font-size:11px">Lineups pending — no PP lines yet</span>`}
@@ -3243,13 +3426,28 @@ function renderHitterCard(g) {
       </div>
       <div class="card-bd" id="hg-${g.gamePk}-bd">
         <div style="margin-top:14px">
-          <div class="hitter-section-title">${g.awayTeam} BATTERS vs <span style="color:#00d4ff">${g.homePitcher}</span></div>
-          ${renderSide(g.awayBatters, g.awayTeam, g.homePitcher)}
-          <div class="hitter-section-title" style="margin-top:18px">${g.homeTeam} BATTERS vs <span style="color:#00d4ff">${g.awayPitcher}</span></div>
-          ${renderSide(g.homeBatters, g.homeTeam, g.awayPitcher)}
+          <div class="hitter-section-title">${g.awayTeam} BATTERS vs <span style="color:#00d4ff">${g.homePitcher}</span> <span class="hand-tag">${g.homePitcherHand||"R"}HP</span></div>
+          ${renderSide(g.awayBatters, g.awayTeam, g.homePitcher, g.homePitcherHand)}
+          <div class="hitter-section-title" style="margin-top:18px">${g.homeTeam} BATTERS vs <span style="color:#00d4ff">${g.awayPitcher}</span> <span class="hand-tag">${g.awayPitcherHand||"R"}HP</span></div>
+          ${renderSide(g.homeBatters, g.homeTeam, g.awayPitcher, g.awayPitcherHand)}
         </div>
       </div>
     </div>`;
+}
+
+// Toggle last-5-games bar chart for a batter row (async: fetches on first open)
+const _hglLoaded = new Set();
+async function toggleHitterLog(domId, playerId, gamePk) {
+  const el = document.getElementById(`hgl-${domId}`);
+  if (!el) return;
+  const isOpen = el.classList.toggle("open");
+  if (!isOpen) return;
+  if (_hglLoaded.has(domId)) return;
+  _hglLoaded.add(domId);
+  const season = parseInt(selectedDate?.split("-")[0] || new Date().getFullYear());
+  const adjSeason = parseInt(selectedDate?.split("-")[1] || 4) < 4 ? season - 1 : season;
+  const log = await getHitterGameLog(playerId, adjSeason);
+  el.innerHTML = renderHitterGameLog(log, domId);
 }
 
 function renderSOCard(g) {
