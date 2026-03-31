@@ -2307,23 +2307,30 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) 
   const mlb = await resolvePitcher(schedProb, gamePk, side, gameInfo);
   if (mlb && mlb.id) {
     const expectedAbbr = mlbTeam?.abbreviation?.toUpperCase();
-    if (expectedAbbr) {
-      // First try the fast PP-line check (no extra API call needed)
-      const ppEntry = mlb.fullName ? lookupPP(mlb.fullName) : null;
-      const ppLoaded = Object.keys(ppLines).length > 0;
-      const ppWrongTeam = ppLoaded && ppEntry?.team && ppEntry.team.toUpperCase() !== expectedAbbr;
+    if (expectedAbbr && mlb.fullName) {
+      const nk = normName(mlb.fullName);
 
-      if (ppWrongTeam) {
-        console.warn(`[MLB] Pitcher PP mismatch: ${mlb.fullName} PP=${ppEntry.team} expected=${expectedAbbr} — skipping`);
-        // fall through
+      // Check A: pitcher appears in ppHitterLines for a DIFFERENT team (e.g. Ohtani = LAD batter)
+      const hitterEntry = ppHitterLines[nk];
+      if (hitterEntry?.team && hitterEntry.team.toUpperCase() !== expectedAbbr) {
+        console.warn(`[MLB] ${mlb.fullName} is a ${hitterEntry.team} batter, not a ${expectedAbbr} pitcher — skipping`);
+        // fall through to PP team map
       } else {
-        // PP check passed (or no PP entry). Verify via MLB people API — cached after first call.
-        const currentTeam = await getPitcherCurrentTeamAbbr(mlb.id);
-        if (currentTeam && currentTeam !== expectedAbbr) {
-          console.warn(`[MLB] Pitcher team mismatch: ${mlb.fullName} currentTeam=${currentTeam} expected=${expectedAbbr} — skipping`);
+        // Check B: pitcher has a K/outs PP line for a different team
+        const ppEntry = lookupPP(mlb.fullName);
+        const ppLoaded = Object.keys(ppLines).length > 0;
+        if (ppLoaded && ppEntry?.team && ppEntry.team.toUpperCase() !== expectedAbbr) {
+          console.warn(`[MLB] Pitcher PP K-line mismatch: ${mlb.fullName} PP=${ppEntry.team} expected=${expectedAbbr} — skipping`);
           // fall through
         } else {
-          return { prob: mlb, src: schedProb?.id ? "probable" : "confirmed" };
+          // Check C: MLB people API current team (cached, fails silently → null means unknown → trust)
+          const currentTeam = await getPitcherCurrentTeamAbbr(mlb.id);
+          if (currentTeam && currentTeam !== expectedAbbr) {
+            console.warn(`[MLB] Pitcher people API mismatch: ${mlb.fullName} currentTeam=${currentTeam} expected=${expectedAbbr} — skipping`);
+            // fall through
+          } else {
+            return { prob: mlb, src: schedProb?.id ? "probable" : "confirmed" };
+          }
         }
       }
     } else {
