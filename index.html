@@ -243,20 +243,38 @@ let ppLinesSnapshot = {};
 let lineMovements   = {};
 
 function captureLineSnapshot() {
-  if (Object.keys(ppLinesSnapshot).length === 0 && Object.keys(ppLines).length > 0) {
-    ppLinesSnapshot = JSON.parse(JSON.stringify(ppLines));
-  }
+  if (!Object.keys(ppLines).length) return;
+  if (Object.keys(ppLinesSnapshot).length > 0) return; // already loaded
+  const snapKey = `ppSnap_${today()}`;
+  try {
+    const saved = localStorage.getItem(snapKey);
+    if (saved) {
+      // Returning visitor today: compare current lines against the first-load snapshot
+      ppLinesSnapshot = JSON.parse(saved);
+      return;
+    }
+  } catch {}
+  // First load of the day: save current lines as the baseline snapshot
+  ppLinesSnapshot = JSON.parse(JSON.stringify(ppLines));
+  try { localStorage.setItem(snapKey, JSON.stringify(ppLinesSnapshot)); } catch {}
+  // Clean up snapshots older than 2 days
+  try {
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const twoDaysAgo = new Date(Date.now() - 172800000).toISOString().slice(0, 10);
+    [`ppSnap_${yesterday}`, `ppSnap_${twoDaysAgo}`].forEach(k => {
+      if (localStorage.getItem(k)) localStorage.removeItem(k);
+    });
+  } catch {}
 }
 function detectLineMovements() {
   lineMovements = {};
   if (!Object.keys(ppLinesSnapshot).length) return;
   for (const [key, cur] of Object.entries(ppLines)) {
     const snap = ppLinesSnapshot[key];
-    if (!snap) continue;
-    if (cur.line !== snap.line) {
-      lineMovements[key] = { from: snap.line, to: cur.line,
-        dir: cur.line > snap.line ? "up" : "down", name: cur.rawName };
-    }
+    if (!snap || cur.line === snap.line) continue;
+    lineMovements[key] = { from: snap.line, to: cur.line,
+      dir: cur.line > snap.line ? "up" : "down", name: cur.rawName,
+      ts: Date.now() };
   }
 }
 function getLineMovement(pitcherName) {
@@ -3008,12 +3026,13 @@ function renderH2H(h2hData, pitcherName) {
 // ── LINE MOVEMENT BADGE RENDER ────────────────────────────────────────────────
 function renderLineMovement(lineMov) {
   if (!lineMov) return "";
-  const isUp   = lineMov.dir === "up";
-  const color  = isUp ? "#ff4d6d" : "#00ff88";
-  const arrow  = isUp ? "▲" : "▼";
-  const label  = isUp ? "Line moved UP (sharp money on Over?)" : "Line moved DOWN (sharp money on Under?)";
-  return `<div class="line-moved" style="display:inline-flex;align-items:center;gap:6px;background:${color}18;border:1px solid ${color}55;border-radius:5px;padding:3px 10px;font-size:11px;font-weight:700;color:${color};margin-left:4px">
-    ${arrow} ${lineMov.from} → ${lineMov.to} <span style="font-size:9px;opacity:.8">${label}</span>
+  const isUp  = lineMov.dir === "up";
+  const color = isUp ? "#ff4d6d" : "#00ff88";
+  const arrow = isUp ? "▲" : "▼";
+  const tip   = isUp ? "Line moved UP since first load today" : "Line moved DOWN since first load today";
+  return `<div class="line-moved" style="display:inline-flex;align-items:center;gap:5px;background:${color}18;border:1px solid ${color}55;border-radius:5px;padding:3px 9px;font-size:11px;font-weight:800;color:${color};cursor:default" title="${tip}">
+    ${arrow} ${lineMov.from} → ${lineMov.to}K
+    <span style="font-size:9px;opacity:.75;font-weight:600">${isUp ? "STEAMED UP" : "STEAMED DOWN"}</span>
   </div>`;
 }
 
@@ -3745,6 +3764,21 @@ function renderSOCard(g) {
                 : `<span style="font-size:10px;color:#64748b">⏳ Lineup pending — team avg used</span>`}
             ${g.ppOutsLine!=null ? `<span style="font-size:10px;color:#ffd60a;font-weight:700">· ~${(g.ppOutsLine/3).toFixed(1)} IP implied</span>` : ""}
           </div>
+          ${g.ump && g.ump.src === "known" ? (() => {
+            const c = g.ump.kAdj >= 1.07 ? "#00ff88" : g.ump.kAdj <= 0.93 ? "#ff4d6d" : "#94a3b8";
+            const label = g.ump.kAdj >= 1.07 ? "↑ K-FRIENDLY" : g.ump.kAdj <= 0.93 ? "↓ K-SUPPRESSOR" : "NEUTRAL ZONE";
+            const pct = Math.round((g.ump.kAdj - 1) * 100);
+            const sign = pct >= 0 ? "+" : "";
+            return `<div style="margin-top:5px;display:inline-flex;align-items:center;gap:7px;background:${c}12;border:1px solid ${c}40;border-radius:6px;padding:4px 10px">
+              <span style="font-size:10px;font-weight:800;color:#64748b;letter-spacing:.06em">⚖️ UMP</span>
+              <span style="font-size:12px;font-weight:700;color:#e2e8f0">${g.ump.name}</span>
+              <span style="font-size:11px;font-weight:800;color:${c}">${label} (K×${g.ump.kAdj.toFixed(2)} / ${sign}${pct}%)</span>
+            </div>`;
+          })() : g.ump && g.ump.name && g.ump.name !== "Unknown" ? `<div style="margin-top:5px;display:inline-flex;align-items:center;gap:7px;background:rgba(100,116,139,.08);border:1px solid rgba(100,116,139,.2);border-radius:6px;padding:4px 10px">
+              <span style="font-size:10px;font-weight:800;color:#64748b;letter-spacing:.06em">⚖️ UMP</span>
+              <span style="font-size:12px;color:#64748b">${g.ump.name}</span>
+              <span style="font-size:10px;color:#475569">No data</span>
+            </div>` : ""}
         </div>
         <div class="card-right">
           <div class="conf-num" style="color:${color}">${g.confidence}%</div>
