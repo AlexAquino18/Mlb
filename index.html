@@ -549,7 +549,7 @@ async function loadPPLines() {
 
   try {
     // ── Step 1: discover MLB (regular season) league ID — not MLBST ───────────
-    let leagueId = null, leagueName = "?";
+    let leagueId = 2, leagueName = "MLB"; // MLB is always league_id=2 — skip probe
     const leagues = await ppGet("/leagues");
     if (leagues?.data) {
       debugLines.push(`Leagues found: ${leagues.data.length}`);

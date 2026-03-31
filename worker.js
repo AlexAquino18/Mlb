@@ -60,9 +60,6 @@ export default {
 
     let lastErr = null;
     for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) {
-        await new Promise(r => setTimeout(r, 300 * Math.pow(2, attempt)));
-      }
 
       const ua = UA_POOL[(attempt + Math.floor(Math.random() * UA_POOL.length)) % UA_POOL.length];
 
@@ -85,8 +82,15 @@ export default {
           },
         });
 
-        if ((resp.status === 429 || resp.status === 403) && attempt < 2) {
-          lastErr = new Error(`PP returned ${resp.status}`);
+        if (resp.status === 403) {
+          // Hard block — no point retrying
+          const text = await resp.text();
+          return new Response(text, { status: 403, headers: { ...corsHeaders(), "Content-Type": "application/json" } });
+        }
+        if (resp.status === 429 && attempt < 2) {
+          // Rate limited — wait longer before retry
+          await new Promise(r => setTimeout(r, 3000 * (attempt + 1)));
+          lastErr = new Error(`PP returned 429`);
           continue;
         }
 
