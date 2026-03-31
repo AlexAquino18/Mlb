@@ -107,14 +107,6 @@
     .hitter-section-title { font-size: 12px; font-weight: 700; color: #94a3b8; margin: 14px 0 8px; letter-spacing: .04em; }
     .hand-tag { display: inline-block; background: rgba(100,116,139,.2); border: 1px solid rgba(100,116,139,.3); border-radius: 4px; padding: 1px 5px; font-size: 10px; color: #94a3b8; margin-left: 5px; }
     .divider { border: none; border-top: 1px solid #1e2d45; margin: 14px 0; }
-    .batter-row { cursor: pointer; }
-    .batter-row:hover { background: rgba(0,212,255,.03); border-radius: 6px; }
-    .hitter-gamelog { display:none; padding:8px 0 4px; }
-    .hitter-gamelog.open { display:block; }
-    .hgl-bars { display:flex; gap:4px; margin-bottom:6px; }
-    .hgl-bar-group { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; min-width:0; }
-    .hgl-bar-track { width:100%; background:#1e2d45; border-radius:3px 3px 0 0; display:flex; align-items:flex-end; }
-    .hgl-bar-fill  { width:100%; border-radius:3px 3px 0 0; min-height:3px; transition:height .35s ease; }
     #disclaimer { background: #111827; border: 1px solid #1e2d45; border-radius: 10px; padding: 16px; margin-top: 20px; color: #64748b; font-size: 11px; line-height: 1.6; }
 
     /* ── GAME LOG TABLE ──────────────────────────────────────────────────── */
@@ -2654,48 +2646,11 @@ function clNrfiChip(cl) {
 // ── GAME LOG RENDER ───────────────────────────────────────────────────────────
 function renderGameLog(gameLog, pitcherHand) {
   if (!gameLog || gameLog.length === 0) return "";
-  const avgK = (gameLog.reduce((a,s)=>a+s.k,0)/gameLog.length).toFixed(1);
-  const avgER = (gameLog.reduce((a,s)=>a+s.er,0)/gameLog.length).toFixed(1);
-  const maxK  = Math.max(...gameLog.map(s=>s.k), 1);
-  const maxER = Math.max(...gameLog.map(s=>s.er), 1);
-
-  const kBars = gameLog.map(s => {
-    const pct   = Math.round(s.k / maxK * 100);
-    const color = s.k >= 8 ? "#00ff88" : s.k >= 5 ? "#ffd60a" : "#ff4d6d";
-    return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;min-width:0">
-      <span style="font-size:10px;font-weight:700;color:${color}">${s.k}</span>
-      <div style="width:100%;background:#1e2d45;border-radius:3px 3px 0 0;height:44px;display:flex;align-items:flex-end">
-        <div style="width:100%;height:${Math.max(4,pct)}%;background:${color};border-radius:3px 3px 0 0;min-height:4px;transition:height .4s ease"></div>
-      </div>
-      <span style="font-size:9px;color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;text-align:center">${s.opp}</span>
-    </div>`;
-  }).join("");
-
-  const erBars = gameLog.map(s => {
-    const pct   = maxER > 0 ? Math.round(s.er / maxER * 100) : 0;
-    const color = s.er === 0 ? "#00ff88" : s.er >= 4 ? "#ff4d6d" : "#ffd60a";
-    return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;min-width:0">
-      <span style="font-size:10px;font-weight:700;color:${color}">${s.er}</span>
-      <div style="width:100%;background:#1e2d45;border-radius:3px 3px 0 0;height:30px;display:flex;align-items:flex-end">
-        <div style="width:100%;height:${Math.max(pct>0?4:0,pct)}%;background:${color};border-radius:3px 3px 0 0;min-height:${s.er>0?4:0}px;transition:height .4s ease"></div>
-      </div>
-    </div>`;
-  }).join("");
-
+  const avgK = gameLog.length ? (gameLog.reduce((a,s)=>a+s.k,0)/gameLog.length).toFixed(1) : "—";
   return `
   <div style="background:#0a0e1a;border-radius:8px;padding:11px 14px;margin-top:10px">
-    <div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.06em;margin-bottom:10px">
-      📋 LAST ${gameLog.length} STARTS
-      <span style="color:#00ff88;margin-left:8px">Avg ${avgK} K</span>
-      <span style="color:#94a3b8;margin-left:8px">Avg ${avgER} ER</span>
-    </div>
-    <div style="display:flex;gap:3px;padding-bottom:6px;border-bottom:1px solid #1e2d45;margin-bottom:6px">
-      <div style="font-size:9px;color:#64748b;writing-mode:horizontal-tb;width:22px;flex-shrink:0;padding-top:2px">K</div>
-      <div style="display:flex;gap:3px;flex:1">${kBars}</div>
-    </div>
-    <div style="display:flex;gap:3px;padding-bottom:8px;border-bottom:1px solid #1e2d45;margin-bottom:8px">
-      <div style="font-size:9px;color:#64748b;width:22px;flex-shrink:0;padding-top:2px">ER</div>
-      <div style="display:flex;gap:3px;flex:1">${erBars}</div>
+    <div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.06em;margin-bottom:8px">
+      📋 LAST ${gameLog.length} STARTS — Avg K: <span style="color:#00ff88">${avgK}</span>
     </div>
     <table class="game-log-table">
       <thead><tr>
@@ -3286,40 +3241,6 @@ async function buildHitters(games, season) {
   return results;
 }
 
-function renderHitterGameLog(log, playerId) {
-  if (!log || !log.length) return `<div style="color:#4a5568;font-size:11px;padding:6px 0">No recent game data available</div>`;
-  const stats = ["h","tb","hr","bb"];
-  const labels = ["H","TB","HR","BB"];
-  const colors = ["#00d4ff","#a78bfa","#ff4d6d","#ffd60a"];
-  const maxes  = stats.map(k => Math.max(...log.map(g=>g[k]), 1));
-
-  const bars = log.map((g, gi) => {
-    const barCols = stats.map((k, si) => {
-      const pct = maxes[si] > 0 ? Math.round(g[k] / maxes[si] * 100) : 0;
-      return `<div class="hgl-bar-group">
-        <span style="font-size:9px;font-weight:700;color:${colors[si]}">${g[k]}</span>
-        <div class="hgl-bar-track" style="height:32px">
-          <div class="hgl-bar-fill" style="height:${Math.max(g[k]>0?3:0,pct)}%;background:${colors[si]}"></div>
-        </div>
-      </div>`;
-    }).join("");
-    return `<div style="flex:1;min-width:0">
-      <div class="hgl-bars">${barCols}</div>
-      <div style="font-size:9px;color:#475569;text-align:center">${g.opp||"?"}</div>
-      <div style="font-size:8px;color:#334155;text-align:center">${g.date||""}</div>
-    </div>`;
-  }).join(`<div style="width:1px;background:#1e2d45;flex-shrink:0"></div>`);
-
-  const legend = stats.map((k,i) =>
-    `<span style="font-size:9px;color:${colors[i]};font-weight:700">${labels[i]}</span>`
-  ).join(" · ");
-
-  return `
-  <div class="hitter-gamelog open" id="hgl-${playerId}">
-    <div style="font-size:9px;color:#475569;margin-bottom:4px;letter-spacing:.05em">LAST ${log.length} GAMES · ${legend}</div>
-    <div style="display:flex;gap:6px;align-items:flex-end">${bars}</div>
-  </div>`;
-}
 
 function renderHitterCard(g) {
   const time = g.gameTime
@@ -3373,15 +3294,13 @@ function renderHitterCard(g) {
           + `vs${pitHand}HP: ${platoonAvg} AVG (${platoon.pa} PA)</span>`;
       }
 
-      const glId = `hgl-${b.id}`;
       return `
-        <div class="batter-row" onclick="toggleHitterLog('${b.id}', ${b.id}, '${g.gamePk}')">
+        <div class="batter-row">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:4px;margin-bottom:4px">
             <div>
               <span class="pitcher-name">#${b.order} ${b.name}</span>
               <span class="stat-chip" style="margin-left:5px">${b.pos}</span>
               <span class="stat-chip" style="margin-left:3px">B:${b.bats}</span>
-              <span style="font-size:9px;color:#334155;margin-left:5px">▾ L5</span>
             </div>
             <div>${bestStr}</div>
           </div>
@@ -3391,9 +3310,6 @@ function renderHitterCard(g) {
           </div>
           ${platoonHtml ? `<div style="margin-top:4px">${platoonHtml}</div>` : ""}
           ${chips ? `<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">${chips}</div>` : ""}
-          <div class="hitter-gamelog" id="${glId}">
-            <div style="color:#4a5568;font-size:11px;padding:4px 0">Loading last 5 games…</div>
-          </div>
         </div>`;
     }).join("");
   };
@@ -3435,20 +3351,6 @@ function renderHitterCard(g) {
     </div>`;
 }
 
-// Toggle last-5-games bar chart for a batter row (async: fetches on first open)
-const _hglLoaded = new Set();
-async function toggleHitterLog(domId, playerId, gamePk) {
-  const el = document.getElementById(`hgl-${domId}`);
-  if (!el) return;
-  const isOpen = el.classList.toggle("open");
-  if (!isOpen) return;
-  if (_hglLoaded.has(domId)) return;
-  _hglLoaded.add(domId);
-  const season = parseInt(selectedDate?.split("-")[0] || new Date().getFullYear());
-  const adjSeason = parseInt(selectedDate?.split("-")[1] || 4) < 4 ? season - 1 : season;
-  const log = await getHitterGameLog(playerId, adjSeason);
-  el.innerHTML = renderHitterGameLog(log, domId);
-}
 
 function renderSOCard(g) {
   const color = confColor(g.confidence);
