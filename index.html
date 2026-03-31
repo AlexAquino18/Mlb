@@ -3012,6 +3012,8 @@ function extractPPHitterLines(allProj, playerMap) {
     hrr:  ["hits+runs+rbis", "h+r+rbi", "hits + runs + rbis"],
     sb:   ["stolen bases", "stolen base"],
   };
+  // First pass: collect ALL lines per player per stat
+  const allLines = {}; // normName → { statKey → [{ line, statType }] }
   for (const proj of allProj) {
     const attr = proj.attributes || {};
     const st   = (attr.stat_type || "").toLowerCase().trim();
@@ -3028,9 +3030,20 @@ function extractPPHitterLines(allProj, playerMap) {
     }
     if (!statKey) continue;
     const nk = normName(player.name);
-    if (!ppHitterLines[nk]) ppHitterLines[nk] = { rawName: player.name, team: player.team };
-    if (!ppHitterLines[nk][statKey]) {
-      ppHitterLines[nk][statKey] = { line, statType: attr.stat_type };
+    if (!allLines[nk]) allLines[nk] = { rawName: player.name, team: player.team };
+    if (!allLines[nk][statKey]) allLines[nk][statKey] = [];
+    allLines[nk][statKey].push({ line, statType: attr.stat_type });
+  }
+  // Second pass: pick the standard line — lowest non-trivial line (> 0.25)
+  // This avoids the "demon" (highest) line and picks the goblin/standard line
+  for (const [nk, data] of Object.entries(allLines)) {
+    ppHitterLines[nk] = { rawName: data.rawName, team: data.team };
+    for (const [statKey, entries] of Object.entries(data)) {
+      if (statKey === "rawName" || statKey === "team") continue;
+      const sorted = entries.filter(e => e.line > 0.25).sort((a, b) => a.line - b.line);
+      if (sorted.length) {
+        ppHitterLines[nk][statKey] = sorted[0]; // lowest standard line
+      }
     }
   }
 }
