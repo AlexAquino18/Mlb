@@ -3124,7 +3124,7 @@ async function getHitterVsSplit(playerId, season, pitcherHand) {
   } catch(_) { _hitterStats[key] = null; return null; }
 }
 
-// Fetch last 5 game log entries for a batter
+// Fetch last 5 regular-season games for a batter (tries current year first, then falls back)
 async function getHitterGameLog(playerId, season) {
   const key = `hgl_${playerId}_${season}`;
   if (_hitterStats[key] !== undefined) return _hitterStats[key];
@@ -3132,30 +3132,8 @@ async function getHitterGameLog(playerId, season) {
     const d = await mlbGet(`/people/${playerId}/stats?stats=gameLog&group=hitting&gameType=R&season=${season}&limit=5`);
     const splits = d?.stats?.[0]?.splits || [];
     const result = splits.slice(0, 5).map(sp => ({
-      date: (sp.date || "").slice(5),
-      opp:  sp.opponent?.abbreviation || "?",
-      h:    sp.stat?.hits        || 0,
-      tb:   sp.stat?.totalBases  || 0,
-      hr:   sp.stat?.homeRuns    || 0,
-      bb:   sp.stat?.baseOnBalls || 0,
-      ab:   sp.stat?.atBats      || 0,
-      pa:   sp.stat?.plateAppearances || 0,
-    }));
-    _hitterStats[key] = result;
-    return result;
-  } catch(_) { _hitterStats[key] = []; return []; }
-}
-
-// Fetch last 5 regular-season games for a batter
-async function getHitterGameLog(playerId, season) {
-  const key = `hgl_${playerId}_${season}`;
-  if (_hitterStats[key] !== undefined) return _hitterStats[key];
-  try {
-    const d = await mlbGet(`/people/${playerId}/stats?stats=gameLog&group=hitting&gameType=R&season=${season}&limit=5`);
-    const splits = d?.stats?.[0]?.splits || [];
-    const result = splits.slice(0, 5).map(sp => ({
-      date: (sp.date || "").slice(5),
-      opp:  sp.opponent?.abbreviation || "?",
+      date: (sp.date || sp.game?.officialDate || "").slice(5),
+      opp:  sp.opponent?.abbreviation || sp.opponent?.name?.slice(0,3).toUpperCase() || "?",
       ab:   sp.stat?.atBats          || 0,
       h:    sp.stat?.hits            || 0,
       hr:   sp.stat?.homeRuns        || 0,
@@ -3450,15 +3428,18 @@ function renderHitterCard(g) {
 }
 
 
-const _batterGLLoaded = new Set();
 async function toggleBatterLog(playerId, season) {
   const el = document.getElementById(`bgl-${playerId}`);
   if (!el) return;
   el.classList.toggle("open");
-  if (!el.classList.contains("open") || _batterGLLoaded.has(playerId)) return;
-  _batterGLLoaded.add(playerId);
+  if (!el.classList.contains("open")) return;
+  if (el.innerHTML.trim()) return; // already rendered
   el.innerHTML = `<div style="color:#475569;font-size:11px;padding:4px 0">Loading…</div>`;
-  const log = await getHitterGameLog(playerId, season);
+  // Always try the current calendar year first so we get 2026 games as soon as they start
+  const currentYear = new Date().getFullYear();
+  let log = [];
+  if (currentYear !== season) log = await getHitterGameLog(playerId, currentYear);
+  if (!log.length) log = await getHitterGameLog(playerId, season);
   if (!log.length) {
     el.innerHTML = `<div style="color:#475569;font-size:11px;padding:4px 0">No recent game data</div>`;
     return;
