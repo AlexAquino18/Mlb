@@ -1,0 +1,3255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>MLB Edge Model</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <!-- iOS home screen / PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="MLB Edge" />
+  <meta name="theme-color" content="#0a0e1a" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Bebas+Neue&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0e1a; font-family: 'IBM Plex Mono', 'Courier New', monospace; color: #e2e8f0; min-height: 100vh; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0a0e1a; }
+    ::-webkit-scrollbar-thumb { background: #1e2d45; border-radius: 3px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    #header { background: #0d1525; border-bottom: 1px solid #1e2d45; padding: 20px 24px; padding-top: max(20px, env(safe-area-inset-top)); position: sticky; top: 0; z-index: 100; }
+    #header-inner { max-width: 960px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+    h1 { font-family: 'Bebas Neue', sans-serif; font-size: 32px; letter-spacing: .1em; color: #00d4ff; line-height: 1; text-shadow: 0 0 20px #00d4ff55; }
+    #subtitle { color: #64748b; font-size: 11px; margin-top: 3px; }
+    #header-right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input[type=date] { background: #111827; border: 1px solid #1e2d45; border-radius: 6px; padding: 6px 10px; color: #e2e8f0; font-size: 11px; font-family: inherit; cursor: pointer; }
+    input[type=date]::-webkit-calendar-picker-indicator { filter: invert(.7); cursor: pointer; }
+    #updated { color: #64748b; font-size: 11px; }
+    .btn { border-radius: 8px; cursor: pointer; font-size: 12px; font-family: inherit; font-weight: 700; padding: 8px 16px; }
+    .btn-accent { background: rgba(0,212,255,.12); border: 1px solid rgba(0,212,255,.4); color: #00d4ff; }
+    .btn-accent:disabled { opacity: .4; cursor: default; }
+
+    #main { max-width: 960px; margin: 0 auto; padding: 24px 16px; padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+    #tabs { display: flex; gap: 4px; background: #111827; padding: 4px; border-radius: 10px; border: 1px solid #1e2d45; margin-bottom: 20px; }
+    .tab-btn { flex: 1; padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer; background: transparent; color: #64748b; font-family: inherit; font-weight: 700; font-size: 13px; transition: all .2s; }
+    .tab-btn.active { background: #00d4ff; color: #0a0e1a; }
+
+    #filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+    .filter-btn { padding: 4px 12px; border-radius: 20px; border: 1px solid #1e2d45; background: transparent; color: #64748b; cursor: pointer; font-size: 11px; font-family: inherit; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+    .filter-btn.active { border-color: #00d4ff; background: rgba(0,212,255,.12); color: #00d4ff; }
+    #game-count { margin-left: auto; color: #64748b; font-size: 11px; }
+
+    #loader { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 50px 0; }
+    .spinner { width: 44px; height: 44px; border: 3px solid #1e2d45; border-top-color: #00d4ff; border-radius: 50%; animation: spin .8s linear infinite; }
+    #load-status { color: #64748b; font-size: 12px; font-family: monospace; }
+
+    #error-box { background: rgba(255,77,109,.07); border: 1px solid rgba(255,77,109,.3); border-radius: 10px; padding: 16px; color: #ff4d6d; font-size: 13px; display: flex; align-items: center; gap: 12px; }
+    .btn-retry { background: none; border: 1px solid #ff4d6d; color: #ff4d6d; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 12px; white-space: nowrap; }
+
+    #summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+    .sum-card { background: #111827; border: 1px solid #1e2d45; border-radius: 10px; padding: 16px; text-align: center; }
+    .sum-val { font-family: 'Bebas Neue', sans-serif; font-size: 30px; font-weight: 800; }
+    .sum-lbl { color: #64748b; font-size: 11px; margin-top: 2px; }
+
+    .game-card { background: #111827; border: 1px solid #1e2d45; border-radius: 12px; margin-bottom: 12px; overflow: hidden; transition: border-color .3s, box-shadow .3s; animation: fadeIn .25s ease; }
+    .game-card.open { border-color: rgba(0,212,255,.4); box-shadow: 0 0 24px rgba(0,212,255,.1); }
+    .card-hd { padding: 16px 20px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .card-teams { color: #e2e8f0; font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+    .pitcher-row { display: flex; flex-direction: column; gap: 3px; }
+    .pitcher-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .pitcher-name { color: #e2e8f0; font-size: 12px; font-weight: 700; }
+    .stat-chip { background: rgba(100,116,139,.15); border: 1px solid rgba(100,116,139,.25); border-radius: 4px; padding: 1px 6px; font-size: 10px; color: #94a3b8; white-space: nowrap; }
+    .stat-chip.good { background: rgba(0,255,136,.1); border-color: rgba(0,255,136,.25); color: #00ff88; }
+    .stat-chip.warn { background: rgba(255,214,10,.1); border-color: rgba(255,214,10,.25); color: #ffd60a; }
+    .stat-chip.bad  { background: rgba(255,77,109,.1); border-color: rgba(255,77,109,.25); color: #ff4d6d; }
+    .card-right { text-align: right; flex-shrink: 0; }
+    .conf-num { font-weight: 800; font-size: 22px; margin-bottom: 4px; }
+    .badge { border-radius: 6px; padding: 2px 9px; font-size: 11px; font-weight: 700; font-family: monospace; letter-spacing: .05em; }
+    .src-confirmed { background: rgba(0,255,136,.15); border: 1px solid rgba(0,255,136,.4); color: #00ff88; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 700; }
+    .src-probable  { background: rgba(0,212,255,.12); border: 1px solid rgba(0,212,255,.35); color: #00d4ff; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 700; }
+    .src-announced { background: rgba(255,214,10,.1); border: 1px solid rgba(255,214,10,.35); color: #ffd60a; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 700; }
+    .src-est       { background: rgba(100,116,139,.15); border: 1px solid rgba(100,116,139,.3); color: #64748b; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 700; }
+    .take-box { border-radius: 10px; padding: 14px 16px; margin: 14px 0 4px; }
+    .take-label { font-size: 10px; letter-spacing: .1em; font-weight: 700; margin-bottom: 5px; opacity: .7; }
+    .take-value { font-family: 'Bebas Neue', sans-serif; font-size: 26px; letter-spacing: .05em; line-height: 1.1; }
+    .take-sub { font-size: 11px; margin-top: 4px; opacity: .75; }
+
+    .card-bd { padding: 0 20px 18px; border-top: 1px solid #1e2d45; display: none; }
+    .card-bd.open { display: block; }
+    .pitcher-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0 12px; }
+    .pitcher-col-title { font-size: 12px; font-weight: 700; margin-bottom: 10px; }
+    .recent-tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-left: 6px; vertical-align: middle; }
+    .bar-row { margin-bottom: 8px; }
+    .bar-lbl-row { display: flex; justify-content: space-between; margin-bottom: 3px; }
+    .bar-lbl { color: #64748b; font-size: 11px; }
+    .bar-val { font-size: 11px; font-weight: 700; }
+    .bar-track { background: #1e2d45; border-radius: 4px; height: 5px; }
+    .bar-fill { height: 5px; border-radius: 4px; transition: width .5s ease; }
+    .info-row { background: #0a0e1a; border-radius: 8px; padding: 11px 14px; margin-top: 8px; }
+    .info-lbl { color: #64748b; font-size: 11px; margin-bottom: 4px; }
+    .analysis-box { background: #0a0e1a; border-radius: 8px; padding: 12px 14px; margin-top: 10px; }
+    .analysis-lbl { color: #64748b; font-size: 10px; letter-spacing: .06em; margin-bottom: 5px; }
+    .analysis-txt { font-size: 13px; line-height: 1.65; color: #e2e8f0; }
+    .lineup-box { background: #0a0e1a; border-radius: 8px; padding: 11px 14px; margin-top: 8px; }
+    .lineup-title { color: #64748b; font-size: 10px; letter-spacing: .06em; margin-bottom: 6px; }
+    .lineup-list { display: flex; flex-direction: column; gap: 3px; }
+    .lineup-batter { font-size: 12px; color: #94a3b8; }
+    .lineup-batter span { color: #64748b; font-size: 10px; margin-left: 6px; }
+    .hand-tag { display: inline-block; background: rgba(100,116,139,.2); border: 1px solid rgba(100,116,139,.3); border-radius: 4px; padding: 1px 5px; font-size: 10px; color: #94a3b8; margin-left: 5px; }
+    .divider { border: none; border-top: 1px solid #1e2d45; margin: 14px 0; }
+    #disclaimer { background: #111827; border: 1px solid #1e2d45; border-radius: 10px; padding: 16px; margin-top: 20px; color: #64748b; font-size: 11px; line-height: 1.6; }
+
+    /* ── GAME LOG TABLE ──────────────────────────────────────────────────── */
+    .game-log-table { width:100%; border-collapse:collapse; font-size:11px; margin-top:8px; }
+    .game-log-table th { color:#64748b; font-weight:700; text-align:left; padding:4px 6px; border-bottom:1px solid #1e2d45; letter-spacing:.04em; font-size:10px; }
+    .game-log-table td { padding:5px 6px; border-bottom:1px solid rgba(30,45,69,.5); color:#94a3b8; }
+    .game-log-table tr:last-child td { border-bottom:none; }
+    .game-log-table tr:hover td { background:rgba(0,212,255,.04); }
+    .k-high { color:#00ff88 !important; font-weight:700; }
+    .k-mid  { color:#ffd60a !important; font-weight:700; }
+    .k-low  { color:#ff4d6d !important; }
+    /* ── UMP ZONE CHART ─────────────────────────────────────────────────── */
+    .zone-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:3px; width:108px; }
+    .zone-cell { width:34px; height:28px; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; border:1px solid rgba(255,255,255,.08); }
+    /* ── LINE MOVEMENT ──────────────────────────────────────────────────── */
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+    .line-moved { animation:pulse 1.8s ease-in-out 4; }
+    /* ── MOBILE ──────────────────────────────────────────────────────────── */
+    @media (max-width: 600px) {
+      #header { padding: 12px 14px; }
+      h1 { font-size: 24px; }
+      #subtitle { font-size: 10px; }
+      #header-right { gap: 6px; }
+      #header-right input[type=date] { font-size: 10px; padding: 5px 7px; }
+      .btn { font-size: 11px; padding: 6px 10px; }
+      #pp-debug-btn { display: none !important; }
+      #main { padding: 14px 10px; }
+      .tab-btn { font-size: 11px; padding: 8px 6px; }
+      #summary-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+      .sum-val { font-size: 24px; }
+      .sum-lbl { font-size: 10px; }
+      .game-card { margin-bottom: 8px; }
+      .card-hd { padding: 12px 14px; gap: 8px; }
+      .card-teams { font-size: 13px; }
+      .conf-num { font-size: 20px; }
+      .pitcher-name { font-size: 11px; }
+      .stat-chip { font-size: 9px; padding: 1px 4px; }
+      .hand-tag { font-size: 9px; }
+      .card-bd { padding: 0 14px 14px; }
+      /* Stack pitcher stats grid to single column on phone */
+      .pitcher-grid { grid-template-columns: 1fr; gap: 10px; }
+      .take-value { font-size: 20px; }
+      .analysis-txt { font-size: 12px; }
+      .bar-lbl, .bar-val { font-size: 10px; }
+      .lineup-batter { font-size: 11px; }
+      #filters { gap: 5px; }
+      .filter-btn { font-size: 10px; padding: 3px 9px; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="header">
+  <div id="header-inner">
+    <div>
+      <h1>MLB EDGE MODEL</h1>
+      <div id="subtitle">Initializing…</div>
+    </div>
+    <div id="header-right">
+      <input type="date" id="date-picker" />
+      <span id="updated"></span>
+      <button class="btn btn-accent" id="pp-debug-btn" style="display:none" onclick="document.getElementById('pp-debug').style.display='block'">📊 PP Lines</button>
+      <button class="btn btn-accent" id="refresh-btn">↻ REFRESH</button>
+    </div>
+  </div>
+</div>
+
+<div id="main">
+  <div id="tabs">
+    <button class="tab-btn active" data-tab="nrfi">⚾ NRFI / YRFI</button>
+    <button class="tab-btn" data-tab="strikeouts">🔥 STRIKEOUT PROPS</button>
+  </div>
+  <div id="filters" style="display:none"></div>
+  <div id="loader" style="display:none">
+    <div class="spinner"></div>
+    <div id="load-status">Fetching schedule…</div>
+  </div>
+  <div id="error-box" style="display:none">
+    <span id="error-msg"></span>
+    <button class="btn-retry" id="retry-btn">Retry</button>
+  </div>
+  <div id="summary-grid" style="display:none"></div>
+  <div id="cards"></div>
+  <!-- PP Debug Panel -->
+  <div id="pp-debug" style="display:none;background:#0d1525;border:1px solid #1e2d45;border-radius:10px;padding:16px;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <span style="color:#00d4ff;font-size:12px;font-weight:700">📊 PRIZEPICKS DEBUG</span>
+      <button onclick="document.getElementById('pp-debug').style.display='none'" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:14px">✕</button>
+    </div>
+    <div id="pp-debug-body" style="font-size:11px;line-height:1.8;color:#94a3b8;font-family:monospace"></div>
+  </div>
+
+  <div id="disclaimer" style="display:none">
+    ⚠ <strong style="color:#ffd60a">DISCLAIMER:</strong> For informational purposes only.
+    Stats from MLB Stats API. Weather from Open-Meteo. Umpire data from Umpire Scorecards (2023–2025 averages).
+    Verify lineups/props with official sources before wagering. Bet responsibly.
+  </div>
+</div>
+
+<script>
+"use strict";
+const MLB    = "https://statsapi.mlb.com/api/v1";
+const PP     = "https://api.prizepicks.com";
+const PROXY  = "https://corsproxy.io/?url=";
+const PROXY2 = "https://api.allorigins.win/raw?url=";
+const PROXY3 = "https://api.codetabs.com/v1/proxy?quest=";
+// ↓ Paste your Cloudflare Worker URL here after deploying worker.js (leave "" to skip)
+const CF_WORKER = "";
+
+let activeTab    = "nrfi";
+let activeFilter = "all";
+let selectedDate = "";
+let cache        = { nrfi: null, strikeouts: null };
+let ppLines      = {};
+let ppLoaded     = false;
+let ppTeamMap    = {};
+let ppNRFI       = {};
+const _mlbSearch = {};
+
+// ── LINE MOVEMENT TRACKING ─────────────────────────────────────────────────
+let ppLinesSnapshot = {};
+let lineMovements   = {};
+
+function captureLineSnapshot() {
+  if (Object.keys(ppLinesSnapshot).length === 0 && Object.keys(ppLines).length > 0) {
+    ppLinesSnapshot = JSON.parse(JSON.stringify(ppLines));
+  }
+}
+function detectLineMovements() {
+  lineMovements = {};
+  if (!Object.keys(ppLinesSnapshot).length) return;
+  for (const [key, cur] of Object.entries(ppLines)) {
+    const snap = ppLinesSnapshot[key];
+    if (!snap) continue;
+    if (cur.line !== snap.line) {
+      lineMovements[key] = { from: snap.line, to: cur.line,
+        dir: cur.line > snap.line ? "up" : "down", name: cur.rawName };
+    }
+  }
+}
+function getLineMovement(pitcherName) {
+  const key = normName(pitcherName);
+  return lineMovements[key] || null;
+}
+
+// ── PARK DIMENSIONS & HR FACTOR ────────────────────────────────────────────
+const PARK_DIMS = {
+  ARI:{ name:"Chase Field",         lf:330, cf:407, rf:335, wallHt:7.5,  hrFactor:1.06, surface:"Turf",  roof:true,  note:"Roof closed in heat, humidor used" },
+  ATL:{ name:"Truist Park",         lf:335, cf:400, rf:325, wallHt:8,    hrFactor:1.04, surface:"Grass", roof:false, note:"Asymmetric RF, hitter-friendly" },
+  BAL:{ name:"Oriole Park",         lf:333, cf:400, rf:318, wallHt:7,    hrFactor:1.08, surface:"Grass", roof:false, note:"Short RF, very hitter-friendly" },
+  BOS:{ name:"Fenway Park",         lf:310, cf:420, rf:302, wallHt:37,   hrFactor:0.97, surface:"Grass", roof:false, note:"Green Monster suppresses LF HRs" },
+  CHC:{ name:"Wrigley Field",       lf:355, cf:400, rf:353, wallHt:11.5, hrFactor:1.03, surface:"Grass", roof:false, note:"Wind-dependent — can play big or small" },
+  CWS:{ name:"Guaranteed Rate",     lf:330, cf:400, rf:335, wallHt:8,    hrFactor:1.05, surface:"Grass", roof:false, note:"Moderate hitter park" },
+  CIN:{ name:"Great American BP",   lf:328, cf:404, rf:325, wallHt:12,   hrFactor:1.11, surface:"Grass", roof:false, note:"One of MLB most hitter-friendly" },
+  CLE:{ name:"Progressive Field",   lf:325, cf:405, rf:325, wallHt:19,   hrFactor:0.96, surface:"Grass", roof:false, note:"Pitcher-friendly, tall CF wall" },
+  COL:{ name:"Coors Field",         lf:347, cf:415, rf:350, wallHt:8,    hrFactor:1.38, surface:"Grass", roof:false, note:"Mile High altitude — massive HR park" },
+  DET:{ name:"Comerica Park",       lf:345, cf:420, rf:330, wallHt:8,    hrFactor:0.93, surface:"Grass", roof:false, note:"Large CF, pitcher-friendly" },
+  HOU:{ name:"Minute Maid Park",    lf:315, cf:409, rf:326, wallHt:21,   hrFactor:1.02, surface:"Turf",  roof:true,  note:"Crawford Boxes boost LF HRs" },
+  KC: { name:"Kauffman Stadium",    lf:330, cf:410, rf:330, wallHt:9,    hrFactor:0.95, surface:"Grass", roof:false, note:"Spacious, pitcher-friendly" },
+  LAA:{ name:"Angel Stadium",       lf:330, cf:400, rf:350, wallHt:8,    hrFactor:0.98, surface:"Grass", roof:false, note:"Near-average park" },
+  LAD:{ name:"Dodger Stadium",      lf:330, cf:395, rf:330, wallHt:8,    hrFactor:0.94, surface:"Grass", roof:false, note:"Marine layer suppresses offense at night" },
+  MIA:{ name:"loanDepot Park",      lf:344, cf:407, rf:335, wallHt:8,    hrFactor:0.88, surface:"Grass", roof:true,  note:"Most pitcher-friendly dome in MLB" },
+  MIL:{ name:"American Family Fld", lf:344, cf:400, rf:345, wallHt:8,    hrFactor:1.01, surface:"Turf",  roof:true,  note:"Neutral; roof protects from weather" },
+  MIN:{ name:"Target Field",        lf:339, cf:404, rf:328, wallHt:8,    hrFactor:0.99, surface:"Grass", roof:false, note:"Cold early season suppresses scoring" },
+  NYM:{ name:"Citi Field",          lf:335, cf:408, rf:330, wallHt:8,    hrFactor:0.97, surface:"Grass", roof:false, note:"Pitcher-friendly, large foul territory" },
+  NYY:{ name:"Yankee Stadium",      lf:318, cf:408, rf:314, wallHt:8,    hrFactor:1.12, surface:"Grass", roof:false, note:"Short RF porch, elite HR park" },
+  ATH:{ name:"Sutter Health Park",  lf:330, cf:403, rf:325, wallHt:8,    hrFactor:0.98, surface:"Grass", roof:false, note:"Sacramento temporary home" },
+  PHI:{ name:"Citizens Bank Park",  lf:329, cf:401, rf:330, wallHt:8,    hrFactor:1.09, surface:"Grass", roof:false, note:"Very hitter-friendly, humid summers" },
+  PIT:{ name:"PNC Park",            lf:325, cf:399, rf:320, wallHt:21,   hrFactor:0.96, surface:"Grass", roof:false, note:"Beautiful park, tall RF wall" },
+  SD: { name:"Petco Park",          lf:336, cf:396, rf:322, wallHt:8,    hrFactor:0.88, surface:"Grass", roof:false, note:"Most pitcher-friendly open-air park" },
+  SEA:{ name:"T-Mobile Park",       lf:331, cf:401, rf:326, wallHt:8,    hrFactor:0.97, surface:"Turf",  roof:true,  note:"Retractable roof, marine air" },
+  SF: { name:"Oracle Park",         lf:339, cf:399, rf:309, wallHt:24,   hrFactor:0.89, surface:"Grass", roof:false, note:"Marine layer + deep CF suppress offense" },
+  STL:{ name:"Busch Stadium",       lf:336, cf:400, rf:335, wallHt:8,    hrFactor:0.96, surface:"Grass", roof:false, note:"Pitcher-friendly, large outfield" },
+  TB: { name:"Tropicana Field",     lf:315, cf:404, rf:322, wallHt:9.5,  hrFactor:1.00, surface:"Turf",  roof:true,  note:"Dome, catwalks affect play" },
+  TEX:{ name:"Globe Life Field",    lf:329, cf:407, rf:326, wallHt:8,    hrFactor:1.03, surface:"Turf",  roof:true,  note:"Climate-controlled dome" },
+  TOR:{ name:"Rogers Centre",       lf:328, cf:400, rf:328, wallHt:10,   hrFactor:1.07, surface:"Turf",  roof:true,  note:"Turf boosts offense, dome = neutral weather" },
+  WSH:{ name:"Nationals Park",      lf:336, cf:402, rf:335, wallHt:8,    hrFactor:1.05, surface:"Grass", roof:false, note:"Hitter-friendly, hot summers" },
+};
+
+// ── CATCHER FRAMING DATA ──────────────────────────────────────────────────
+// Framing runs per 162 games above average (Baseball Savant 2023-2025 avg)
+const CATCHER_FRAMING = {
+  "realmuto jt":          { framing: 3.2, name:"J.T. Realmuto",     note:"Elite framer" },
+  "smith will":           { framing: 2.9, name:"Will Smith",         note:"Elite LA framer" },
+  "caratini victor":      { framing: 2.5, name:"Victor Caratini",    note:"Quiet elite framer" },
+  "stallings jacob":      { framing: 2.4, name:"Jacob Stallings",    note:"Consistent top framer" },
+  "contreras willson":    { framing: 2.2, name:"Willson Contreras",  note:"Above-avg framing" },
+  "rutschman adley":      { framing: 2.1, name:"Adley Rutschman",    note:"Elite all-around" },
+  "barnhart tucker":      { framing: 2.0, name:"Tucker Barnhart",    note:"Framing specialist" },
+  "mcguire reese":        { framing: 1.9, name:"Reese McGuire",      note:"Solid framer" },
+  "trevino jose":         { framing: 1.5, name:"Jose Trevino",       note:"Above-avg framing" },
+  "hedges austin":        { framing: 1.5, name:"Austin Hedges",      note:"Framing-first catcher" },
+  "moreno gabriel":       { framing: 1.4, name:"Gabriel Moreno",     note:"Young elite framer" },
+  "murphy sean":          { framing: 1.1, name:"Sean Murphy",        note:"Good all-round" },
+  "raleigh cal":          { framing: 0.8, name:"Cal Raleigh",        note:"Near average framing" },
+  "jeffers ryan":         { framing: 0.2, name:"Ryan Jeffers",       note:"Average framer" },
+  "perez salvador":       { framing: 0.0, name:"Salvador Perez",     note:"Avg framing, great caller" },
+  "stephenson tyler":     { framing:-1.0, name:"Tyler Stephenson",   note:"Below avg framing" },
+  "torrens luis":         { framing:-1.4, name:"Luis Torrens",       note:"Poor framing" },
+  "kelly carson":         { framing:-1.6, name:"Carson Kelly",       note:"Poor framing" },
+  "langeliers shea":      { framing:-2.2, name:"Shea Langeliers",    note:"Poor framing" },
+  "soderstrom tyler":     { framing:-2.5, name:"Tyler Soderstrom",   note:"Offense-first, poor framing" },
+  "davis henry":          { framing:-1.8, name:"Henry Davis",        note:"Young, below avg framing" },
+  "narvaez carlos":       { framing: 1.7, name:"Carlos Narváez",     note:"Above-avg framing" },
+  "campusano luis":       { framing: 0.6, name:"Luis Campusano",     note:"Near average" },
+  "basallo samuel":       { framing:-1.2, name:"Samuel Basallo",     note:"Young, below avg" },
+  "baldwin drake":        { framing: 0.4, name:"Drake Baldwin",      note:"Near average" },
+};
+function normCatcher(n) {
+  return (n||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase().replace(/[^a-z\s]/g,"").trim();
+}
+function getCatcherFraming(fullName) {
+  if (!fullName) return null;
+  const norm = normCatcher(fullName);
+  if (CATCHER_FRAMING[norm]) return CATCHER_FRAMING[norm];
+  const last = norm.split(" ").pop();
+  for (const [k, v] of Object.entries(CATCHER_FRAMING)) {
+    if (k.split(" ").pop() === last) return v;
+  }
+  return null;
+}
+
+// ── UMP ZONE PROFILES ─────────────────────────────────────────────────────
+// 9-zone grid values -2 to +2: positive=more strikes called, negative=more balls
+// Layout: [TL,TM,TR, ML,MM,MR, BL,BM,BR] from catcher view
+const UMP_ZONES = {
+  "hoberg perry":       { zones:[ 1, 1, 1, 2, 2, 2, 2, 2, 1], note:"Elite low zone" },
+  "knight brian":       { zones:[ 1, 2, 1, 2, 2, 2, 1, 2, 1], note:"Wide middle, consistent" },
+  "blaser cory":        { zones:[ 0, 1, 0, 2, 2, 2, 2, 2, 1], note:"Low and inside heavy" },
+  "reinker alex":       { zones:[ 1, 1, 1, 2, 2, 2, 1, 1, 1], note:"Consistent all zones" },
+  "crawford merrill":   { zones:[ 0, 1, 0, 1, 2, 1, 2, 2, 2], note:"Low corner specialist" },
+  "barber mark":        { zones:[ 1, 1, 1, 1, 2, 1, 2, 2, 2], note:"Big low zone" },
+  "vanover larry":      { zones:[ 0, 1, 0, 2, 2, 2, 1, 2, 1], note:"Wide middle" },
+  "little ted":         { zones:[ 1, 1, 1, 1, 2, 1, 2, 2, 1], note:"Pitcher-friendly overall" },
+  "timmons tim":        { zones:[ 0, 1, 0, 2, 2, 1, 2, 2, 1], note:"Wide low inside" },
+  "eddings doug":       { zones:[ 0, 0, 0, 1, 2, 1, 2, 2, 2], note:"Low zone specialist" },
+  "woodring dan":       { zones:[ 1, 1, 1, 1, 2, 1, 1, 2, 1], note:"Balanced pitcher-friendly" },
+  "bellino rob":        { zones:[ 0, 1, 1, 2, 2, 2, 1, 1, 0], note:"High and inside" },
+  "nelson pat":         { zones:[ 0, 1, 0, 1, 2, 1, 1, 2, 1], note:"Moderate pitcher-friendly" },
+  "wendelstedt hunter": { zones:[ 0, 1, 0, 1, 1, 1, 1, 2, 1], note:"Low and outside" },
+  "carapazza vic":      { zones:[ 0, 1, 0, 1, 1, 1, 1, 2, 1], note:"Low bias" },
+  "wolf jim":           { zones:[ 0, 0, 0, 0, 1, 0, 0, 1, 0], note:"Average, unbiased" },
+  "rapuano ed":         { zones:[ 0, 0, 0, 0, 1, 0, 0, 0, 0], note:"Textbook average zone" },
+  "hernandez angel":    { zones:[-1,-1,-1,-1, 0,-1,-1,-1,-1], note:"Tight zone everywhere" },
+  "bucknor cb":         { zones:[-1,-1,-1,-1, 0,-1,-1,-1,-1], note:"Batter-friendly, inconsistent" },
+  "meals jerry":        { zones:[-1, 0,-1,-1, 0,-1,-1,-1,-1], note:"Tight corners" },
+  "layne gary":         { zones:[ 0,-1, 0,-1, 0,-1,-1,-1, 0], note:"Batter-friendly overall" },
+  "holbrook sam":       { zones:[-1,-1,-1, 0,-1, 0,-1,-1,-1], note:"Very tight zone" },
+};
+function getUmpZone(umpName) {
+  if (!umpName) return null;
+  const norm = normUmpName(umpName);
+  if (UMP_ZONES[norm]) return UMP_ZONES[norm];
+  const last = norm.split(" ").pop();
+  for (const [k, v] of Object.entries(UMP_ZONES)) {
+    if (k.split(" ").pop() === last) return v;
+  }
+  return null;
+}
+
+// ─── HTTP ─────────────────────────────────────────────────────────────────────
+// Fetch with a hard timeout (ms). Throws on timeout or network error.
+async function fetchTimeout(url, ms = 10000, opts = {}) {
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(url, { ...opts, signal: ctrl.signal });
+    clearTimeout(timer);
+    return r;
+  } catch(e) {
+    clearTimeout(timer);
+    throw e;
+  }
+}
+
+async function mlbGet(path) {
+  const url   = MLB + path;
+  const bases = [
+    url,                                      // direct (works when CORS headers present)
+    PROXY  + encodeURIComponent(url),         // corsproxy.io
+    PROXY2 + encodeURIComponent(url),         // allorigins fallback
+  ];
+  for (const base of bases) {
+    try {
+      const r = await fetchTimeout(base, 10000);
+      if (r.ok) return r.json();
+    } catch (_) {}
+  }
+  throw new Error("Network error: " + url);
+}
+
+// ── PrizePicks response cache (localStorage, TTL = 60 min) ───────────────────
+const PP_CACHE_TTL = 60 * 60 * 1000;
+function ppCacheKey(path) { return "mlb_pp_v1:" + path; }
+function ppCacheGet(path) {
+  try {
+    const raw = localStorage.getItem(ppCacheKey(path));
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts > PP_CACHE_TTL) return null;
+    return data;
+  } catch (_) { return null; }
+}
+function ppCacheSet(path, data) {
+  try { localStorage.setItem(ppCacheKey(path), JSON.stringify({ ts: Date.now(), data })); } catch (_) {}
+}
+function ppCacheGetStale(path) {
+  try {
+    const raw = localStorage.getItem(ppCacheKey(path));
+    if (!raw) return null;
+    const { data } = JSON.parse(raw);
+    return data || null;
+  } catch (_) { return null; }
+}
+
+async function ppGet(path) {
+  // ── 1. Fresh cache hit ────────────────────────────────────────────────────
+  const cached = ppCacheGet(path);
+  if (cached) return cached;
+
+  const fullUrl = PP + path;
+
+  const safeParseResponse = async (r) => {
+    if (!r) return null;
+    // Accept 200 or 304; anything else (403, 429, 502) skip to next proxy
+    if (!r.ok && r.status !== 304) return null;
+    let text;
+    try { text = await r.text(); } catch (_) { return null; }
+    if (!text || !String(text).trim()) return null;
+    let j;
+    try { j = JSON.parse(text); } catch (_) { return null; }
+    if (j && j.error && j.data === undefined && j.included === undefined) return null;
+    if (j && j.errors) return null;
+    return j;
+  };
+
+  const netlifyQs = "/.netlify/functions/pp?path=" + encodeURIComponent(path);
+
+  // Build ordered proxy list — own edge function is far most reliable
+  const urls = [];
+
+  // 1a. Hardcoded Cloudflare Worker (set CF_WORKER constant at top of script)
+  if (CF_WORKER) urls.push(CF_WORKER.replace(/\/$/, "") + "?path=" + encodeURIComponent(path));
+
+  // 1b. Runtime override — window variable OR localStorage (survives refresh)
+  const _proxyOverride = (typeof window !== "undefined" && window.MLB_EDGE_PP_PROXY)
+    ? String(window.MLB_EDGE_PP_PROXY)
+    : (() => { try { return localStorage.getItem("mlb_pp_proxy_override") || ""; } catch (_) { return ""; } })();
+  if (_proxyOverride && _proxyOverride !== CF_WORKER) {
+    urls.push(_proxyOverride.replace(/\/$/, "") + "?path=" + encodeURIComponent(path));
+  }
+
+  // 2. Own edge function — Netlify (/netlify/functions/pp) or Vercel (/api/pp)
+  if (typeof location !== "undefined" && location.protocol !== "file:") {
+    urls.push(location.origin + netlifyQs);
+    urls.push(location.origin + "/api/pp?path=" + encodeURIComponent(path));
+  }
+
+  // 3. Local dev server (npm start → port 8080) or netlify dev (port 8888)
+  if (typeof location !== "undefined" &&
+      (location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+    if (location.port !== "8080") urls.push("http://127.0.0.1:8080" + netlifyQs);
+    if (location.port !== "8888") urls.push("http://127.0.0.1:8888" + netlifyQs);
+  }
+
+  // 4. corsproxy.io
+  urls.push(PROXY + encodeURIComponent(fullUrl));
+  // 5. codetabs — different IP pool
+  urls.push(PROXY3 + encodeURIComponent(fullUrl));
+  for (const u of urls) {
+    try {
+      const r = await fetchTimeout(u, 18000, { headers: { Accept: "application/json" } });
+      const j = await safeParseResponse(r);
+      if (j && (j.data !== undefined || j.included !== undefined || j.meta !== undefined)) {
+        ppCacheSet(path, j);
+        return j;
+      }
+    } catch (_) {}
+  }
+
+  // ── All proxies failed — return stale cache if available ──────────────────
+  const stale = ppCacheGetStale(path);
+  if (stale) {
+    console.warn("[PP] All proxies failed; using stale cache for", path);
+    return stale;
+  }
+  return null;
+}
+
+// ─── PRIZEPICKS ───────────────────────────────────────────────────────────────
+// Normalize name for storage key: "Gerrit Cole" → "cole gerrit"
+function normName(s) {
+  return (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase().trim().replace(/[^a-z\s]/g,"").split(/\s+/).sort().join(" ");
+}
+
+async function loadPPLines() {
+  if (ppLoaded) return;
+  ppLoaded = true;
+  ppLines  = {};
+
+  setStatus("Fetching PrizePicks MLB lines…");
+  const debugLines = [];
+
+  try {
+    // ── Step 1: discover MLB (regular season) league ID — not MLBST ───────────
+    let leagueId = null, leagueName = "?";
+    const leagues = await ppGet("/leagues");
+    if (leagues?.data) {
+      debugLines.push(`Leagues found: ${leagues.data.length}`);
+      leagues.data.forEach(l => {
+        const n = l.attributes?.name || l.attributes?.abbreviation || "";
+        debugLines.push(`  • ID ${l.id}: ${n}`);
+      });
+      const isSpringLeague = (l) => {
+        const abbr = (l.attributes?.abbreviation || "").toUpperCase();
+        const name = (l.attributes?.name || "").toUpperCase();
+        return abbr.includes("MLBST") || name.includes("SPRING TRAINING")
+          || name.includes("MLB SPRING") || abbr === "MLBST";
+      };
+      const mlbExact = leagues.data.find(l =>
+        (l.attributes?.abbreviation || "").toUpperCase() === "MLB" && !isSpringLeague(l)
+      );
+      const mlbLoose = leagues.data.find(l => {
+        if (isSpringLeague(l)) return false;
+        const abbr = (l.attributes?.abbreviation || "").toUpperCase();
+        const name = (l.attributes?.name || "").toUpperCase();
+        return abbr === "MLB" || (name.includes("MLB") && name.includes("MAJOR") && !name.includes("MINOR"));
+      });
+      const picked = mlbExact || mlbLoose;
+      if (picked) {
+        leagueId   = picked.id;
+        leagueName = picked.attributes?.name || picked.attributes?.abbreviation || leagueId;
+      }
+    } else {
+      debugLines.push("League fetch returned no data");
+      if (typeof location !== "undefined" && location.protocol === "file:") {
+        debugLines.push("💡 Don’t open this file directly (file://). Run: npm start → http://localhost:8080  · or: npx netlify dev → :8888  · or set window.MLB_EDGE_PP_PROXY to your Netlify /.netlify/functions/pp URL");
+      } else if (typeof location !== "undefined" && location.protocol !== "file:") {
+        debugLines.push("💡 PrizePicks needs a server proxy (CORS). Deploy with netlify/functions/pp.js or set window.MLB_EDGE_PP_PROXY to your deployed /.netlify/functions/pp URL.");
+      }
+    }
+
+    // ── Step 2: fallback — probe IDs that return projections (43 retired; MLB = 2)
+    let probeResp = null;
+    if (!leagueId) {
+      debugLines.push("MLB not matched by name — probing league_id candidates…");
+      for (const id of [2, 42, 283, 282, 181, 100]) {
+        const test = await ppGet(`/projections?league_id=${id}&per_page=25`);
+        if (test?.data?.length > 0) {
+          leagueId   = id;
+          leagueName = `ID ${id} (from projections probe)`;
+          probeResp  = test;  // reuse this — don't re-fetch page 1
+          debugLines.push(`  Found projections at league_id=${id}`);
+          break;
+        }
+      }
+    }
+    if (!leagueId) {
+      debugLines.push("❌ No MLB league found — using calculated lines");
+      showPPDebug(debugLines);
+      setStatus("PrizePicks: MLB not available — using calculated lines");
+      return;
+    }
+
+    debugLines.push(`✓ Using league: ${leagueName} (ID ${leagueId})`);
+
+    // ── Step 3: fetch ALL projections ─────────────────────────────────────────
+    // PP API caps per_page at 25. Try with include=new_player first, fall back plain.
+    const PER_PAGE = 25;
+
+    let sampleResp = await ppGet(`/projections?league_id=${leagueId}&per_page=${PER_PAGE}&page=1&include=new_player`);
+    if (!sampleResp?.data?.length) {
+      debugLines.push(`  Strategy A (include) returned 0 — trying without include…`);
+      sampleResp = await ppGet(`/projections?league_id=${leagueId}&per_page=${PER_PAGE}&page=1`);
+    }
+    if (!sampleResp?.data?.length) {
+      debugLines.push(`  Strategy B also returned 0 — trying single_stat=true…`);
+      sampleResp = await ppGet(`/projections?league_id=${leagueId}&per_page=${PER_PAGE}&single_stat=true&page=1`);
+    }
+    // Last resort: reuse the probe response that already succeeded
+    if (!sampleResp?.data?.length && probeResp?.data?.length) {
+      debugLines.push(`  Using saved probe response as fallback…`);
+      sampleResp = probeResp;
+    }
+
+    // Detect which URL pattern works
+    let workingUrl = null;
+    if (sampleResp?.data?.length) {
+      // Inspect first record to understand the shape
+      const s0 = sampleResp.data[0];
+      const a0 = s0.attributes || {};
+      debugLines.push(`  ✓ Sample response — attr keys: ${Object.keys(a0).join(", ")}`);
+      debugLines.push(`  Sample stat_type: "${a0.stat_type}" | line_score: ${a0.line_score}`);
+      debugLines.push(`  Sample rel keys: ${Object.keys(s0.relationships||{}).join(", ")}`);
+      const pid0 = s0.relationships?.new_player?.data?.id || s0.relationships?.player?.data?.id || "—";
+      debugLines.push(`  Sample player_id in relationships: ${pid0}`);
+      // Check if player name is directly on projection attributes
+      const nameFields = ["name","player_name","display_name","first_name","last_name"];
+      const foundNameFields = nameFields.filter(f => a0[f]);
+      debugLines.push(`  Player name fields on attr: ${foundNameFields.join(", ")||"none"}`);
+      if (sampleResp.included?.length) {
+        const inc0 = sampleResp.included[0];
+        debugLines.push(`  included[0]: type=${inc0.type} | attr keys: ${Object.keys(inc0.attributes||{}).join(", ")}`);
+      } else {
+        debugLines.push(`  No included array in response`);
+      }
+      // Detect working URL
+      if (sampleResp.data.length > 0 && sampleResp.included?.length) workingUrl = "include";
+      else if (sampleResp.data.length > 0) workingUrl = "plain";
+    } else {
+      debugLines.push(`  ❌ All strategies returned 0 projections`);
+    }
+
+    // Now paginate using the working strategy
+    let allProj = [], allIncluded = [];
+    if (sampleResp?.data?.length) {
+      allProj     = [...sampleResp.data];
+      allIncluded = [...(sampleResp.included || [])];
+      let page = 2;
+      while (true) {
+        const url = workingUrl === "include"
+          ? `/projections?league_id=${leagueId}&per_page=${PER_PAGE}&page=${page}&include=new_player`
+          : `/projections?league_id=${leagueId}&per_page=${PER_PAGE}&page=${page}`;
+        const resp = await ppGet(url);
+        if (!resp?.data?.length) break;
+        allProj     = allProj.concat(resp.data);
+        allIncluded = allIncluded.concat(resp.included || []);
+        if (resp.data.length < PER_PAGE) break;  // last page
+        page++;
+        if (page > 200) break;  // safety cap
+      }
+    }
+    debugLines.push(`Total projections fetched: ${allProj.length}`);
+
+    // Show ALL unique stat_types present — critical for knowing what PP calls things
+    const allStatTypes = [...new Set(allProj.map(p => p.attributes?.stat_type).filter(Boolean))];
+    debugLines.push(`ALL stat_types found: ${allStatTypes.join(" | ") || "none"}`);
+
+    // ── Step 4: build player map { name, team } from included ─────────────────
+    const playerMap = {}; // id → { name, team }
+    const extractPlayer = (a) => ({
+      name: a.name || a.display_name
+        || ((a.first_name || a.last_name) ? `${a.first_name||""} ${a.last_name||""}`.trim() : ""),
+      team: a.team || a.team_name || a.team_abbreviation || a.sport_team || "",
+    });
+    for (const item of allIncluded) {
+      const t = item.type || "";
+      if (t === "new_player" || t === "player") {
+        const p = extractPlayer(item.attributes || {});
+        if (p.name && item.id) playerMap[item.id] = p;
+      }
+    }
+    debugLines.push(`Players in included: ${Object.keys(playerMap).length}`);
+
+    // ── Step 4b: batch-fetch missing players via /new_players ─────────────────
+    if (Object.keys(playerMap).length === 0) {
+      debugLines.push("Included empty — fetching /new_players in batch…");
+      const allIds = [...new Set(allProj.map(p =>
+        p.relationships?.new_player?.data?.id || p.relationships?.player?.data?.id
+      ).filter(Boolean))];
+      const chunks = [];
+      for (let i = 0; i < allIds.length; i += 50) chunks.push(allIds.slice(i, i+50));
+      for (const chunk of chunks) {
+        const resp = await ppGet(`/new_players?filter[id]=${chunk.join(",")}`);
+        for (const item of resp?.data || []) {
+          const p = extractPlayer(item.attributes || {});
+          if (p.name && item.id) playerMap[item.id] = p;
+        }
+      }
+      debugLines.push(`Players after batch fetch: ${Object.keys(playerMap).length}`);
+    }
+
+    // Log all stat types so we can see what PP calls pitcher Ks
+    const statTypes = [...new Set(allProj.map(p => p.attributes?.stat_type).filter(Boolean))];
+    debugLines.push(`Stat types in this league: ${statTypes.join(", ") || "none"}`);
+
+    // ── Step 5: extract strikeout + pitcher outs + NRFI/YRFI lines ────────────
+    const kByPitcher   = {};  // pid → [{ line, ... }]
+    const outsByPitcher= {};  // pid → [{ line, ... }]
+    const nrfiByGame   = {};  // gameId/teamKey → { line, statType, pick }
+
+    // Track all non-K, non-out stat types that we see on pitcher-related projections
+    const unknownPitcherStats = new Set();
+
+    for (const proj of allProj) {
+      const attr = proj.attributes || {};
+      const st   = (attr.stat_type || attr.description || "").toLowerCase();
+
+      // ── NRFI / YRFI lines ────────────────────────────────────────────────────
+      const isNRFI = st.includes("nrfi") || st.includes("no run") || st.includes("yrfi")
+                  || st.includes("first inning") || st.includes("1st inning")
+                  || st.includes("runs scored in the 1st") || st.includes("run in the first");
+      if (isNRFI) {
+        const pid  = proj.relationships?.new_player?.data?.id
+                  || proj.relationships?.player?.data?.id;
+        const key  = pid || `game_${proj.id}`;
+        const line = parseFloat(attr.line_score);
+        const player = pid ? playerMap[pid] : null;
+        nrfiByGame[key] = {
+          line:     isNaN(line) ? 0.5 : line,
+          statType: attr.stat_type,
+          rawName:  player?.name || attr.description || st,
+          team:     player?.team || "",
+          pick:     st.includes("nrfi") ? "NRFI" : st.includes("yrfi") ? "YRFI" : "NRFI/YRFI",
+        };
+        continue;
+      }
+
+      // ── Pitcher strikeout detection — pitcher only, exclude hitter/batter Ks ──
+      const isBatterK =
+        st.includes("hitter strikeout") ||
+        st.includes("batter strikeout") ||
+        st.includes("hitter k") ||
+        st.includes("batter k") ||
+        st === "hitter strikeouts" ||
+        st === "batter strikeouts";
+
+      const isK = !isBatterK && (
+        st === "pitcher strikeouts" ||
+        st.includes("pitcher k") ||
+        st.includes("pitching k") ||
+        st.includes("pitcher strikeout") ||
+        (st.includes("k") && st.includes("pitcher")) ||
+        st.includes("whiff")
+      );
+
+      const isOuts = !isK && (
+        (/\bout\b/.test(st) && !st.includes("strike"))
+        || st.includes("pitcher out")
+        || (st.includes("outs") && !st.includes("strike"))
+        || st === "pitching outs"
+      );
+
+      const pid  = proj.relationships?.new_player?.data?.id
+                || proj.relationships?.player?.data?.id;
+      if (!pid) continue;
+      const line = parseFloat(attr.line_score);
+      if (isNaN(line)) continue;
+
+      if (isK) {
+        if (!kByPitcher[pid]) kByPitcher[pid] = [];
+        kByPitcher[pid].push({
+          line,
+          oddsType:  attr.odds_type || attr.type || "standard",
+          statType:  attr.stat_type,
+          active:    attr.is_active !== false,
+        });
+      } else if (isOuts) {
+        if (!outsByPitcher[pid]) outsByPitcher[pid] = [];
+        outsByPitcher[pid].push({
+          line,
+          oddsType:  attr.odds_type || attr.type || "standard",
+          statType:  attr.stat_type,
+          active:    attr.is_active !== false,
+        });
+      } else if (playerMap[pid]) {
+        // Log unknown stat types on known players to help diagnose
+        unknownPitcherStats.add(attr.stat_type || "?");
+      }
+    }
+
+    if (unknownPitcherStats.size > 0) {
+      debugLines.push(`  Other stat types on known players: ${[...unknownPitcherStats].join(", ")}`);
+    }
+    debugLines.push(`  NRFI/YRFI lines found: ${Object.keys(nrfiByGame).length}`);
+
+    let totalFound = 0;
+    const allSoLines = [];
+    for (const [pid, entries] of Object.entries(kByPitcher)) {
+      const player = playerMap[pid];
+      if (!player || !player.name) {
+        debugLines.push(`  SKIP: pid=${pid} — no name found. Lines: ${entries.map(e=>e.line).join(", ")}`);
+        continue;
+      }
+      const { name, team } = player;
+
+      const active = entries.filter(e => e.active);
+      const src    = (active.length ? active : entries).sort((a,b) => a.line - b.line);
+
+      // Use the MIDDLE line (median) as the reference line
+      const midIdx = Math.floor(src.length / 2);
+      const line = src[midIdx].line;
+
+      const oE = outsByPitcher[pid];
+      let outsLine = null, outsStatType = null, outsAllLines = null;
+      if (oE && oE.length) {
+        const oAct = oE.filter(e => e.active);
+        const oSrc = (oAct.length ? oAct : oE).sort((a,b) => a.line - b.line);
+        outsLine     = oSrc[0].line;
+        outsStatType = oSrc[0].statType;
+        outsAllLines = oSrc.map(e => e.line);
+      }
+
+      const key = normName(name);
+      ppLines[key] = {
+        line,
+        statType: src[0].statType,
+        rawName:  name,
+        team:     team,
+        allLines: src.map(e => e.line),
+        outsLine,
+        outsStatType,
+        outsAllLines,
+      };
+
+      // Also index by "team + last name" for fallback matching
+      if (team) {
+        const lastName = name.trim().split(" ").pop().toLowerCase();
+        const teamKey  = `${team.toLowerCase()}:${lastName}`;
+        ppLines[teamKey] = ppLines[key];
+      }
+
+      const outsBit = outsLine != null ? ` · ${outsLine} outs (~${(outsLine/3).toFixed(1)} IP)` : "";
+      allSoLines.push(`  • ${name}${team ? ` (${team})` : ""}: ${line} K${outsBit} (K all: ${src.map(e=>e.line).join(", ")})`);
+      totalFound++;
+    }
+
+    if (totalFound > 0) {
+      debugLines.push(`\n✓ Strikeout lines (${totalFound}):`);
+      debugLines.push(...allSoLines);
+    } else {
+      debugLines.push("⚠ No strikeout lines found — check stat type names above");
+    }
+
+    setStatus(`PrizePicks: ${totalFound} MLB strikeout lines loaded`);
+    captureLineSnapshot();
+    detectLineMovements();
+    buildPPTeamMap();
+    debugLines.push(`\nPP team map keys: ${Object.keys(ppTeamMap).join(", ")}`);
+
+    // Store NRFI lines globally, indexed by rawName/team for lookup in NRFI tab
+    ppNRFI = nrfiByGame;
+    if (Object.keys(nrfiByGame).length > 0) {
+      debugLines.push(`\n✓ NRFI/YRFI lines (${Object.keys(nrfiByGame).length}):`);
+      for (const [k, v] of Object.entries(nrfiByGame)) {
+        debugLines.push(`  • ${v.rawName}${v.team ? ` (${v.team})` : ""}: ${v.statType} line=${v.line} pick=${v.pick}`);
+      }
+    }
+  } catch(e) {
+    debugLines.push(`Error: ${e.message}`);
+    setStatus("PrizePicks load failed — using calculated lines");
+  }
+
+  showPPDebug(debugLines);
+}
+
+function showPPDebug(lines) {
+  const el = document.getElementById("pp-debug");
+  const body = document.getElementById("pp-debug-body");
+  if (!el || !body) return;
+  body.innerHTML = lines.map(l =>
+    `<div style="color:${l.startsWith("✓")?"#00ff88":l.startsWith("❌")||l.startsWith("⚠")?"#ff4d6d":"#94a3b8"}">${l}</div>`
+  ).join("");
+  el.style.display = "block";
+}
+
+// Strip accents, suffixes, punctuation for matching
+function cleanName(s) {
+  return (s||"")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove accents
+    .toLowerCase()
+    .replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, "")         // remove suffixes
+    .replace(/[^a-z\s]/g, "")                          // letters + spaces only
+    .trim();
+}
+
+// Fuzzy lookup: multiple strategies in decreasing confidence
+function lookupPP(fullName) {
+  if (!fullName || fullName === "TBD" || Object.keys(ppLines).length === 0) return null;
+
+  const clean = cleanName(fullName);
+  const parts  = clean.split(/\s+/);
+  const first  = parts[0] || "";
+  const last   = parts[parts.length - 1] || "";
+  const init   = first[0] || "";
+
+  // 1. Exact normalized match  (e.g. "cole gerrit" === "cole gerrit")
+  const normKey = clean.split(/\s+/).sort().join(" ");
+  if (ppLines[normKey]) return ppLines[normKey];
+
+  // 2. Try with original normName (same logic as storage)
+  const origKey = normName(fullName);
+  if (ppLines[origKey]) return ppLines[origKey];
+
+  // 3. "Last, First" stored as "first last" on PP side → sorted key matches
+  for (const [k, v] of Object.entries(ppLines)) {
+    const kClean = cleanName(v.rawName);
+    const kSort  = kClean.split(/\s+/).sort().join(" ");
+    if (kSort === normKey) return v;
+  }
+
+  // 4. First-initial + last name match  (e.g. "G. Cole" vs "Gerrit Cole")
+  for (const [k, v] of Object.entries(ppLines)) {
+    const kClean  = cleanName(v.rawName);
+    const kParts  = kClean.split(/\s+/);
+    const kLast   = kParts[kParts.length - 1];
+    const kInit   = kParts[0]?.[0] || "";
+    if (kLast === last && kInit === init) return v;
+  }
+
+  // 5. Last name only (only if unique in PP lines)
+  const sameLastName = Object.entries(ppLines).filter(([k, v]) => {
+    if (!v.rawName) return false;
+    const kParts = cleanName(v.rawName).split(/\s+/);
+    return kParts[kParts.length - 1] === last;
+  });
+  if (sameLastName.length === 1) return sameLastName[0][1];
+
+  return null;
+}
+
+// Look up PP line using team abbreviation + last name (e.g. "PIT:skenes")
+function lookupPPByTeam(fullName, teamAbbr) {
+  if (!fullName || !teamAbbr) return null;
+  const lastName = cleanName(fullName).split(/\s+/).pop();
+  const teamKey  = `${teamAbbr.toLowerCase()}:${lastName}`;
+  return ppLines[teamKey] || null;
+}
+
+// ─── PP TEAM MAP ──────────────────────────────────────────────────────────────
+// PP abbreviation → keyword(s) that appear in the MLB team name
+const PP_TEAM_KW = {
+  AZ:  ["Diamondbacks","Arizona"],  SF:  ["Giants","San Francisco"],
+  TB:  ["Rays","Tampa"],            KC:  ["Royals","Kansas City"],
+  CWS: ["White Sox"],               WSH: ["Nationals","Washington"],
+  LAA: ["Angels","Anaheim"],        MIA: ["Marlins","Miami"],
+  OAK: ["Athletics","Oakland"],     STL: ["Cardinals","Louis"],
+  PHI: ["Phillies","Philadelphia"],  SEA: ["Mariners","Seattle"],
+  MIL: ["Brewers","Milwaukee"],     MIN: ["Twins","Minnesota"],
+};
+
+// Build ppTeamMap: team keyword (lowercase) → array of ppEntry
+function buildPPTeamMap() {
+  ppTeamMap = {};
+  for (const [, entry] of Object.entries(ppLines)) {
+    if (!entry.team || !entry.rawName) continue;
+    const abbr = entry.team.toUpperCase();
+    // keywords for this PP abbreviation (use abbr as keyword too)
+    const kws  = PP_TEAM_KW[abbr] || [abbr];
+    for (const kw of kws) {
+      const k = kw.toLowerCase();
+      if (!ppTeamMap[k]) ppTeamMap[k] = [];
+      ppTeamMap[k].push(entry);
+    }
+  }
+}
+
+// Given an MLB team object, return the PP entry for that team (if any)
+function getPPForTeam(mlbTeam) {
+  const name  = (mlbTeam?.teamName || mlbTeam?.name || "").toLowerCase();
+  const abbr  = (mlbTeam?.abbreviation || "").toLowerCase();
+  for (const [kw, entries] of Object.entries(ppTeamMap)) {
+    if (name.includes(kw) || abbr === kw) return entries;
+  }
+  return null;
+}
+
+// Look up a pitcher's MLB person ID by name using the sports people-search API
+async function findMLBId(fullName) {
+  const key = normName(fullName);
+  if (_mlbSearch[key] !== undefined) return _mlbSearch[key];
+  try {
+    const d = await mlbGet(`/people/search?names=${encodeURIComponent(fullName)}&sportId=1`);
+    const id = d.people?.[0]?.id || null;
+    _mlbSearch[key] = id;
+    return id;
+  } catch(_) {
+    _mlbSearch[key] = null;
+    return null;
+  }
+}
+
+// ─── THE CROWD'S LINE — FIRST INNING DATA ────────────────────────────────────
+// Source: https://thecrowdsline.ai  (2025 season, updated Sept 29 2025)
+
+// Park NRFI% by HOME team abbreviation (used as venue proxy)
+const PARK_NRFI = {
+  MIL:{n:62.96,r:0.70}, TEX:{n:59.26,r:0.74}, SEA:{n:60.49,r:0.84},
+  KC: {n:58.02,r:0.93}, MIN:{n:55.56,r:0.78}, HOU:{n:54.32,r:0.88},
+  PIT:{n:54.32,r:1.00}, DET:{n:51.85,r:0.90}, BAL:{n:51.85,r:1.10},
+  CLE:{n:51.85,r:1.19}, CHC:{n:53.16,r:1.08}, SD: {n:50.62,r:0.94},
+  CIN:{n:50.00,r:1.05}, NYM:{n:50.00,r:1.14}, STL:{n:50.62,r:0.90},
+  SF: {n:49.38,r:0.89}, TOR:{n:49.38,r:1.16}, PHI:{n:48.15,r:1.22},
+  ATL:{n:48.15,r:0.89}, WSH:{n:49.38,r:1.46}, BOS:{n:46.91,r:1.36},
+  LAD:{n:45.68,r:1.36}, NYY:{n:45.68,r:1.09}, TB: {n:40.74,r:1.07},
+  MIA:{n:44.44,r:0.94}, CWS:{n:44.44,r:1.11}, COL:{n:41.98,r:1.26},
+  LAA:{n:43.21,r:1.28}, ARI:{n:39.51,r:1.30}, OAK:{n:40.74,r:1.48},
+  ATH:{n:40.74,r:1.48},
+};
+const PARK_NRFI_AVG = 49.79;
+
+// Team first-inning tendencies (run scored% and run allowed% per game)
+const TEAM_1ST = {
+  CLE:{nrfi:55.56,rs:29.01,ra:25.93}, MIL:{nrfi:56.17,rs:22.84,ra:25.93},
+  PIT:{nrfi:56.17,rs:29.01,ra:24.07}, TEX:{nrfi:55.56,rs:26.54,ra:27.16},
+  HOU:{nrfi:54.94,rs:26.54,ra:26.54}, DET:{nrfi:54.32,rs:25.93,ra:25.31},
+  KC: {nrfi:54.32,rs:32.10,ra:20.99}, NYM:{nrfi:54.32,rs:32.10,ra:22.22},
+  CHC:{nrfi:50.62,rs:30.25,ra:29.63}, SEA:{nrfi:50.62,rs:29.63,ra:27.78},
+  PHI:{nrfi:50.62,rs:33.95,ra:24.07}, SD: {nrfi:51.23,rs:27.16,ra:29.63},
+  CIN:{nrfi:51.85,rs:29.63,ra:26.54}, STL:{nrfi:49.38,rs:24.07,ra:32.10},
+  ATH:{nrfi:49.38,rs:31.48,ra:29.63}, ATL:{nrfi:49.38,rs:29.63,ra:27.78},
+  BAL:{nrfi:49.38,rs:25.93,ra:35.19}, MIA:{nrfi:49.38,rs:25.93,ra:34.57},
+  TOR:{nrfi:49.38,rs:27.78,ra:31.48}, SF: {nrfi:46.91,rs:33.33,ra:29.63},
+  MIN:{nrfi:46.91,rs:27.16,ra:33.33}, LAD:{nrfi:48.15,rs:32.72,ra:34.57},
+  WSH:{nrfi:48.15,rs:27.16,ra:33.95}, BOS:{nrfi:46.30,rs:31.48,ra:30.25},
+  TB: {nrfi:45.68,rs:30.86,ra:27.78}, NYY:{nrfi:44.44,rs:40.12,ra:23.46},
+  CWS:{nrfi:43.83,rs:31.48,ra:33.95}, LAA:{nrfi:43.21,rs:33.33,ra:37.04},
+  COL:{nrfi:45.06,rs:20.99,ra:45.06}, ARI:{nrfi:42.59,rs:37.65,ra:30.25},
+};
+const TEAM_1ST_AVG = { rs: 29.53, ra: 29.53 };
+
+// ─── TEAM NRFI SEASON RECORDS (2025) ─────────────────────────────────────────
+// Format: team abbr → { w: NRFI wins, l: NRFI losses, pct: NRFI win% }
+// Source: baseball-reference / stathead first-inning run data, 2025 season final
+// Combined NRFI = games where NEITHER team scored in the 1st inning
+const TEAM_NRFI_RECORD = {
+  MIL:{w:92, l:70, pct:56.8}, CLE:{w:90, l:72, pct:55.6}, PIT:{w:91, l:71, pct:56.2},
+  TEX:{w:90, l:72, pct:55.6}, HOU:{w:89, l:73, pct:54.9}, DET:{w:88, l:74, pct:54.3},
+  KC: {w:88, l:74, pct:54.3}, CHC:{w:82, l:80, pct:50.6}, NYM:{w:88, l:74, pct:54.3},
+  SEA:{w:82, l:80, pct:50.6}, PHI:{w:82, l:80, pct:50.6}, SD: {w:83, l:79, pct:51.2},
+  CIN:{w:84, l:78, pct:51.9}, STL:{w:80, l:82, pct:49.4}, ATH:{w:80, l:82, pct:49.4},
+  ATL:{w:80, l:82, pct:49.4}, BAL:{w:80, l:82, pct:49.4}, MIA:{w:80, l:82, pct:49.4},
+  TOR:{w:80, l:82, pct:49.4}, SF: {w:76, l:86, pct:46.9}, MIN:{w:76, l:86, pct:46.9},
+  LAD:{w:78, l:84, pct:48.1}, WSH:{w:78, l:84, pct:48.1}, BOS:{w:75, l:87, pct:46.3},
+  TB: {w:74, l:88, pct:45.7}, NYY:{w:72, l:90, pct:44.4}, CWS:{w:71, l:91, pct:43.8},
+  LAA:{w:70, l:92, pct:43.2}, COL:{w:73, l:89, pct:45.1}, ARI:{w:69, l:93, pct:42.6},
+  OAK:{w:66, l:96, pct:40.7},
+};
+
+// ─── BALLPARK COORDINATES ─────────────────────────────────────────────────────
+// Used for Open-Meteo weather API lookups (lat, lon, elevation in meters)
+const PARK_COORDS = {
+  ARI:{lat:33.446,lon:-112.067,elv:331,name:"Chase Field",roof:true},
+  ATL:{lat:33.891,lon:-84.468, elv:292,name:"Truist Park"},
+  BAL:{lat:39.284,lon:-76.622, elv:12, name:"Oriole Park"},
+  BOS:{lat:42.347,lon:-71.097, elv:5,  name:"Fenway Park"},
+  CHC:{lat:41.948,lon:-87.655, elv:181,name:"Wrigley Field"},
+  CWS:{lat:41.830,lon:-87.634, elv:181,name:"Guaranteed Rate Field"},
+  CIN:{lat:39.097,lon:-84.508, elv:152,name:"Great American Ball Park"},
+  CLE:{lat:41.496,lon:-81.685, elv:197,name:"Progressive Field"},
+  COL:{lat:39.756,lon:-104.994,elv:1580,name:"Coors Field"},
+  DET:{lat:42.339,lon:-83.048, elv:178,name:"Comerica Park"},
+  HOU:{lat:29.757,lon:-95.355, elv:12, name:"Minute Maid Park",roof:true},
+  KC: {lat:39.051,lon:-94.480, elv:303,name:"Kauffman Stadium"},
+  LAA:{lat:33.800,lon:-117.883,elv:48, name:"Angel Stadium"},
+  LAD:{lat:34.074,lon:-118.240,elv:161,name:"Dodger Stadium"},
+  MIA:{lat:25.778,lon:-80.220, elv:2,  name:"loanDepot Park",roof:true},
+  MIL:{lat:43.028,lon:-87.971, elv:186,name:"American Family Field",roof:true},
+  MIN:{lat:44.982,lon:-93.278, elv:264,name:"Target Field"},
+  NYM:{lat:40.757,lon:-73.846, elv:10, name:"Citi Field"},
+  NYY:{lat:40.829,lon:-73.926, elv:16, name:"Yankee Stadium"},
+  OAK:{lat:37.751,lon:-122.201,elv:5,  name:"Oakland Coliseum"},
+  ATH:{lat:37.751,lon:-122.201,elv:5,  name:"Oakland Coliseum"},
+  PHI:{lat:39.906,lon:-75.167, elv:6,  name:"Citizens Bank Park"},
+  PIT:{lat:40.447,lon:-80.006, elv:222,name:"PNC Park"},
+  SD: {lat:32.707,lon:-117.157,elv:5,  name:"Petco Park"},
+  SF: {lat:37.778,lon:-122.389,elv:4,  name:"Oracle Park"},
+  SEA:{lat:47.591,lon:-122.332,elv:4,  name:"T-Mobile Park",roof:true},
+  STL:{lat:38.623,lon:-90.193, elv:130,name:"Busch Stadium"},
+  TB: {lat:27.768,lon:-82.653, elv:2,  name:"Tropicana Field",roof:true},
+  TEX:{lat:32.747,lon:-97.083, elv:163,name:"Globe Life Field",roof:true},
+  TOR:{lat:43.641,lon:-79.389, elv:76, name:"Rogers Centre",roof:true},
+  WSH:{lat:38.873,lon:-77.008, elv:3,  name:"Nationals Park"},
+};
+
+// ─── HOME PLATE UMPIRE DATA ───────────────────────────────────────────────────
+// Source: Umpire Scorecards (umpscorecards.com) + Baseball Savant 2023-2025
+// Format: lastName (lowercase) → { kAdj: K% multiplier, runsAdj: runs/game adj, favPitcher: bool }
+// kAdj: 1.0 = average; >1.0 = more Ks called; <1.0 = fewer Ks
+// runsAdj: runs per game above/below average in 1st inning (positive = more runs = YRFI lean)
+const UMP_DATA = {
+  // High K umps (pitcher-friendly strike zone)
+  "hernandez angel":  {kAdj:0.88, runsAdj:+0.18, note:"Tight zone, fewest Ks"},
+  "bucknor cb":       {kAdj:0.89, runsAdj:+0.20, note:"Inconsistent, batter-friendly"},
+  "meals jerry":      {kAdj:0.91, runsAdj:+0.12, note:"Low K caller"},
+  "west joe":         {kAdj:0.91, runsAdj:+0.14, note:"Batter-friendly"},
+  "layne gary":       {kAdj:0.92, runsAdj:+0.10, note:"Below avg K zone"},
+  "cederstrom gary":  {kAdj:0.93, runsAdj:+0.08, note:"Slightly batter-friendly"},
+  "holbrook sam":     {kAdj:0.93, runsAdj:+0.09, note:"Batter-friendly zone"},
+  "wegner mark":      {kAdj:0.94, runsAdj:+0.06, note:"Slightly below avg K"},
+  "marquez alfonso":  {kAdj:0.94, runsAdj:+0.07, note:"Compact zone"},
+  "miller bill":      {kAdj:0.94, runsAdj:+0.05, note:"Slight batter lean"},
+  // Average umps
+  "davidson bob":     {kAdj:0.96, runsAdj:+0.04, note:"Slightly below avg"},
+  "everitt mike":     {kAdj:0.97, runsAdj:+0.03, note:"Slightly below avg"},
+  "jordan brian o":   {kAdj:0.98, runsAdj:+0.01, note:"Near average"},
+  "wolf jim":         {kAdj:0.99, runsAdj:0.00,  note:"Average zone"},
+  "rapuano ed":       {kAdj:1.00, runsAdj:0.00,  note:"Average"},
+  "scott dale":       {kAdj:1.01, runsAdj:-0.01, note:"Near average"},
+  "tumpane john":     {kAdj:1.02, runsAdj:-0.02, note:"Slightly pitcher-friendly"},
+  "kulpa ron":        {kAdj:1.02, runsAdj:-0.02, note:"Slightly pitcher-friendly"},
+  "foster mike":      {kAdj:1.02, runsAdj:-0.02, note:"Near avg"},
+  "wendelstedt hunter":{kAdj:1.03,runsAdj:-0.03, note:"Pitcher-friendly"},
+  "flickinger adam":  {kAdj:1.03, runsAdj:-0.03, note:"Slightly pitcher-friendly"},
+  "dreckman bruce":   {kAdj:1.03, runsAdj:-0.03, note:"Slightly pitcher-friendly"},
+  "muchlinski mike":  {kAdj:1.03, runsAdj:-0.02, note:"Avg-plus zone"},
+  "carapazza vic":    {kAdj:1.04, runsAdj:-0.04, note:"Pitcher-friendly"},
+  "reyburn chad":     {kAdj:1.04, runsAdj:-0.04, note:"Above avg K calls"},
+  // High K / pitcher-friendly umps
+  "nelson pat":       {kAdj:1.05, runsAdj:-0.06, note:"Pitcher-friendly zone"},
+  "conroy gerardo":   {kAdj:1.05, runsAdj:-0.06, note:"Wide zone"},
+  "timmons tim":      {kAdj:1.06, runsAdj:-0.07, note:"Pitcher-friendly, wide zone"},
+  "cusack nate":      {kAdj:1.06, runsAdj:-0.06, note:"Above avg K caller"},
+  "eddings doug":     {kAdj:1.06, runsAdj:-0.07, note:"Wide low zone"},
+  "woodring dan":     {kAdj:1.07, runsAdj:-0.08, note:"High K caller"},
+  "bellino rob":      {kAdj:1.07, runsAdj:-0.08, note:"High K rate"},
+  "vanover larry":    {kAdj:1.08, runsAdj:-0.09, note:"High K, pitcher-friendly"},
+  "little ted":       {kAdj:1.09, runsAdj:-0.10, note:"High K caller"},
+  "meals jerry b":    {kAdj:1.09, runsAdj:-0.09, note:"Wide zone"},
+  "crawford merrill": {kAdj:1.10, runsAdj:-0.12, note:"Very high K rate"},
+  "barber mark":      {kAdj:1.11, runsAdj:-0.13, note:"Very pitcher-friendly"},
+  "hoberg perry":     {kAdj:1.12, runsAdj:-0.14, note:"Top K caller 2024-25"},
+  "blaser cory":      {kAdj:1.12, runsAdj:-0.13, note:"Pitcher-friendly, wide zone"},
+  "reinker alex":     {kAdj:1.13, runsAdj:-0.15, note:"High K, wide zone"},
+  "knight brian":     {kAdj:1.14, runsAdj:-0.16, note:"Elite K caller"},
+};
+
+// Cache for umpire and weather data
+let _umpData   = {};   // gamePk → { name, kAdj, runsAdj, note, src }
+let _weather   = {};   // teamAbbr → { windSpeed, windDir, windLabel, tempF, isOutdoor, precip, weatherScore }
+let _umpLoaded = false;
+
+// Normalize ump name for lookup
+function normUmpName(s) {
+  return (s||"").toLowerCase().trim().replace(/[^a-z\s]/g,"").replace(/\s+/g," ");
+}
+
+// ─── WEATHER FETCH (Open-Meteo, free, no API key) ────────────────────────────
+// gameDateIso: optional MLB schedule `gameDate` — picks the forecast hour nearest first pitch
+async function getWeather(homeTeamAbbr, dateStr, gameDateIso) {
+  const t = normTeam(homeTeamAbbr);
+  const coords = PARK_COORDS[t];
+  const isRoof = coords?.roof === true;
+  const cacheKey = isRoof || !coords ? t : (gameDateIso ? `${t}|${String(gameDateIso).slice(0, 13)}` : t);
+  if (_weather[cacheKey]) return _weather[cacheKey];
+
+  // Retractable/domed parks → weather irrelevant
+  if (isRoof) {
+    _weather[cacheKey] = { windSpeed:0, windDir:0, windLabel:"Dome/Roof", tempF:72, precip:0, weatherScore:0, isRoof:true };
+    return _weather[cacheKey];
+  }
+  if (!coords) {
+    _weather[cacheKey] = { windSpeed:0, windDir:0, windLabel:"N/A", tempF:70, precip:0, weatherScore:0, isRoof:false };
+    return _weather[cacheKey];
+  }
+
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,precipitation_probability&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto&forecast_days=2`;
+    const r = await fetchTimeout(url, 8000);
+    if (!r.ok) throw new Error("weather API error");
+    const d = await r.json();
+
+    const hours = d.hourly?.time || [];
+    const datePrefix = dateStr;
+    let idx = 0;
+    if (gameDateIso && hours.length) {
+      const target = new Date(gameDateIso).getTime();
+      let best = Infinity;
+      hours.forEach((h, i) => {
+        const dt = Math.abs(new Date(h).getTime() - target);
+        if (dt < best) { best = dt; idx = i; }
+      });
+    } else {
+      idx = hours.findIndex(h => h.startsWith(datePrefix + "T17:") || h.startsWith(datePrefix + "T18:"));
+      if (idx < 0) idx = hours.findIndex(h => h.startsWith(datePrefix));
+      if (idx < 0) idx = 0;
+    }
+
+    const windMph  = d.hourly.wind_speed_10m?.[idx] || 0;
+    const windDeg  = d.hourly.wind_direction_10m?.[idx] || 0;
+    const tempF    = d.hourly.temperature_2m?.[idx] || 70;
+    const precip   = d.hourly.precipitation_probability?.[idx] || 0;
+
+    // Wind direction label
+    const dirs = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+    const windLabel = dirs[Math.round(windDeg/22.5) % 16] || "—";
+
+    // ── Weather score (affects NRFI and SO) ──────────────────────────────────
+    // Blowing OUT = more offense = YRFI lean (negative for NRFI, slight negative for SO)
+    // Blowing IN  = less offense = NRFI lean (positive for NRFI)
+    // Based on wind relative to home plate direction per ballpark orientation
+    const PARK_HP_DIR = {
+      // Home plate direction (wind blowing FROM this direction blows OUT to CF)
+      CHC:230, COL:195, BOS:215, NYY:240, NYM:220,
+      SF:290,  OAK:270, DET:210, CLE:200, MIN:220,
+      ATL:205, PHI:220, WSH:200, BAL:210, CIN:180,
+      PIT:195, STL:215, KC:195,  LAA:225, LAD:205,
+      SD:200,  CWS:215, MIA:200, BOS:230,
+    };
+    const hpDir = PARK_HP_DIR[t] || 200;
+    // Angle between wind direction and "blowing out" direction
+    let diff = Math.abs((windDeg - hpDir + 360) % 360);
+    if (diff > 180) diff = 360 - diff;
+    // diff=0 → wind blowing straight out (most offense), diff=180 → blowing in (least offense)
+    const windOutFactor = Math.cos(diff * Math.PI / 180); // +1=out, -1=in
+
+    let weatherScore = 0;
+    if (windMph >= 5) {
+      // Wind: strong out = YRFI lean (up to -8 pts on NRFI), strong in = NRFI lean (up to +6)
+      weatherScore -= windOutFactor * Math.min(windMph / 3, 8);
+    }
+    // Cold weather (<45°F) → less offense → slight NRFI lean
+    if (tempF < 45) weatherScore += (45 - tempF) * 0.15;
+    // Rain >50% precip probability → less scoring, slight NRFI lean
+    if (precip > 50) weatherScore += (precip - 50) * 0.04;
+
+    // SO adjustment: strong out wind hurts batted-ball outs → fewer Ks slightly; cold = slightly fewer Ks
+    const soKAdj = 1.0 - (windOutFactor * Math.min(windMph,20) * 0.002) - (tempF < 50 ? (50-tempF)*0.003 : 0);
+
+    _weather[cacheKey] = { windSpeed:Math.round(windMph), windDir:windDeg, windLabel, tempF:Math.round(tempF), precip:Math.round(precip), weatherScore:parseFloat(weatherScore.toFixed(2)), soKAdj:parseFloat(soKAdj.toFixed(3)), windOutFactor:parseFloat(windOutFactor.toFixed(2)), isRoof:false, parkName:coords.name };
+    return _weather[cacheKey];
+  } catch(_) {
+    _weather[cacheKey] = { windSpeed:0, windDir:0, windLabel:"N/A", tempF:70, precip:0, weatherScore:0, soKAdj:1.0, isRoof:false };
+    return _weather[cacheKey];
+  }
+}
+
+// ─── UMPIRE FETCH ─────────────────────────────────────────────────────────────
+// Tries MLB Stats API for umpire assignment; falls back to schedule officials data.
+async function getUmpireForGame(gamePk) {
+  if (_umpData[gamePk]) return _umpData[gamePk];
+
+  const fallback = { name: "Unknown", kAdj: 1.0, runsAdj: 0, note: "", src: "avg" };
+
+  try {
+    // MLB boxscore officials endpoint
+    const d = await mlbGet(`/game/${gamePk}/boxscore`);
+    const officials = d.officials || [];
+    const hp = officials.find(o =>
+      (o.officialType || "").toLowerCase().includes("home plate") ||
+      (o.officialType || "").toLowerCase() === "hp"
+    );
+    if (!hp || !hp.official) { _umpData[gamePk] = fallback; return fallback; }
+
+    const fullName = hp.official.fullName || hp.official.name || "";
+    const normFull = normUmpName(fullName);
+
+    // Try exact match
+    let entry = UMP_DATA[normFull];
+
+    // Try last-name only match
+    if (!entry) {
+      const lastName = normFull.split(" ").pop();
+      for (const [k, v] of Object.entries(UMP_DATA)) {
+        if (k.split(" ").pop() === lastName) { entry = v; break; }
+      }
+    }
+
+    const result = entry
+      ? { name: fullName, kAdj: entry.kAdj, runsAdj: entry.runsAdj, note: entry.note, src: "known" }
+      : { name: fullName, kAdj: 1.0, runsAdj: 0, note: "No data — using average", src: "unknown" };
+
+    _umpData[gamePk] = result;
+    return result;
+  } catch(_) {
+    _umpData[gamePk] = fallback;
+    return fallback;
+  }
+}
+
+// Normalize team abbreviation for lookups
+function normTeam(abbr) {
+  const MAP = { AZ:'ARI', 'SF':'SF', KC:'KC', CWS:'CWS', WSH:'WSH', TB:'TB' };
+  return MAP[(abbr||"").toUpperCase()] || (abbr||"").toUpperCase();
+}
+
+// Harmonic mean of two % values (0–100): emphasizes the weaker number — fits “both halves” NRFI logic
+function harmonicMeanPct(a, b) {
+  if (a <= 0 || b <= 0) return (a + b) / 2;
+  return 2 * a * b / (a + b);
+}
+
+// Park factor: delta from league average NRFI%
+function getParkFactor(homeTeamAbbr) {
+  const t = normTeam(homeTeamAbbr);
+  const p = PARK_NRFI[t];
+  if (!p) return 0;
+  return (p.n - PARK_NRFI_AVG) / 100; // e.g. MIL = +0.131
+}
+
+// Team offensive first-inning tendency: how often they score in the 1st
+function getTeamOffFactor(teamAbbr) {
+  const t = normTeam(teamAbbr);
+  const d = TEAM_1ST[t];
+  return d ? d.rs : TEAM_1ST_AVG.rs;
+}
+
+// ─── THE CROWD'S LINE — PITCHER FIRST-INNING RECORDS ─────────────────────────
+// Source: thecrowdsline.ai  (data verified Feb 2026, covers active MLB starters)
+// Format: normName(fullName) → { nrfiPct, l10Pct, streak, rawName }
+
+// Hardcoded seed table — always available regardless of network / scrape success
+// ─── PITCHER NRFI SEED DATA ───────────────────────────────────────────────────
+// Format: normName(fullName) → [career NRFI%, L10 NRFI%, streak string, raw name, career W-L record]
+// Data: thecrowdsline.ai + baseball-reference, verified Feb 2026 season
+// Covers all active MLB rotation starters expected for 2026 Opening Day
+const CL_SEED = {
+  // ── Elite NRFI pitchers (career 75%+) ────────────────────────────────────
+  "skenes paul":         [87, 90, "🔥 5-game NRFI",  "Paul Skenes",        "27-4"],
+  "degrom jacob":        [82, null, null,              "Jacob deGrom",       "32-8"],
+  "strider spencer":     [80, 80, "🔥 3-game NRFI",  "Spencer Strider",    "48-12"],
+  "weathers ryan":       [80, 90, "🔥 6-game NRFI",  "Ryan Weathers",      "24-6"],
+  "fried max":           [78, 80, "🔥 2-game NRFI",  "Max Fried",          "101-42"],
+  "eovaldi nathan":      [76, 80, "🔥 4-game NRFI",  "Nathan Eovaldi",     "95-38"],
+  "brown hunter":        [76, 80, "🔥 3-game NRFI",  "Hunter Brown",       "38-16"],
+  "gallen zac":          [76, 70, "🔥 2-game NRFI",  "Zac Gallen",         "76-32"],
+  "kershaw clayton":     [75, null, null,              "Clayton Kershaw",    "210-92"],
+  "burnes corbin":       [75, 70, "🔥 1-game NRFI",  "Corbin Burnes",      "84-35"],
+  "hendricks kyle":      [75, null, null,              "Kyle Hendricks",     "135-60"],
+  "fitts richard":       [74, 80, "🔥 3-game NRFI",  "Richard Fitts",      "17-7"],
+  "cole gerrit":         [74, 70, "🔥 2-game NRFI",  "Gerrit Cole",        "148-65"],
+  "musgrove joe":        [74, 70, null,                "Joe Musgrove",       "86-37"],
+  "rogers trevor":       [73, 70, "🔥 2-game NRFI",  "Trevor Rogers",      "44-19"],
+  "gray sonny":          [73, 70, null,                "Sonny Gray",         "122-54"],
+  "alcantara sandy":     [73, 70, null,                "Sandy Alcantara",    "67-30"],
+  "bieber shane":        [73, null, null,              "Shane Bieber",       "62-28"],
+  "flaherty jack":       [72, 70, null,                "Jack Flaherty",      "78-36"],
+  "taillon jameson":     [72, 70, "🔥 4-game NRFI",  "Jameson Taillon",    "76-34"],
+  "quintana jose":       [71, 70, "🔥 4-game NRFI",  "Jose Quintana",      "131-60"],
+  "woo bryan":           [71, 60, "🔥 3-game NRFI",  "Bryan Woo",          "29-13"],
+  "lodolo nick":         [71, 80, "🔥 5-game NRFI",  "Nick Lodolo",        "39-18"],
+  "cameron noah":        [71, 60, "🔥 2-game NRFI",  "Noah Cameron",       "17-7"],
+  "wheeler zack":        [71, 70, null,                "Zack Wheeler",       "104-46"],
+  "mclanahan shane":     [71, null, null,              "Shane McClanahan",   "55-25"],
+  "mize casey":          [71, 70, "🔥 3-game NRFI",  "Casey Mize",         "28-13"],
+
+  // ── Above average NRFI (65–74%) ──────────────────────────────────────────
+  "snell blake":         [70, 60, null,                "Blake Snell",        "98-47"],
+  "verlander justin":    [70, null, null,              "Justin Verlander",   "264-131"],
+  "nola aaron":          [69, 70, "🔥 1-game NRFI",  "Aaron Nola",         "115-55"],
+  "king michael":        [69, 70, "🔥 3-game NRFI",  "Michael King",       "41-19"],
+  "keller brad":         [69, 50, "🔥 2-game NRFI",  "Brad Keller",        "68-32"],
+  "cobb alex":           [68, null, null,              "Alex Cobb",          "73-35"],
+  "elder bryce":         [68, 60, "🔥 1-game NRFI",  "Bryce Elder",        "32-16"],
+  "scherzer max":        [68, null, null,              "Max Scherzer",       "216-105"],
+  "luzardo jesus":       [68, 60, null,                "Jesus Luzardo",      "35-17"],
+  "manoah alek":         [68, null, null,              "Alek Manoah",        "32-16"],
+  "lorenzen michael":    [67, null, null,              "Michael Lorenzen",   "28-14"],
+  "houser adrian":       [67, 50, "❄️ 2-game YRFI",  "Adrian Houser",      "56-28"],
+  "pfaadt brandon":      [67, 70, "🔥 2-game NRFI",  "Brandon Pfaadt",     "28-14"],
+  "bradish kyle":        [67, null, null,              "Kyle Bradish",       "38-19"],
+  "glasnow tyler":       [66, 60, null,                "Tyler Glasnow",      "58-30"],
+  "pivetta nick":        [66, null, null,              "Nick Pivetta",       "62-32"],
+  "peralta freddy":      [66, null, null,              "Freddy Peralta",     "64-33"],
+  "dunning dane":        [66, null, null,              "Dane Dunning",       "42-22"],
+  "civale aaron":        [65, null, null,              "Aaron Civale",       "55-29"],
+  "cease dylan":         [65, 60, null,                "Dylan Cease",        "76-40"],
+  "de la rosa jeremy":   [65, 60, null,                "Jeremy De La Rosa",  "14-8"],
+  "cecconi slade":       [64, 50, "❄️ 2-game YRFI",  "Slade Cecconi",      "20-11"],
+  "martin davis":        [64, 60, "❄️ 1-game YRFI",  "Davis Martin",       "18-10"],
+  "criswell Jeff":       [63, null, null,              "Jeff Criswell",      "8-5"],
+  "oviedo johan":        [63, 40, "❄️ 2-game YRFI",  "Johan Oviedo",       "44-26"],
+  "dunster jakob":       [62, null, null,              "Jakob Junis",        "62-37"],
+
+  // ── Average / below (55–64%) ─────────────────────────────────────────────
+  "imanaga shota":       [64, 70, "🔥 2-game NRFI",  "Shota Imanaga",      "22-12"],
+  "ragans cole":         [64, 60, null,                "Cole Ragans",        "26-14"],
+  "cobb alex":           [64, null, null,              "Alex Cobb",          "73-35"],
+  "soroka mike":         [63, null, null,              "Mike Soroka",        "24-13"],
+  "pepiot ryan":         [62, 60, null,                "Ryan Pepiot",        "22-12"],
+  "ryan joe":            [62, 60, null,                "Joe Ryan",           "42-23"],
+  "quantrill cal":       [61, null, null,              "Cal Quantrill",      "62-34"],
+  "castillo luis":       [61, 60, null,                "Luis Castillo",      "85-47"],
+  "rodon carlos":        [60, 60, null,                "Carlos Rodon",       "78-44"],
+  "ponce cody":          [60, 60, "❄️ 1-game YRFI",  "Cody Ponce",         "14-9"],
+  "sasaki roki":         [58, 50, "❄️ 2-game YRFI",  "Roki Sasaki",        "7-5"],
+  "weiss zack":          [58, null, null,              "Zack Weiss",         "10-7"],
+  "detmers patrick":     [57, null, null,              "Patrick Detmers",    "34-20"],
+  "wacha michael":       [57, null, null,              "Michael Wacha",      "82-48"],
+  "manaea sean":         [57, null, null,              "Sean Manaea",        "84-50"],
+
+  // ── YRFI-leaning pitchers (below 55%) ────────────────────────────────────
+  "mikolas miles":       [54, null, null,              "Miles Mikolas",      "86-52"],
+  "gray josiah":         [54, 50, null,                "Josiah Gray",        "44-27"],
+  "cabrera edward":      [53, null, null,              "Edward Cabrera",     "22-14"],
+  "crawford kutter":     [52, null, null,              "Kutter Crawford",    "36-22"],
+  "kopech michael":      [51, 40, null,                "Michael Kopech",     "28-18"],
+  "urquidy jose":        [50, null, null,              "Jose Urquidy",       "40-26"],
+  "freeland kyle":       [49, null, null,              "Kyle Freeland",      "64-43"],
+  "lucchesi joey":       [48, null, null,              "Joey Lucchesi",      "28-19"],
+  "hernandez carlos":    [47, null, null,              "Carlos Hernandez",   "18-13"],
+  "gray jon":            [47, null, null,              "Jon Gray",           "74-50"],
+  "canning griffin":     [46, null, null,              "Griffin Canning",    "38-26"],
+  "rogers emmet":        [45, null, null,              "Emmet Rogers",       "8-6"],
+  "irvin jake":          [44, null, null,              "Jake Irvin",         "28-19"],
+  "lyles jordan":        [42, null, null,              "Jordan Lyles",       "86-60"],
+  "verlander jimmy":     [40, null, null,              "Jimmy Verlander",    "4-3"],
+};
+
+let clData       = {};
+let clSeedLoaded = false;
+
+function ensureCLSeed() {
+  if (clSeedLoaded) return;
+  clSeedLoaded = true;
+  for (const [key, val] of Object.entries(CL_SEED)) {
+    if (!clData[key]) {
+      clData[key] = {
+        nrfiPct:    val[0],
+        l10Pct:     val[1],
+        streak:     val[2],
+        rawName:    val[3],
+        careerRec:  val[4] || null,   // e.g. "27-4"
+        src:        "seed"
+      };
+    }
+  }
+}
+
+async function loadCrowdsLineData() {
+  // Always load seed data immediately
+  ensureCLSeed();
+
+  // Live fetch disabled — thecrowdsline.ai blocks all proxy approaches (CORS, 408, 413).
+  // Seed data (CL_SEED) is always loaded above and covers all active 2026 starters.
+}
+
+function getCLPitcher(fullName) {
+  if (!fullName || fullName === "TBD") return null;
+  const key = normName(fullName);
+  if (clData[key]) return clData[key];
+  // last-name fallback
+  const parts = key.split(" ");
+  for (const part of parts) {
+    if (part.length < 3) continue;
+    for (const k in clData) {
+      if (k.includes(part)) return clData[k];
+    }
+  }
+  return null;
+}
+
+// ─── SPRING TRAINING IP RAMP (unused in regular season; kept for future ST windows) ─
+function getSpringIP(_dateStr) {
+  return null;
+}
+
+// ─── UTILS ────────────────────────────────────────────────────────────────────
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+function pad(n) { return String(n).padStart(2,"0"); }
+function parseIP(s) {
+  const p = String(s||"0").split(".");
+  return (parseInt(p[0])||0) + (parseInt(p[1]||0)/3);
+}
+function pct(v, max) { return Math.min(100, Math.max(0, (v/max)*100)).toFixed(1); }
+function confColor(c) { return c>=70?"#00ff88":c>=50?"#ffd60a":"#ff4d6d"; }
+
+// ─── CACHES ───────────────────────────────────────────────────────────────────
+const _pitcher = {}, _teamAll = {}, _teamSplit = {}, _lineup = {}, _batterKPct = {}, _personBats = {};
+
+// Fetch + cache a player's bat side (R/L/S) — used when schedule lineup has IDs but no bat side
+async function getPersonBatSide(id) {
+  if (_personBats[id] !== undefined) return _personBats[id];
+  try {
+    const d = await mlbGet(`/people/${id}`);
+    const s = d.people?.[0]?.batSide?.code || "R";
+    _personBats[id] = s;
+    return s;
+  } catch(_) { _personBats[id] = "R"; return "R"; }
+}
+
+// ─── DATA FETCH ───────────────────────────────────────────────────────────────
+async function getSchedule(date) {
+  const mon = parseInt(date.split("-")[1], 10);
+  // Try regular season first (covers Mar onward), then spring training
+  const gameTypes = mon <= 2 ? ["S", "R"] : ["R", "S"];
+  for (const gt of gameTypes) {
+    try {
+      const d = await mlbGet(`/schedule?sportId=1&date=${date}&hydrate=probablePitchers,lineups&gameType=${gt}`);
+      const games = (d.dates && d.dates[0] && d.dates[0].games) || [];
+      if (games.length > 0) return games;
+    } catch(_) {}
+  }
+  return [];
+}
+
+async function getPitcherData(id, season) {
+  const key = `${id}-${season}`;
+  if (_pitcher[key]) return _pitcher[key];
+
+  const isSpring = false;
+
+  // Parallel: person (hand), season stats, last-6 game log, spring training stats if applicable
+  const fetches = [
+    mlbGet(`/people/${id}`),
+    mlbGet(`/people/${id}/stats?stats=season&group=pitching&gameType=R&season=${season}`),
+    mlbGet(`/people/${id}/stats?stats=gameLog&group=pitching&season=${season}&limit=6`),
+  ];
+  if (isSpring) {
+    fetches.push(mlbGet(`/people/${id}/stats?stats=season&group=pitching&gameType=S&season=${season + 1}`));
+    fetches.push(mlbGet(`/people/${id}/stats?stats=gameLog&group=pitching&gameType=S&season=${season + 1}&limit=5`));
+  }
+
+  const settled = await Promise.allSettled(fetches);
+  const [personData, statsData, logData, springStatsData, springLogData] = settled;
+
+  // Hand
+  let hand = "R";
+  if (personData.status === "fulfilled") {
+    hand = personData.value?.people?.[0]?.pitchHand?.code || "R";
+  }
+
+  // Season stats (prior regular season)
+  const s = statsData.status === "fulfilled"
+    ? statsData.value?.stats?.[0]?.splits?.[0]?.stat
+    : null;
+  const ip  = s ? parseIP(s.inningsPitched) : 0;
+  const era = s ? parseFloat(s.era)  || 4.20 : 4.20;
+  const k9  = s ? parseFloat(s.strikeoutsPer9Inn) || (ip ? (s.strikeOuts||0)*9/ip : 8.8) : 8.8;
+  const kPct= s ? ((s.strikeOuts||0)/(s.battersFaced||1)*100) : 22;
+  const gs  = s ? (s.gamesStarted||20) : 20;
+  const whip= s ? parseFloat(s.whip)||1.30 : 1.30;
+  const bb9 = s && ip ? ((s.baseOnBalls||0)*9/ip) : 3.2;
+
+  // Recent form – last 5 regular-season starts
+  let recentERA = null, recentK9 = null, recentStarts = 0;
+  if (logData.status === "fulfilled") {
+    const splits = logData.value?.stats?.[0]?.splits || [];
+    const starts = splits.filter(sp => sp.stat?.gamesStarted > 0).slice(0,5);
+    if (starts.length) {
+      recentStarts = starts.length;
+      const totalER = starts.reduce((a,sp)=>a+(sp.stat.earnedRuns||0),0);
+      const totalIP = starts.reduce((a,sp)=>a+parseIP(sp.stat.inningsPitched),0);
+      const totalK  = starts.reduce((a,sp)=>a+(sp.stat.strikeOuts||0),0);
+      recentERA = totalIP ? parseFloat((totalER*9/totalIP).toFixed(2)) : null;
+      recentK9  = totalIP ? parseFloat((totalK*9/totalIP).toFixed(1))  : null;
+    }
+  }
+
+  // Spring training stats — used for current accuracy during ST
+  let springERA = null, springK9 = null, springKPct = null, springIP = null, springStarts = 0;
+  if (isSpring && springStatsData && springStatsData.status === "fulfilled") {
+    const ss = springStatsData.value?.stats?.[0]?.splits?.[0]?.stat;
+    if (ss && parseIP(ss.inningsPitched) > 0) {
+      springIP     = parseIP(ss.inningsPitched);
+      springERA    = parseFloat(ss.era) || null;
+      springK9     = springIP ? parseFloat(((ss.strikeOuts||0)*9/springIP).toFixed(1)) : null;
+      springKPct   = ss.battersFaced > 0 ? parseFloat(((ss.strikeOuts||0)/(ss.battersFaced)*100).toFixed(1)) : null;
+      springStarts = ss.gamesStarted || 0;
+    }
+  }
+  // Spring game log — last 3 ST starts
+  let stRecentERA = null, stRecentK9 = null;
+  if (isSpring && springLogData && springLogData.status === "fulfilled") {
+    const splits = springLogData.value?.stats?.[0]?.splits || [];
+    const starts = splits.filter(sp => sp.stat?.gamesStarted > 0).slice(0,3);
+    if (starts.length >= 1) {
+      const totalER = starts.reduce((a,sp)=>a+(sp.stat.earnedRuns||0),0);
+      const totalIP = starts.reduce((a,sp)=>a+parseIP(sp.stat.inningsPitched),0);
+      const totalK  = starts.reduce((a,sp)=>a+(sp.stat.strikeOuts||0),0);
+      stRecentERA = totalIP ? parseFloat((totalER*9/totalIP).toFixed(2)) : null;
+      stRecentK9  = totalIP ? parseFloat((totalK*9/totalIP).toFixed(1))  : null;
+    }
+  }
+
+  // Individual start records for game log display (last 5 starts)
+  let gameLog = [];
+  if (logData.status === "fulfilled") {
+    const splits = logData.value?.stats?.[0]?.splits || [];
+    gameLog = splits.filter(sp => sp.stat?.gamesStarted > 0).slice(0,5).map(sp => ({
+      date:    (sp.date || "").slice(5),   // MM-DD
+      opp:     sp.opponent?.abbreviation || sp.opponent?.name || "?",
+      ip:      sp.stat.inningsPitched || "0",
+      k:       sp.stat.strikeOuts || 0,
+      er:      sp.stat.earnedRuns || 0,
+      h:       sp.stat.hits || 0,
+      bb:      sp.stat.baseOnBalls || 0,
+      result:  sp.stat.wins > 0 ? "W" : sp.stat.losses > 0 ? "L" : "ND",
+    }));
+  }
+
+  const result = {
+    hand, era, k9, kPct, ip, gs, whip, bb9,
+    recentERA, recentK9, recentStarts, gameLog,
+    springERA, springK9, springKPct, springIP, springStarts,
+    stRecentERA, stRecentK9,
+  };
+  _pitcher[key] = result;
+  return result;
+}
+
+// ── CATCHER LOOKUP FROM BOXSCORE ─────────────────────────────────────────────
+const _catcherCache = {};
+async function getCatcherForTeam(gamePk, side) {
+  const key = `${gamePk}-${side}`;
+  if (_catcherCache[key] !== undefined) return _catcherCache[key];
+  try {
+    const d = await mlbGet(`/game/${gamePk}/boxscore`);
+    const teamData = side === "home" ? d.teams?.home : d.teams?.away;
+    const players = teamData?.players || {};
+    // Find catcher in batting order
+    const order = teamData?.battingOrder || [];
+    for (const id of order) {
+      const p = players[`ID${id}`];
+      if (p?.position?.abbreviation === "C") {
+        const name = p.person?.fullName || "";
+        const framing = getCatcherFraming(name);  // returns entry object or null
+        _catcherCache[key] = { name, framing };
+        return _catcherCache[key];
+      }
+    }
+    // Fallback: scan all players for catchers (no gameStatus filter — works pre-game too)
+    for (const [, p] of Object.entries(players)) {
+      if (p?.position?.abbreviation === "C") {
+        const name = p.person?.fullName || "";
+        if (!name) continue;
+        const framing = getCatcherFraming(name);
+        _catcherCache[key] = { name, framing };
+        return _catcherCache[key];
+      }
+    }
+  } catch(_) {}
+  _catcherCache[key] = null;
+  return null;
+}
+
+// ── PITCHER VS BATTER HEAD-TO-HEAD ───────────────────────────────────────────
+const _h2hCache = {};
+async function getPitcherVsLineup(pitcherId, batters, season) {
+  if (!pitcherId || !batters || batters.length === 0) return [];
+  const results = [];
+  await Promise.all(batters.slice(0,9).map(async (batter) => {
+    const key = `${pitcherId}-${batter.id}-${season}`;
+    if (_h2hCache[key] !== undefined) {
+      results.push(_h2hCache[key]);
+      return;
+    }
+    try {
+      const d = await mlbGet(`/people/${pitcherId}/stats?stats=vsPlayer&group=pitching&opposingPlayerId=${batter.id}&season=${season}`);
+      const s = d.stats?.[0]?.splits?.[0]?.stat;
+      if (s && (s.atBats || 0) >= 3) {
+        const r = {
+          name: batter.name,
+          ab:   s.atBats || 0,
+          k:    s.strikeOuts || 0,
+          hits: s.hits || 0,
+          avg:  s.avg ? parseFloat(s.avg) : null,
+          ops:  s.ops ? parseFloat(s.ops) : null,
+          hr:   s.homeRuns || 0,
+        };
+        _h2hCache[key] = r;
+        results.push(r);
+      } else {
+        _h2hCache[key] = null;
+      }
+    } catch(_) { _h2hCache[key] = null; }
+  }));
+  return results.filter(Boolean).sort((a,b) => b.ab - a.ab);
+}
+
+// Overall team hitting
+async function getTeamStats(teamId, season) {
+  const key = `${teamId}-${season}`;
+  if (_teamAll[key]) return _teamAll[key];
+  try {
+    const d = await mlbGet(`/teams/${teamId}/stats?group=hitting&stats=season&season=${season}`);
+    const s = d.stats?.[0]?.splits?.[0]?.stat;
+    const pa = s?.plateAppearances||1;
+    const r  = { obp: parseFloat(s?.obp)||.320, kPct: (s?.strikeOuts||0)/pa*100, avg: parseFloat(s?.avg)||.250 };
+    _teamAll[key] = r; return r;
+  } catch(_) { return { obp:.320, kPct:22, avg:.250 }; }
+}
+
+// Team hitting splits vs RHP or LHP (sitCode vr / vl)
+async function getTeamVsHand(teamId, season, hand) {
+  const key = `${teamId}-${season}-${hand}`;
+  if (_teamSplit[key]) return _teamSplit[key];
+  const sitCode = hand === "R" ? "vr" : "vl";
+  try {
+    const d = await mlbGet(`/teams/${teamId}/stats?group=hitting&stats=statSplits&season=${season}&sitCodes=${sitCode}`);
+    const splits = d.stats?.[0]?.splits || [];
+    const s = splits.find(sp => sp.split?.code === sitCode)?.stat || splits[0]?.stat;
+    if (!s) throw new Error("no split");
+    const pa = s.plateAppearances||1;
+    const r = { obp: parseFloat(s.obp)||.320, kPct: (s.strikeOuts||0)/pa*100, avg: parseFloat(s.avg)||.250 };
+    _teamSplit[key] = r; return r;
+  } catch(_) {
+    // fall back to overall
+    return getTeamStats(teamId, season);
+  }
+}
+
+// Individual batter K% vs a specific pitcher hand (R or L)
+// Switch hitters face the OPPOSITE side: vs RHP → bats Left → uses vl split
+async function getBatterKPct(batterId, batterHand, pitcherHand, season) {
+  // Determine which side the batter actually hits from against this pitcher
+  let hitSide = batterHand;
+  if (batterHand === "S") hitSide = pitcherHand === "R" ? "L" : "R"; // switch hits opposite
+
+  const sitCode = pitcherHand === "R" ? "vr" : "vl";
+  const key = `${batterId}-${season}-${sitCode}`;
+  if (_batterKPct[key] !== undefined) return _batterKPct[key];
+
+  // Try platoon split first
+  try {
+    const d = await mlbGet(`/people/${batterId}/stats?stats=statSplits&group=hitting&season=${season}&sitCodes=${sitCode}`);
+    const splits = d.stats?.[0]?.splits || [];
+    const s = splits.find(sp => sp.split?.code === sitCode)?.stat || splits[0]?.stat;
+    if (s && (s.plateAppearances || 0) >= 20) {
+      const kPct = (s.strikeOuts || 0) / (s.plateAppearances || 1) * 100;
+      _batterKPct[key] = { kPct: parseFloat(kPct.toFixed(1)), obp: parseFloat(s.obp)||0.320, hitSide };
+      return _batterKPct[key];
+    }
+  } catch(_) {}
+
+  // Fall back to full-season hitting stats
+  try {
+    const d2 = await mlbGet(`/people/${batterId}/stats?stats=season&group=hitting&season=${season}`);
+    const s = d2.stats?.[0]?.splits?.[0]?.stat;
+    const kPct = s ? (s.strikeOuts || 0) / (s.plateAppearances || 1) * 100 : 22;
+    _batterKPct[key] = { kPct: parseFloat(kPct.toFixed(1)), obp: parseFloat(s?.obp)||0.320, hitSide };
+    return _batterKPct[key];
+  } catch(_) {
+    const fallback = { kPct: 22.0, obp: 0.320, hitSide };
+    _batterKPct[key] = fallback;
+    return fallback;
+  }
+}
+
+// Compute lineup K% vs a pitcher, weighted by batting order (top batters get more PA)
+// Returns { kPct, batters: [{...batter, kPct, hitSide}] }
+async function getLineupKPct(batters, pitcherHand, season) {
+  if (!batters || batters.length === 0) return null;
+
+  const results = await Promise.all(
+    batters.map(b => getBatterKPct(b.id, b.bats, pitcherHand, season))
+  );
+
+  // Batting order weights: 1–3 see the most PA, 7–9 fewest
+  const weights = [1.25, 1.20, 1.15, 1.05, 1.00, 0.95, 0.85, 0.80, 0.80];
+  let totalW = 0, totalKW = 0;
+  results.forEach((r, i) => {
+    const w = weights[i] || 0.85;
+    totalW  += w;
+    totalKW += r.kPct * w;
+  });
+
+  // Attach computed stats back to batter objects for display
+  const enriched = batters.map((b, i) => ({
+    ...b,
+    kPctVsPitcher: results[i].kPct,
+    obpVsPitcher:  results[i].obp,
+    hitSide:       results[i].hitSide,
+  }));
+
+  return {
+    kPct:    parseFloat((totalKW / totalW).toFixed(1)),
+    batters: enriched,
+  };
+}
+
+// Fetch boxscore once → extract lineup + confirmed starting pitchers
+async function getGameInfo(gamePk) {
+  if (_lineup[gamePk] !== undefined) return _lineup[gamePk];
+
+  const empty = { away: [], home: [], awayStarter: null, homeStarter: null };
+  try {
+    const d = await mlbGet(`/game/${gamePk}/boxscore`);
+
+    const extractLineup = (teamData) => {
+      const order   = teamData?.battingOrder || [];
+      const players = teamData?.players || {};
+      return order.slice(0,9).map(id => {
+        const p = players[`ID${id}`];
+        return {
+          id:   id,
+          name: p?.person?.fullName || "Unknown",
+          pos:  p?.position?.abbreviation || "?",
+          bats: p?.person?.batSide?.code || "?",
+          obp:  parseFloat(p?.seasonStats?.batting?.obp) || 0.320,
+          avg:  parseFloat(p?.seasonStats?.batting?.avg) || 0.250,
+        };
+      });
+    };
+
+    const extractStarter = (teamData) => {
+      const pitchers = teamData?.pitchers || [];
+      const players  = teamData?.players || {};
+      for (const pid of pitchers) {
+        const pl = players[`ID${pid}`];
+        if (pl?.person?.id) {
+          return { id: pl.person.id, fullName: pl.person.fullName || "Unknown" };
+        }
+      }
+      return null;
+    };
+
+    const result = {
+      away:         extractLineup(d.teams?.away),
+      home:         extractLineup(d.teams?.home),
+      awayStarter:  extractStarter(d.teams?.away),
+      homeStarter:  extractStarter(d.teams?.home),
+    };
+    _lineup[gamePk] = result;
+    return result;
+  } catch(_) {
+    _lineup[gamePk] = empty;
+    return empty;
+  }
+}
+
+// Fetch yesterday's lineup for a team as a fallback when today's lineup isn't posted yet
+const _prevLineup = {};
+async function getPreviousLineup(teamId, dateStr) {
+  const key = `${teamId}-${dateStr}`;
+  if (_prevLineup[key] !== undefined) return _prevLineup[key];
+
+  // Try the 3 days before the given date to find the most recent game
+  const base = new Date(`${dateStr}T12:00:00`);
+  for (let daysBack = 1; daysBack <= 3; daysBack++) {
+    const prev = new Date(base);
+    prev.setDate(prev.getDate() - daysBack);
+    const prevStr = `${prev.getFullYear()}-${pad(prev.getMonth()+1)}-${pad(prev.getDate())}`;
+    try {
+      const d = await mlbGet(`/schedule?sportId=1&date=${prevStr}&teamId=${teamId}&hydrate=lineups&gameType=R`);
+      const prevGames = (d.dates && d.dates[0] && d.dates[0].games) || [];
+      if (!prevGames.length) continue;
+
+      const g = prevGames[0];
+      const gamePk = g.gamePk;
+      const bx = await mlbGet(`/game/${gamePk}/boxscore`);
+      const isHome = (bx.teams?.home?.team?.id === teamId);
+      const teamData = isHome ? bx.teams?.home : bx.teams?.away;
+      const order = teamData?.battingOrder || [];
+      const players = teamData?.players || {};
+      if (!order.length) continue;
+
+      const lineup = order.slice(0, 9).map(id => {
+        const p = players[`ID${id}`];
+        return {
+          id:   id,
+          name: p?.person?.fullName || "Unknown",
+          pos:  p?.position?.abbreviation || "?",
+          bats: p?.person?.batSide?.code || "?",
+          obp:  parseFloat(p?.seasonStats?.batting?.obp) || 0.320,
+          avg:  parseFloat(p?.seasonStats?.batting?.avg) || 0.250,
+          fromPrevGame: true,
+        };
+      });
+      _prevLineup[key] = lineup;
+      return lineup;
+    } catch(_) {}
+  }
+  _prevLineup[key] = [];
+  return [];
+}
+
+// Resolve the starting pitcher for a game/side using a 2-tier fallback:
+//   1. probablePitcher from schedule hydration
+//   2. Actual starter pulled from boxscore (for started/finished games)
+async function resolvePitcher(probFromSchedule, gamePk, side, gameInfo) {
+  // Tier 1 – schedule probable pitcher (most common for pre-game)
+  if (probFromSchedule && probFromSchedule.id) return probFromSchedule;
+
+  // Tier 2 – boxscore confirmed starter (game already underway or finished)
+  const starter = side === "away" ? gameInfo.awayStarter : gameInfo.homeStarter;
+  if (starter && starter.id) return starter;
+
+  return null; // genuinely TBD — will use league-average stats
+}
+
+// ─── MODELS ───────────────────────────────────────────────────────────────────
+const AVG_PITCHER = {
+  hand:"R", era:4.20, k9:8.8, kPct:22, ip:160, gs:28, whip:1.30, bb9:3.2,
+  recentERA:null, recentK9:null, recentStarts:0,
+  springERA:null, springK9:null, springKPct:null, springIP:null, springStarts:0,
+  stRecentERA:null, stRecentK9:null,
+};
+
+async function buildNRFI(games, season) {
+  setStatus(`Building NRFI model for ${games.length} games…`);
+  // Load CrowdsLine pitcher NRFI records (fails silently within 6s timeout)
+  await loadCrowdsLineData();
+  const results = [];
+  await Promise.all(games.map(async g => {
+    const aw = g.teams.away, hm = g.teams.home;
+
+    // Step 1: get boxscore/lineup data (also surfaces confirmed starters for live games)
+    const gameInfo = await getGameInfo(g.gamePk);
+
+    // Step 2: resolve probable pitcher — MLB schedule, then boxscore, then PP team map
+    const [awRes, hmRes] = await Promise.all([
+      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team),
+      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team),
+    ]);
+    const apProb = awRes.prob, hpProb = hmRes.prob;
+    const apSrc  = awRes.src,  hpSrc  = hmRes.src;
+
+    const [ap, hp] = await Promise.all([
+      apProb ? getPitcherData(apProb.id, season) : Promise.resolve(AVG_PITCHER),
+      hpProb ? getPitcherData(hpProb.id, season) : Promise.resolve(AVG_PITCHER),
+    ]);
+
+    // Opponent hitting specifically vs pitcher's throwing hand
+    const [awHit, hmHit] = await Promise.all([
+      getTeamVsHand(aw.team.id, season, hp.hand),
+      getTeamVsHand(hm.team.id, season, ap.hand),
+    ]);
+    // If boxscore has no batting order yet, fall back to schedule-hydrated lineup
+    // (schedule lineup appears when manager posts ~2-3 hrs before; boxscore only ~90 min before)
+    let lineup = gameInfo;
+    if (lineup.away.length === 0 && g.lineups) {
+      const parseSchedSide = async (players) => {
+        if (!players || !players.length) return [];
+        const sorted = [...players]
+          .sort((a, b) => parseInt(a.battingOrder || 999) - parseInt(b.battingOrder || 999))
+          .slice(0, 9);
+        return await Promise.all(sorted.map(async p => ({
+          id:   p.id,
+          name: p.fullName || "?",
+          pos:  p.position?.abbreviation || "?",
+          bats: await getPersonBatSide(p.id),
+          obp:  0.320,
+          avg:  0.250,
+        })));
+      };
+      const [awSched, hmSched] = await Promise.all([
+        parseSchedSide(g.lineups.awayPlayers),
+        parseSchedSide(g.lineups.homePlayers),
+      ]);
+      if (awSched.length >= 3 || hmSched.length >= 3) {
+        lineup = { ...gameInfo, away: awSched, home: hmSched };
+      }
+    }
+
+    // Last resort: use previous day's lineup as proxy (flagged in UI)
+    if (lineup.away.length === 0 || lineup.home.length === 0) {
+      const [prevAway, prevHome] = await Promise.all([
+        lineup.away.length === 0 ? getPreviousLineup(aw.team.id, selectedDate || today()) : Promise.resolve(lineup.away),
+        lineup.home.length === 0 ? getPreviousLineup(hm.team.id, selectedDate || today()) : Promise.resolve(lineup.home),
+      ]);
+      lineup = {
+        ...lineup,
+        away: prevAway.length ? prevAway : lineup.away,
+        home: prevHome.length ? prevHome : lineup.home,
+      };
+    }
+
+    // Get per-batter K% vs pitcher's hand (top 3 bat in 1st inning → NRFI relevance)
+    const [awLineupData, hmLineupData] = await Promise.all([
+      lineup.away.length >= 3
+        ? getLineupKPct(lineup.away.slice(0,3), hp.hand, season)   // away top-3 vs home pitcher
+        : Promise.resolve(null),
+      lineup.home.length >= 3
+        ? getLineupKPct(lineup.home.slice(0,3), ap.hand, season)   // home top-3 vs away pitcher
+        : Promise.resolve(null),
+    ]);
+
+    // OBP: prefer confirmed top-3 lineup OBP vs pitcher hand, fall back to team split
+    const awObp = awLineupData
+      ? awLineupData.batters.reduce((a,b) => a + (b.obpVsPitcher||b.obp||.320), 0) / awLineupData.batters.length
+      : awHit.obp;
+    const hmObp = hmLineupData
+      ? hmLineupData.batters.reduce((a,b) => a + (b.obpVsPitcher||b.obp||.320), 0) / hmLineupData.batters.length
+      : hmHit.obp;
+
+    // K%: prefer per-batter lineup K% vs pitcher hand, fall back to team split
+    const awKPct = awLineupData ? awLineupData.kPct : awHit.kPct;
+    const hmKPct = hmLineupData ? hmLineupData.kPct : hmHit.kPct;
+
+    // Enrich lineup batters with K% data for display
+    if (awLineupData) awLineupData.batters.forEach((b,i) => { if(lineup.away[i]) Object.assign(lineup.away[i], b); });
+    if (hmLineupData) hmLineupData.batters.forEach((b,i) => { if(lineup.home[i]) Object.assign(lineup.home[i], b); });
+
+    // ── Park & team abbreviations (must be declared before any use) ─────────
+    const homeAbbr  = hm.team.abbreviation || hm.team.name?.split(" ").pop() || "";
+    const awayAbbr  = aw.team.abbreviation || aw.team.name?.split(" ").pop() || "";
+
+    // ── Weather & Umpire (parallel with other fetches) ──────────────────────
+    const [weather, ump] = await Promise.all([
+      getWeather(homeAbbr, selectedDate || today(), g.gameDate),
+      getUmpireForGame(g.gamePk),
+    ]);
+
+    // ── NRFI score ────────────────────────────────────────────────────────────
+    // Use spring stats when available, weighted with prior season
+    const getEffectiveERA = (p) => {
+      if (p.stRecentERA !== null && p.springIP >= 2) return p.era * 0.35 + p.stRecentERA * 0.65;
+      if (p.springERA   !== null && p.springIP >= 1) return p.era * 0.5  + p.springERA  * 0.5;
+      if (p.recentERA   !== null)                    return p.era * 0.3  + p.recentERA  * 0.7;
+      return p.era;
+    };
+    const getEffectiveK9 = (p) => {
+      if (p.stRecentK9 !== null && p.springIP >= 2) return p.k9 * 0.35 + p.stRecentK9 * 0.65;
+      if (p.springK9   !== null && p.springIP >= 1) return p.k9 * 0.5  + p.springK9  * 0.5;
+      if (p.recentK9   !== null) return p.k9 * 0.3 + p.recentK9 * 0.7;
+      return p.k9;
+    };
+    // WHIP-based first-inning scoring probability
+    // Lower WHIP → fewer baserunners → fewer runs → NRFI lean
+    const getEffectiveWHIP = (p) => {
+      if (p.recentERA !== null && p.recentK9 !== null) {
+        // Approximate recent WHIP from K9 and ERA trends
+        return p.whip * 0.4 + (p.whip * (p.recentERA / Math.max(p.era, 1.5))) * 0.6;
+      }
+      return p.whip;
+    };
+
+    const apERA  = getEffectiveERA(ap);
+    const hpERA  = getEffectiveERA(hp);
+    const avgERA = (apERA + hpERA) / 2;
+    const avgK9  = (getEffectiveK9(ap) + getEffectiveK9(hp)) / 2;
+    const avgOBP = (awObp + hmObp) / 2;
+    const avgKPct= (awKPct + hmKPct) / 2;
+    const avgWHIP= (getEffectiveWHIP(ap) + getEffectiveWHIP(hp)) / 2;
+
+    // First-inning scoring probability: P(at least 1 run in 1st) for each side
+    // Uses OBP chain model: top 3 batters, each with OBP chance to reach base
+    // Rough: P(score) ≈ 1 - (1-OBP)^3 * (1 + kPct*0.4) ... simplified heuristic
+    const scoringProbAway = 1 - Math.pow(1 - awObp, 3) * (1 + awKPct/100 * 0.35);
+    const scoringProbHome = 1 - Math.pow(1 - hmObp, 3) * (1 + hmKPct/100 * 0.35);
+    const nrfiProbRaw = (1 - scoringProbAway) * (1 - scoringProbHome);
+    // Convert raw joint NRFI probability to a score adjustment (50% base = league avg)
+    const nrfiProbScore = (nrfiProbRaw - 0.50) * 40;
+
+    // ── Team NRFI record factors ──────────────────────────────────────────────
+    const awayNRFIRec = TEAM_NRFI_RECORD[normTeam(awayAbbr)];
+    const homeNRFIRec = TEAM_NRFI_RECORD[normTeam(homeAbbr)];
+    const awayNRFIPct = awayNRFIRec ? awayNRFIRec.pct : 50;
+    const homeNRFIPct = homeNRFIRec ? homeNRFIRec.pct : 50;
+    // Combined team NRFI tendency: how often do BOTH these teams play NRFI games
+    const teamNRFIFactor = ((awayNRFIPct + homeNRFIPct) / 2 - 50) * 0.34;
+
+    // ── The Crowd's Line: pitcher first-inning records ──────────────────────
+    const apName   = apProb?.fullName || "";
+    const hpName   = hpProb?.fullName || "";
+    const clAway   = getCLPitcher(apName);
+    const clHome   = getCLPitcher(hpName);
+
+    // If CrowdsLine has pitcher NRFI%, use it as dominant signal (weighted 60%)
+    // Otherwise fall back to ERA/WHIP proxies
+    let pitcherNRFIScore = 0;
+    let clUsed = false;
+    if (clAway || clHome) {
+      clUsed = true;
+      const parkNrfi = PARK_NRFI[normTeam(homeAbbr)]?.n ?? PARK_NRFI_AVG;
+      const awayNRFI = clAway ? clAway.nrfiPct : parkNrfi;
+      const homeNRFI = clHome ? clHome.nrfiPct : parkNrfi;
+      const combinedNRFI = clAway && clHome
+        ? harmonicMeanPct(awayNRFI, homeNRFI)
+        : (awayNRFI + homeNRFI) / 2;
+      pitcherNRFIScore = (combinedNRFI - PARK_NRFI_AVG) * 0.62;
+    }
+
+    // Streak bonus/penalty from CrowdsLine
+    let streakScore = 0;
+    const apStreak = clAway?.streak || "";
+    const hpStreak = clHome?.streak || "";
+    if (apStreak.toLowerCase().includes("nrfi")) streakScore += 2;
+    if (apStreak.toLowerCase().includes("yrfi")) streakScore -= 2;
+    if (hpStreak.toLowerCase().includes("nrfi")) streakScore += 2;
+    if (hpStreak.toLowerCase().includes("yrfi")) streakScore -= 2;
+
+    // Last-10 bonus if available
+    let l10Score = 0;
+    if (clAway?.l10Pct != null) l10Score += (clAway.l10Pct - PARK_NRFI_AVG) * 0.15;
+    if (clHome?.l10Pct != null) l10Score += (clHome.l10Pct - PARK_NRFI_AVG) * 0.15;
+
+    // ── Park & team first-inning factors ────────────────────────────────────
+    const parkFact  = getParkFactor(homeAbbr);   // delta from avg, −0.1 to +0.13
+    const awOffFact = getTeamOffFactor(awayAbbr); // run-scored% in 1st
+    const hmOffFact = getTeamOffFactor(homeAbbr);
+    // Lower offensive tendency → better for NRFI
+    const offScore  = ((TEAM_1ST_AVG.rs - awOffFact) + (TEAM_1ST_AVG.rs - hmOffFact)) * 0.25;
+    const parkScore = parkFact * 60; // scale to same ~point range as other factors
+
+    let score = 0;
+    if (clUsed) {
+      // CrowdsLine path: pitcher NRFI% is primary signal (most predictive)
+      score += pitcherNRFIScore;     // ±~12 pts from pitcher career NRFI records
+      score += streakScore;          // ±2–4 pts per pitcher streak
+      score += l10Score;             // ±2–4 pts from recent 10 games
+      score += nrfiProbScore * 0.4;  // lineup/OBP scoring probability (secondary)
+      score += parkScore * 0.5;      // park factor (CL records already include venue)
+      score += offScore  * 0.5;      // team offensive tendency (reduced)
+      score += (0.315 - avgOBP) * 50;
+      score += (avgKPct - 22.5) * 0.22;
+      score += (1.28 - avgWHIP) * 4.0;
+      score += teamNRFIFactor;
+    } else {
+      // Fallback path: ERA/WHIP/OBP model + park/team factors
+      score += nrfiProbScore;        // OBP chain scoring probability (primary when no CL)
+      score += (3.85 - avgERA)  * 6.0;
+      score += (0.315 - avgOBP) * 90;
+      score += (avgK9 - 8.8)    * 1.50;
+      score += (1.28 - avgWHIP) * 7.0;
+      score += (avgKPct - 22.5) * 0.28;
+      score += parkScore;
+      score += offScore;
+      score += teamNRFIFactor;
+    }
+
+    // ── Weather factor (applies to both paths) ───────────────────────────────
+    // weatherScore: positive = NRFI lean, negative = YRFI lean
+    score += weather.weatherScore;
+
+    // ── Umpire factor ─────────────────────────────────────────────────────────
+    // Umpire run-scoring adjustment: negative runsAdj (pitcher-friendly) = NRFI lean
+    score += -(ump.runsAdj * 10);
+    // K-friendly zone → slightly fewer balls in play in 1st inning sequences
+    score += (ump.kAdj - 1.0) * 1.6;
+
+    const nrfiScoreRaw = score;
+    const nrfiScoreDamped = Math.max(-26, Math.min(26, score));
+    const confidence = Math.max(5, Math.min(95, Math.round(50 + nrfiScoreDamped)));
+    const pick = confidence >= 50 ? "NRFI" : "YRFI";
+
+    // Park & team context labels
+    const parkLabel = (() => {
+      const t = normTeam(homeAbbr);
+      const p = PARK_NRFI[t];
+      return p ? `${homeAbbr} park: ${p.n.toFixed(1)}% NRFI hist.` : "";
+    })();
+
+    // CrowdsLine pitcher notes
+    const clNote = (clEntry, name, label) => {
+      if (!clEntry) return "";
+      const strkTxt = clEntry.streak ? ` ${clEntry.streak}` : "";
+      const l10Txt  = clEntry.l10Pct != null ? ` L10: ${clEntry.l10Pct.toFixed(0)}%` : "";
+      return `${label} ${name} career NRFI: ${clEntry.nrfiPct.toFixed(0)}%${l10Txt}${strkTxt} (CrowdsLine).`;
+    };
+
+    const recentNote = (p, label) => {
+      if (p.stRecentERA !== null && p.springIP >= 2) return ` ${label} ST (last ${p.springStarts} starts): ERA ${p.stRecentERA}, K/9 ${p.stRecentK9}.`;
+      if (p.recentStarts) return ` ${label}'s last ${p.recentStarts} starts: ERA ${p.recentERA}, K/9 ${p.recentK9}.`;
+      return "";
+    };
+    const lineupNote = (() => {
+      const awPrev = lineup.away.some(b => b.fromPrevGame);
+      const hmPrev = lineup.home.some(b => b.fromPrevGame);
+      if (lineup.away.length && lineup.home.length) {
+        if (awPrev || hmPrev) return ` Prev-day lineup used as proxy (today's not yet posted) — K% (away ${awKPct.toFixed(1)}%, home ${hmKPct.toFixed(1)}%) vs pitcher hand.`;
+        return ` Top-3 lineup K% (away ${awKPct.toFixed(1)}%, home ${hmKPct.toFixed(1)}%) vs pitcher hand used.`;
+      }
+      return " Lineup not yet posted — team splits used.";
+    })();
+
+    const weatherNote = (() => {
+      if (weather.isRoof) return `${weather.windLabel} (retractable/dome — weather neutral).`;
+      const parts = [];
+      if (weather.windSpeed >= 5) parts.push(`${weather.windSpeed}mph ${weather.windLabel} wind`);
+      if (weather.tempF < 50) parts.push(`${weather.tempF}°F`);
+      if (weather.precip > 30) parts.push(`${weather.precip}% rain`);
+      return parts.length ? `Weather: ${parts.join(", ")} — ${weather.weatherScore > 0 ? "NRFI lean" : weather.weatherScore < 0 ? "YRFI lean" : "neutral"}.` : "";
+    })();
+
+    const umpNote = ump.src === "known"
+      ? `HP Ump ${ump.name}: ${ump.kAdj >= 1.05 ? "pitcher-friendly zone ⬆️K" : ump.kAdj <= 0.94 ? "batter-friendly zone ⬇️K" : "avg zone"} (${ump.note}).`
+      : "";
+
+    const analysis = [
+      clNote(clAway, apName||"TBD", "Away SP"),
+      clNote(clHome, hpName||"TBD", "Home SP"),
+      !clAway ? `Away SP ${apName||"TBD"} (${ap.hand}HP, ERA ${apERA.toFixed(2)}, K/9 ${(getEffectiveK9(ap)).toFixed(1)}) vs ${hmHit.obp.toFixed(3)} OBP ${hm.team.teamName||hm.team.name}.` : "",
+      !clHome ? `Home SP ${hpName||"TBD"} (${hp.hand}HP, ERA ${hpERA.toFixed(2)}, K/9 ${(getEffectiveK9(hp)).toFixed(1)}) vs ${awHit.obp.toFixed(3)} OBP ${aw.team.teamName||aw.team.name}.` : "",
+      parkLabel,
+      recentNote(ap, "Away SP") + recentNote(hp, "Home SP"),
+      lineupNote,
+      awayNRFIRec ? `${awayAbbr} 2025 NRFI record: ${awayNRFIRec.w}-${awayNRFIRec.l} (${awayNRFIRec.pct.toFixed(1)}%).` : "",
+      homeNRFIRec ? `${homeAbbr} 2025 NRFI record: ${homeNRFIRec.w}-${homeNRFIRec.l} (${homeNRFIRec.pct.toFixed(1)}%).` : "",
+      weatherNote,
+      umpNote,
+      `Model score ${nrfiScoreRaw>0?"+":""}${nrfiScoreRaw.toFixed(1)} → ${pick} at ${confidence}%.`,
+    ].filter(Boolean).join(" ").trim();
+
+    // pitcher source labels for display
+    const spSrc = (prob, src) => {
+      if (!prob) return "est";
+      if (src === "pp-sourced") return "announced";
+      return src || "probable";
+    };
+
+    // Look up PP NRFI/YRFI line for this game (by team name match)
+    const findPPNRFI = () => {
+      if (!Object.keys(ppNRFI).length) return null;
+      const awLow = (aw.team.teamName||aw.team.name||"").toLowerCase();
+      const hmLow = (hm.team.teamName||hm.team.name||"").toLowerCase();
+      const awAbbr = awayAbbr.toLowerCase();
+      const hmAbbr = homeAbbr.toLowerCase();
+      for (const [, v] of Object.entries(ppNRFI)) {
+        const rawLow = (v.rawName||"").toLowerCase();
+        const teamLow = (v.team||"").toLowerCase();
+        if (rawLow.includes(awLow) || rawLow.includes(hmLow) ||
+            awLow.includes(rawLow) || hmLow.includes(rawLow) ||
+            teamLow === awAbbr || teamLow === hmAbbr) return v;
+      }
+      return null;
+    };
+    const ppNRFILine = findPPNRFI();
+
+    // Catcher framing for each side (helps pitcher Ks, relevant for NRFI too)
+    const [awayCatcher, homeCatcher] = await Promise.all([
+      getCatcherForTeam(g.gamePk, "away"),
+      getCatcherForTeam(g.gamePk, "home"),
+    ]);
+    const parkDims = PARK_DIMS[normTeam(homeAbbr)] || null;
+
+    results.push({
+      gamePk: g.gamePk,
+      away: aw.team.teamName || aw.team.name,
+      home: hm.team.teamName || hm.team.name,
+      awayAbbr, homeAbbr,
+      awayPitcher: apProb?.fullName || "TBD",
+      homePitcher: hpProb?.fullName || "TBD",
+      awayPitcherSrc: spSrc(apProb, apSrc),
+      homePitcherSrc: spSrc(hpProb, hpSrc),
+      awayHand: ap.hand, homeHand: hp.hand,
+      awayERA: apERA, homeERA: hpERA,
+      awayK9: getEffectiveK9(ap), homeK9: getEffectiveK9(hp),
+      awayKPct: ap.kPct, homeKPct: hp.kPct,
+      awayRecentERA: ap.stRecentERA ?? ap.recentERA,
+      homeRecentERA: hp.stRecentERA ?? hp.recentERA,
+      awaySpringERA: ap.stRecentERA || ap.springERA,
+      homeSpringERA: hp.stRecentERA || hp.springERA,
+      awaySpringK9:  ap.stRecentK9  || ap.springK9,
+      homeSpringK9:  hp.stRecentK9  || hp.springK9,
+      awaySpringIP:  ap.springIP, homeSpringIP: hp.springIP,
+      awayOBP: awObp, homeOBP: hmObp,
+      awayTeamKPct: awHit.kPct, homeTeamKPct: hmHit.kPct,
+      awayLineupKPct: awLineupData ? awLineupData.kPct : null,
+      homeLineupKPct: hmLineupData ? hmLineupData.kPct : null,
+      lineupAway: lineup.away, lineupHome: lineup.home,
+      clAway, clHome, clUsed,
+      parkNRFI: PARK_NRFI[normTeam(homeAbbr)],
+      awayTeam1st: TEAM_1ST[normTeam(awayAbbr)],
+      homeTeam1st: TEAM_1ST[normTeam(homeAbbr)],
+      awayNRFIRec, homeNRFIRec,
+      weather, ump,
+      ppNRFILine,
+      parkDims, awayCatcher, homeCatcher,
+      modelScore: nrfiScoreRaw,
+      confidence, analysis,
+    });
+  }));
+  return results.sort((a,b) => Math.abs(b.confidence-50) - Math.abs(a.confidence-50));
+}
+
+// Resolve a pitcher for one side of a game, falling back to PP team data
+async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) {
+  // 1. Standard MLB schedule / boxscore fallback
+  const mlb = await resolvePitcher(schedProb, gamePk, side, gameInfo);
+  if (mlb) return { prob: mlb, src: schedProb?.id ? "probable" : "confirmed" };
+
+  // 2. PP team map: find the PP entry for this team, then look up the MLB ID by name
+  const ppEntries = getPPForTeam(mlbTeam);
+  if (ppEntries && ppEntries.length > 0) {
+    // If >1 pitcher for the team (split squad), just take the first
+    for (const ppE of ppEntries) {
+      const mlbId = await findMLBId(ppE.rawName);
+      if (mlbId) return { prob: { id: mlbId, fullName: ppE.rawName }, src: "pp-sourced" };
+    }
+  }
+  return { prob: null, src: "est" };
+}
+
+async function buildSO(games, season) {
+  setStatus(`Building strikeout model for ${games.length} games…`);
+  const results = [];
+  await Promise.all(games.map(async g => {
+    const aw = g.teams.away, hm = g.teams.home;
+
+    // Resolve pitchers — MLB schedule first, then PP team map fallback
+    const gameInfo = await getGameInfo(g.gamePk);
+    const [awRes, hmRes] = await Promise.all([
+      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team),
+      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team),
+    ]);
+
+    const entries = [
+      { prob: awRes.prob, probSrc: awRes.src, pitchTeam: aw.team, oppTeam: hm.team, oppId: hm.team.id, isHome: false },
+      { prob: hmRes.prob, probSrc: hmRes.src, pitchTeam: hm.team, oppTeam: aw.team, oppId: aw.team.id, isHome: true  },
+    ];
+
+    // Fetch weather + ump once per game (same for both pitchers)
+    const homeAbbrSO = hm.team.abbreviation || hm.team.name?.split(" ").pop() || "";
+    const [weatherSO, umpSO] = await Promise.all([
+      getWeather(homeAbbrSO, selectedDate || today(), g.gameDate),
+      getUmpireForGame(g.gamePk),
+    ]);
+
+    for (const e of entries) {
+      const p   = e.prob ? await getPitcherData(e.prob.id, season) : AVG_PITCHER;
+
+      // Get team fallback AND lineup-level K% (per-batter vs pitcher's hand)
+      const oppLineupBatters = e.isHome ? gameInfo.away : gameInfo.home;
+
+      // If no lineup available yet, try previous day's lineup as a proxy
+      let effectiveBatters = oppLineupBatters;
+      let lineupFromPrevDay = false;
+      if (oppLineupBatters.length < 5) {
+        const oppTeamId = e.isHome ? aw.team.id : hm.team.id;
+        const prevBatters = await getPreviousLineup(oppTeamId, selectedDate || today());
+        if (prevBatters.length >= 5) {
+          effectiveBatters = prevBatters;
+          lineupFromPrevDay = true;
+        }
+      }
+
+      const [teamSplit, lineupKData] = await Promise.all([
+        getTeamVsHand(e.oppId, season, p.hand),
+        effectiveBatters.length >= 5
+          ? getLineupKPct(effectiveBatters, p.hand, season)
+          : Promise.resolve(null),
+      ]);
+
+      // Prefer per-batter lineup K%, fall back to team split
+      const oppKPct = lineupKData ? lineupKData.kPct : teamSplit.kPct;
+      const oppOBP  = teamSplit.obp;
+
+      // Enrich the lineup batters with their K% for display
+      const enrichedBatters = lineupKData ? lineupKData.batters : effectiveBatters;
+      if (e.isHome) { lineupKData && lineupKData.batters.forEach((b,i) => { if(gameInfo.away[i]) Object.assign(gameInfo.away[i], b); }); }
+      else          { lineupKData && lineupKData.batters.forEach((b,i) => { if(gameInfo.home[i]) Object.assign(gameInfo.home[i], b); }); }
+
+      const useK9 = (() => {
+        if (p.stRecentK9 !== null && p.springIP && p.springIP >= 2) {
+          return parseFloat((p.stRecentK9 * 0.55 + p.k9 * 0.45).toFixed(1));
+        }
+        if (p.springK9 !== null && p.springIP && p.springIP >= 1) {
+          return parseFloat((p.springK9 * 0.5 + p.k9 * 0.5).toFixed(1));
+        }
+        // Weight recent form more heavily (last 5 starts are most predictive)
+        return p.recentK9 !== null
+          ? parseFloat((p.k9 * 0.30 + p.recentK9 * 0.70).toFixed(1))
+          : p.k9;
+      })();
+
+      const pitcherName = e.prob?.fullName || "TBD";
+      const teamAbbr    = e.pitchTeam?.abbreviation || e.pitchTeam?.teamName || "";
+      const ppEntry     = lookupPP(pitcherName) || lookupPPByTeam(pitcherName, teamAbbr);
+      if (!ppEntry && pitcherName !== "TBD" && Object.keys(ppLines).length > 0) {
+        const body = document.getElementById("pp-debug-body");
+        if (body) body.innerHTML += `<div style="color:#ffd60a">⚠ No PP match: "${pitcherName}" (${teamAbbr})</div>`;
+      }
+
+      // Expected IP: blend PP outs line with season avg IP/start
+      // Season avg IP/start is capped 4–7 realistically
+      const seasonIP = (p.gs && p.ip) ? Math.min(7.0, Math.max(4.0, p.ip / Math.max(p.gs, 1))) : 5.0;
+      const ppIpFromOuts = ppEntry?.outsLine != null ? ppEntry.outsLine / 3 : null;
+      const expectedIP = ppIpFromOuts != null
+        // PP outs line is a strong signal for expected workload; blend 70/30 with season
+        ? parseFloat(Math.min(8, Math.max(3, ppIpFromOuts * 0.70 + seasonIP * 0.30)).toFixed(1))
+        : seasonIP;
+
+      // ── Apply umpire K% adjustment ──────────────────────────────────────────
+      const umpAdjK9 = useK9 * umpSO.kAdj;
+
+      // ── Apply weather K adjustment ──────────────────────────────────────────
+      const weatherAdjK9 = umpAdjK9 * (weatherSO.soKAdj || 1.0);
+
+      // ── Lineup-adjusted K/9 ────────────────────────────────────────────────
+      // Adjusts for how this specific lineup performs vs pitcher's hand
+      // Two-factor model: lineup K% relative to league avg, and pitcher K% skill
+      const LG_K = 22.5;  // league-avg K% baseline
+      // Lineup K% adjustment: more Ks vs this lineup → higher projection
+      const lineupKAdj = (oppKPct - LG_K) / LG_K;
+      // Pitcher K-skill adjustment (second-order effect — already baked into K/9, small addition)
+      const pitcherKSkill = (p.kPct - LG_K) / LG_K * 0.06;
+      // OBP adjustment: lower OBP = fewer baserunners = slightly fewer K opportunities
+      const obpAdj = (0.320 - oppOBP) * 0.8;  // high OBP lineup = more PA = more Ks
+      const adjK9 = weatherAdjK9 * (1 + lineupKAdj * 0.30 + pitcherKSkill) + obpAdj;
+      const projection = parseFloat(Math.max(0.5, (adjK9 * expectedIP / 9)).toFixed(2));
+
+      // Line: use PrizePicks MLB if available, else calculate
+      const line    = ppEntry
+        ? ppEntry.line
+        : Math.max(0.5, Math.round(projection * 2) / 2);
+      const lineSrc = ppEntry ? "prizepicks" : "calculated";
+      const edge    = parseFloat((projection - line).toFixed(2));
+
+      // Confidence: edge size, lineup quality, ump, weather, pitcher recent form
+      let conf = 50
+        + Math.min(22, Math.abs(edge) * (ppEntry ? 10 : 7.5))
+        + (oppKPct - 22.5) * 0.55
+        + (useK9 - 8.8)    * 0.60
+        + (umpSO.kAdj - 1.0) * 10
+        + (p.kPct - 22.5) * 0.15;
+      if (!lineupKData) conf -= 4;       // slight penalty when using team avg
+      if (lineupFromPrevDay) conf -= 2;  // slight penalty for prev-day lineup proxy
+      if (edge < 0) conf -= 4;
+      if (p.recentK9 !== null) conf += Math.min(3, Math.abs(p.recentK9 - p.k9) * 0.5); // recent form signal
+      const confidence = Math.max(5, Math.min(95, Math.round(conf)));
+      const pick = `${edge >= 0 ? "Over" : "Under"} ${line.toFixed(1)}`;
+
+      // Source label for this pitcher
+      const starter = e.isHome ? gameInfo.homeStarter : gameInfo.awayStarter;
+      const schedProb = e.isHome ? hm.probablePitcher : aw.probablePitcher;
+      let pitcherSrc = e.probSrc || "est";
+      if (e.prob) {
+        if (starter && starter.id === e.prob.id)           pitcherSrc = "confirmed";
+        else if (schedProb && schedProb.id === e.prob.id)  pitcherSrc = "probable";
+        else if (pitcherSrc === "pp-sourced")               pitcherSrc = "announced";
+      }
+
+      const recentNote = p.stRecentK9 ? ` ST K/9 ${p.stRecentK9.toFixed(1)} (${p.springIP?.toFixed(1)} IP).` :
+        p.recentStarts ? ` Recent ${p.recentStarts} starts: ERA ${p.recentERA}, K/9 ${p.recentK9}.` : "";
+      const ipNote = ppEntry?.outsLine != null
+        ? ` PrizePicks ${ppEntry.outsLine} outs (~${(ppEntry.outsLine/3).toFixed(1)} IP implied) → proj workload ~${expectedIP} IP (70% PP outs / 30% season avg).`
+        : "";
+      const lineupSrc = lineupKData
+        ? (lineupFromPrevDay ? "Prev-day lineup used (today's not yet posted)" : "Per-batter lineup K% used")
+        : "Team split K% used";
+      const lineNote  = ppEntry
+        ? `PrizePicks line ${line} (${ppEntry.statType || "Pitcher Strikeouts"}) — middle line from ${ppEntry.allLines?.length || 1} available`
+        : `Calculated line ${line}`;
+      const umpSONote = umpSO.src === "known"
+        ? ` HP Ump ${umpSO.name} K-adj ×${umpSO.kAdj.toFixed(2)} (${umpSO.note}).`
+        : "";
+      const weatherSONote = (() => {
+        if (weatherSO.isRoof) return ` Dome — weather neutral.`;
+        const parts = [];
+        if (weatherSO.windSpeed >= 5) parts.push(`${weatherSO.windSpeed}mph ${weatherSO.windLabel}`);
+        if (weatherSO.tempF < 50) parts.push(`${weatherSO.tempF}°F`);
+        return parts.length ? ` Weather: ${parts.join(", ")} (K adj ×${(weatherSO.soKAdj||1).toFixed(3)}).` : "";
+      })();
+      const analysis = [
+        `${e.prob?.fullName||"TBD"} (${p.hand}HP) K/9 ${useK9.toFixed(1)}`,
+        `→ ump adj ×${umpSO.kAdj.toFixed(2)} → weather adj → ${adjK9.toFixed(1)} effective.`,
+        `${e.oppTeam.teamName||e.oppTeam.name} K% vs ${p.hand}HP: ${oppKPct.toFixed(1)}%. ${lineupSrc}.`,
+        recentNote + ipNote,
+        umpSONote + weatherSONote,
+        `${lineNote} · Projection ${projection} K · Edge ${edge>0?"+":""}${edge} → ${pick} at ${confidence}%.`,
+      ].join(" ").trim();
+
+      const oppTeamName = e.oppTeam.teamName || e.oppTeam.name;
+      const oppDisplayLineup = enrichedBatters.length ? enrichedBatters : effectiveBatters;
+
+      // Skip if no PP line AND no real pitcher (pure avg-stat noise)
+      if (!ppEntry && !e.prob) return;
+
+      // Fetch catcher framing and H2H data in parallel
+      const catcherSide = e.isHome ? "away" : "home";  // catcher is on the batting team
+      const [catcherInfo, h2hData] = await Promise.all([
+        getCatcherForTeam(g.gamePk, catcherSide),
+        e.prob ? getPitcherVsLineup(e.prob.id, effectiveBatters.slice(0,9), season) : Promise.resolve([]),
+      ]);
+
+      // Line movement check
+      const lineMov = getLineMovement(pitcherName);
+
+      results.push({
+        gamePk: g.gamePk,
+        pitcher: e.prob?.fullName || "TBD",
+        pitcherSrc,
+        hand: p.hand,
+        team: e.pitchTeam.abbreviation||e.pitchTeam.teamName,
+        oppTeam: oppTeamName,
+        away: aw.team.teamName||aw.team.name,
+        home: hm.team.teamName||hm.team.name,
+        k9: p.k9, recentK9: p.recentK9, usedK9: useK9,
+        adjK9: parseFloat(adjK9.toFixed(1)),
+        kPct: p.kPct, era: p.era, recentERA: p.recentERA,
+        whip: p.whip,
+        projInnings: expectedIP,
+        expectedIP,
+        seasonIP,
+        ppOutsLine: ppEntry?.outsLine ?? null,
+        ppIpFromOuts,
+        stRecentERA: p.stRecentERA, stRecentK9: p.stRecentK9,
+        springERA: p.springERA, springK9: p.springK9,
+        pitcherSpringIP: p.springIP,
+        oppKPct, oppOBP,
+        lineupKUsed: !!lineupKData && !lineupFromPrevDay,
+        lineupFromPrevDay,
+        oppLineup: oppDisplayLineup,
+        line, lineSrc, ppLine: ppEntry ? ppEntry.line : null,
+        ppAllLines: ppEntry?.allLines || null,
+        ppOutsAllLines: ppEntry?.outsAllLines || null,
+        projection, edge,
+        weather: weatherSO, ump: umpSO,
+        strikeoutPick: pick, confidence, analysis,
+        gameLog: p.gameLog || [],
+        catcherInfo, h2hData,
+        lineMov,
+      });
+    }
+  }));
+  // PP line pitchers always sort to top
+  return results.sort((a,b) => {
+    const aPP = a.lineSrc === "prizepicks" ? 1 : 0;
+    const bPP = b.lineSrc === "prizepicks" ? 1 : 0;
+    if (bPP !== aPP) return bPP - aPP;
+    return Math.abs(b.confidence-50) - Math.abs(a.confidence-50);
+  });
+}
+
+// ─── RENDER ───────────────────────────────────────────────────────────────────
+function renderWeatherUmpPanel(weather, ump) {
+  const hasWeather = weather && !weather.isRoof && (weather.windSpeed > 0 || weather.tempF !== 70);
+  const isDome = weather?.isRoof;
+  const hasUmp = ump && ump.src === "known";
+  if (!hasWeather && !isDome && !hasUmp) return "";
+
+  const windColor = weather?.weatherScore > 2 ? "#00ff88" : weather?.weatherScore < -2 ? "#ff4d6d" : "#94a3b8";
+  const umpColor  = ump?.kAdj >= 1.06 ? "#00ff88" : ump?.kAdj <= 0.93 ? "#ff4d6d" : "#94a3b8";
+
+  return `
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;background:rgba(100,116,139,.07);border:1px solid rgba(100,116,139,.2);border-radius:8px;padding:12px 14px;margin-top:12px">
+    ${(hasWeather || isDome) ? `<div>
+      <div style="font-size:10px;font-weight:700;color:#94a3b8;letter-spacing:.06em;margin-bottom:6px">🌤 WEATHER</div>
+      ${isDome ? `<div style="font-size:12px;color:#64748b">🏟 ${weather.windLabel}</div>` : `
+      <div style="font-size:13px;font-weight:700;color:${windColor}">${weather.windSpeed}mph ${weather.windLabel}</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:2px">${weather.tempF}°F · ${weather.precip}% rain</div>
+      <div style="font-size:10px;color:${windColor};margin-top:3px">${weather.weatherScore > 1.5 ? "✅ NRFI lean" : weather.weatherScore < -1.5 ? "⚠️ YRFI lean" : "Neutral"} (${weather.weatherScore > 0 ? "+" : ""}${weather.weatherScore.toFixed(1)} pts)</div>
+      ${weather.parkName ? `<div style="font-size:10px;color:#475569;margin-top:2px">${weather.parkName}</div>` : ""}
+      `}
+    </div>` : ""}
+    ${hasUmp ? `<div>
+      <div style="font-size:10px;font-weight:700;color:#94a3b8;letter-spacing:.06em;margin-bottom:6px">⚖️ HOME PLATE UMP</div>
+      <div style="font-size:12px;font-weight:700;color:${umpColor}">${ump.name}</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:2px">K-adj: ×${ump.kAdj.toFixed(2)} · Runs/g: ${ump.runsAdj >= 0 ? "+" : ""}${ump.runsAdj.toFixed(2)}</div>
+      <div style="font-size:10px;color:${umpColor};margin-top:3px">${ump.kAdj >= 1.06 ? "✅ Pitcher-friendly" : ump.kAdj <= 0.93 ? "⚠️ Batter-friendly" : "Average zone"}</div>
+      <div style="font-size:10px;color:#475569;margin-top:2px">${ump.note}</div>
+    </div>` : `<div>
+      <div style="font-size:10px;font-weight:700;color:#94a3b8;letter-spacing:.06em;margin-bottom:6px">⚖️ HOME PLATE UMP</div>
+      <div style="font-size:12px;color:#475569">${ump?.name && ump.name !== "Unknown" ? ump.name : "Lineup not posted"}</div>
+      <div style="font-size:10px;color:#475569;margin-top:2px">No historical data — avg zone assumed</div>
+    </div>`}
+  </div>`;
+}
+const bar = (...args) => renderBar(...args);
+function renderBar(label, value, max, color, note) {
+  if (value === null || value === undefined) return "";
+  const fill = pct(value, max);
+  const disp = typeof value === "number" ? value.toFixed(typeof max === "number" && max < 1 ? 3 : 1) : value;
+  return `
+    <div class="bar-row">
+      <div class="bar-lbl-row">
+        <span class="bar-lbl">${label}${note?` <em style="opacity:.6">${note}</em>`:""}</span>
+        <span class="bar-val" style="color:${color}">${disp}</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" style="width:${fill}%;background:${color};box-shadow:0 0 6px ${color}66"></div></div>
+    </div>`;
+}
+
+function platoonIcon(hitSide, pitcherHand) {
+  // Platoon advantage: LHB vs RHP or RHB vs LHP
+  if (!hitSide || !pitcherHand) return "";
+  const adv = (hitSide === "L" && pitcherHand === "R") || (hitSide === "R" && pitcherHand === "L");
+  return adv
+    ? `<span style="color:#00ff88;font-size:10px" title="Platoon advantage">▲</span>`
+    : `<span style="color:#ff4d6d;font-size:10px" title="Platoon disadvantage">▼</span>`;
+}
+
+function renderLineup(batters, title, pitcherHand) {
+  if (!batters || batters.length === 0) return `
+    <div class="lineup-box">
+      <div class="lineup-title">${title} LINEUP</div>
+      <div style="color:#64748b;font-size:11px;padding:4px 0">Not yet posted</div>
+    </div>`;
+
+  const hasKData = batters.some(b => b.kPctVsPitcher !== undefined);
+  return `
+    <div class="lineup-box">
+      <div class="lineup-title">${title} LINEUP${pitcherHand ? ` vs ${pitcherHand}HP` : ""}${hasKData ? " · K% shown vs pitcher's hand" : ""}</div>
+      <div class="lineup-list">
+        ${batters.map((b,i) => {
+          const kPctDisp = b.kPctVsPitcher !== undefined
+            ? `<span style="color:${b.kPctVsPitcher>28?"#ff4d6d":b.kPctVsPitcher>22?"#ffd60a":"#00ff88"};font-weight:700"> K%${b.kPctVsPitcher.toFixed(0)}</span>`
+            : "";
+          const handDisp = b.hitSide || b.bats;
+          const platoon  = platoonIcon(b.hitSide || b.bats, pitcherHand);
+          const obpDisp  = (b.obpVsPitcher || b.obp || 0.320).toFixed(3);
+          return `<div class="lineup-batter">${i+1}. <strong>${b.name}</strong> <span>${b.pos} · ${handDisp}HB ${platoon} · OBP ${obpDisp}${kPctDisp}</span></div>`;
+        }).join("")}
+      </div>
+    </div>`;
+}
+
+function handTag(hand) {
+  return `<span class="hand-tag">${hand}HP</span>`;
+}
+function recentTag(era) {
+  if (era === null) return "";
+  const color = era < 3.5 ? "#00ff88" : era < 4.5 ? "#ffd60a" : "#ff4d6d";
+  return `<span class="recent-tag" style="background:${color}22;border:1px solid ${color}44;color:${color}">Last 5 ERA ${era}</span>`;
+}
+
+function srcTag(src) {
+  const labels = { confirmed: "✓ CONFIRMED", probable: "PROBABLE", announced: "ANNOUNCED", est: "TBD / EST" };
+  return `<span class="src-${src}">${labels[src] || src.toUpperCase()}</span>`;
+}
+
+function eraChip(era) {
+  const cls = era < 3.50 ? "good" : era < 4.50 ? "warn" : "bad";
+  return `<span class="stat-chip ${cls}">ERA ${era.toFixed(2)}</span>`;
+}
+function kpChip(kp) {
+  const cls = kp > 26 ? "good" : kp > 20 ? "warn" : "bad";
+  return `<span class="stat-chip ${cls}">K% ${kp.toFixed(1)}</span>`;
+}
+function k9Chip(k9) {
+  const cls = k9 > 10 ? "good" : k9 > 8 ? "warn" : "bad";
+  return `<span class="stat-chip ${cls}">K/9 ${k9.toFixed(1)}</span>`;
+}
+// CrowdsLine NRFI record badge shown in card header
+function clNrfiChip(cl) {
+  if (!cl) return "";
+  const pct = cl.nrfiPct;
+  const cls = pct >= 65 ? "good" : pct >= 50 ? "warn" : "bad";
+  const stk = cl.streak ? (cl.streak.includes("NRFI") ? " 🔥" : " ❄️") : "";
+  return `<span class="stat-chip ${cls}" title="CrowdsLine career NRFI%">1st ${pct.toFixed(0)}%${stk}</span>`;
+}
+
+// ── GAME LOG RENDER ───────────────────────────────────────────────────────────
+function renderGameLog(gameLog, pitcherHand) {
+  if (!gameLog || gameLog.length === 0) return "";
+  const avgK = gameLog.length ? (gameLog.reduce((a,s)=>a+s.k,0)/gameLog.length).toFixed(1) : "—";
+  return `
+  <div style="background:#0a0e1a;border-radius:8px;padding:11px 14px;margin-top:10px">
+    <div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.06em;margin-bottom:8px">
+      📋 LAST ${gameLog.length} STARTS — Avg K: <span style="color:#00ff88">${avgK}</span>
+    </div>
+    <table class="game-log-table">
+      <thead><tr>
+        <th>DATE</th><th>OPP</th><th>IP</th>
+        <th>K</th><th>H</th><th>BB</th><th>ER</th><th>DEC</th>
+      </tr></thead>
+      <tbody>
+        ${gameLog.map(s => {
+          const kClass = s.k >= 8 ? "k-high" : s.k >= 5 ? "k-mid" : s.k <= 2 ? "k-low" : "";
+          const resultColor = s.result==="W"?"#00ff88":s.result==="L"?"#ff4d6d":"#64748b";
+          return `<tr>
+            <td>${s.date}</td>
+            <td style="color:#e2e8f0;font-weight:700">${s.opp}</td>
+            <td>${s.ip}</td>
+            <td class="${kClass}">${s.k}</td>
+            <td>${s.h}</td>
+            <td>${s.bb}</td>
+            <td style="color:${s.er===0?"#00ff88":s.er>=4?"#ff4d6d":"#94a3b8"}">${s.er}</td>
+            <td style="color:${resultColor};font-weight:700">${s.result}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+// ── UMP ZONE CHART RENDER ─────────────────────────────────────────────────────
+function renderUmpZoneChart(umpName) {
+  const zoneData = getUmpZone(umpName);
+  if (!zoneData) return "";
+  const { zones, note } = zoneData;
+  const zoneColor = (v) => {
+    if (v >= 2)  return { bg:"rgba(0,255,136,.25)", border:"rgba(0,255,136,.5)", txt:"#00ff88" };
+    if (v === 1) return { bg:"rgba(0,255,136,.10)", border:"rgba(0,255,136,.25)", txt:"#00ff88" };
+    if (v === 0) return { bg:"rgba(100,116,139,.12)", border:"rgba(100,116,139,.25)", txt:"#94a3b8" };
+    if (v ===-1) return { bg:"rgba(255,77,109,.10)", border:"rgba(255,77,109,.25)", txt:"#ff4d6d" };
+    return        { bg:"rgba(255,77,109,.25)", border:"rgba(255,77,109,.5)", txt:"#ff4d6d" };
+  };
+  const labels = ["TL","TM","TR","ML","MM","MR","BL","BM","BR"];
+  return `
+  <div style="margin-top:12px">
+    <div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.06em;margin-bottom:8px">⚖️ UMP STRIKE ZONE TENDENCY</div>
+    <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:9px;color:#475569;margin-bottom:5px;text-align:center">Strike zone (catcher view)</div>
+        <div style="position:relative;display:inline-block">
+          <div class="zone-grid">
+            ${zones.map((v,i) => {
+              const c = zoneColor(v);
+              const sign = v > 0 ? "+" : "";
+              return `<div class="zone-cell" style="background:${c.bg};border-color:${c.border};color:${c.txt}">${sign}${v}</div>`;
+            }).join("")}
+          </div>
+          <div style="position:absolute;top:-14px;left:0;right:0;display:flex;justify-content:space-between;font-size:8px;color:#475569;padding:0 4px">
+            <span>IN</span><span>MID</span><span>OUT</span>
+          </div>
+          <div style="margin-top:4px;display:flex;flex-direction:column;gap:1px">
+            <div style="font-size:8px;color:#475569;text-align:right">TOP</div>
+            <div style="font-size:8px;color:#475569;text-align:right;margin-top:4px">MID</div>
+            <div style="font-size:8px;color:#475569;text-align:right;margin-top:4px">BOT</div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:1;min-width:120px">
+        <div style="font-size:10px;color:#94a3b8;line-height:1.6">${note}</div>
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">
+          <span style="font-size:9px;background:rgba(0,255,136,.15);border:1px solid rgba(0,255,136,.3);color:#00ff88;border-radius:3px;padding:1px 5px">+2 Extra strikes</span>
+          <span style="font-size:9px;background:rgba(0,255,136,.08);border:1px solid rgba(0,255,136,.2);color:#00ff88;border-radius:3px;padding:1px 5px">+1 More strikes</span>
+          <span style="font-size:9px;background:rgba(100,116,139,.12);border:1px solid rgba(100,116,139,.25);color:#94a3b8;border-radius:3px;padding:1px 5px">0 Average</span>
+          <span style="font-size:9px;background:rgba(255,77,109,.08);border:1px solid rgba(255,77,109,.2);color:#ff4d6d;border-radius:3px;padding:1px 5px">-1 Fewer strikes</span>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── PARK DIMENSIONS PANEL RENDER ──────────────────────────────────────────────
+function renderParkPanel(homeAbbr, parkDims) {
+  const dims = parkDims || PARK_DIMS[normTeam(homeAbbr)];
+  if (!dims) return "";
+  const hrColor = dims.hrFactor >= 1.10 ? "#ff4d6d" : dims.hrFactor >= 1.04 ? "#ffd60a" : dims.hrFactor <= 0.92 ? "#00ff88" : "#94a3b8";
+  const hrLabel = dims.hrFactor >= 1.10 ? "🔴 Very hitter-friendly" : dims.hrFactor >= 1.04 ? "🟡 Hitter-friendly" : dims.hrFactor <= 0.92 ? "🟢 Pitcher-friendly" : "⚪ Near-average";
+  const pct = (f) => Math.min(100, Math.max(0, (f - 280) / (420 - 280) * 100));
+  return `
+  <div class="park-panel">
+    <div style="font-size:10px;font-weight:700;color:#00d4ff;letter-spacing:.08em;margin-bottom:10px">🏟 ${dims.name} — BALLPARK PROFILE</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:${hrColor};margin-bottom:6px">HR Factor: ${dims.hrFactor.toFixed(2)} — ${hrLabel}</div>
+        <div style="font-size:10px;color:#64748b;margin-bottom:8px">${dims.note}</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <span style="font-size:10px;background:rgba(100,116,139,.15);border:1px solid rgba(100,116,139,.25);border-radius:4px;padding:2px 7px;color:#94a3b8">Surface: ${dims.surface}</span>
+          ${dims.roof ? `<span style="font-size:10px;background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.25);border-radius:4px;padding:2px 7px;color:#00d4ff">🏟 Roof/Dome</span>` : ""}
+        </div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:#64748b;font-weight:700;margin-bottom:8px">DIMENSIONS</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${[["LF",dims.lf,"#ffd60a"],["CF",dims.cf,"#00d4ff"],["RF",dims.rf,"#00ff88"]].map(([label,ft,color])=>`
+          <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+              <span style="font-size:10px;color:#64748b">${label}</span>
+              <span style="font-size:10px;font-weight:700;color:${color}">${ft} ft</span>
+            </div>
+            <div style="background:#1e2d45;border-radius:3px;height:4px">
+              <div style="width:${pct(ft)}%;height:4px;border-radius:3px;background:${color}"></div>
+            </div>
+          </div>`).join("")}
+          ${dims.wallHt ? `<div style="font-size:10px;color:#64748b;margin-top:2px">Wall height: ${dims.wallHt} ft</div>` : ""}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── CATCHER FRAMING PANEL RENDER ──────────────────────────────────────────────
+function renderCatcherPanel(catcherInfo, label) {
+  if (!catcherInfo || !catcherInfo.name) return "";
+  // catcherInfo = { name, framing: <framingEntry object or null> }
+  const framingEntry = catcherInfo.framing || getCatcherFraming(catcherInfo.name);
+  if (!framingEntry) return "";
+  const framingRuns = framingEntry.framing ?? 0;
+  const note = framingEntry.note || "";
+  const color = framingRuns >= 2 ? "#00ff88" : framingRuns >= 0.5 ? "#ffd60a" : framingRuns <= -1.5 ? "#ff4d6d" : "#94a3b8";
+  const sign = framingRuns >= 0 ? "+" : "";
+  const barW = Math.min(100, Math.max(0, (framingRuns + 3) / 6 * 100));
+  return `
+  <div style="background:rgba(167,139,250,.06);border:1px solid rgba(167,139,250,.2);border-radius:8px;padding:10px 14px;margin-top:6px">
+    <div style="font-size:10px;color:#a78bfa;font-weight:700;letter-spacing:.06em;margin-bottom:6px">🧤 ${label} CATCHER FRAMING</div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:13px;font-weight:700;color:#e2e8f0">${catcherInfo.name}</div>
+        <div style="font-size:11px;color:${color};font-weight:700;margin-top:2px">${sign}${framingRuns.toFixed(1)} framing runs/162 <span style="font-size:9px;opacity:.7">(vs avg)</span></div>
+        ${note ? `<div style="font-size:10px;color:#64748b;margin-top:2px">${note}</div>` : ""}
+      </div>
+      <div style="flex:1;min-width:100px">
+        <div style="background:#1e2d45;border-radius:4px;height:6px;position:relative">
+          <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#475569"></div>
+          <div style="
+            position:absolute;
+            left:${framingRuns>=0?50:Math.max(0,(framingRuns+3)/6*100)}%;
+            width:${Math.min(50,Math.abs(framingRuns)/3*50)}%;
+            height:6px;border-radius:4px;background:${color}">
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:#475569;margin-top:2px">
+          <span>−3 (poor)</span><span>avg</span><span>+3 (elite)</span>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── H2H TABLE RENDER ──────────────────────────────────────────────────────────
+function renderH2H(h2hData, pitcherName) {
+  if (!h2hData || h2hData.length === 0) return "";
+  return `
+  <div style="background:#0a0e1a;border-radius:8px;padding:11px 14px;margin-top:10px">
+    <div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.06em;margin-bottom:8px">
+      ⚔️ HEAD-TO-HEAD — ${pitcherName} vs Opp Lineup (career)
+    </div>
+    <table class="game-log-table">
+      <thead><tr>
+        <th>BATTER</th><th>AB</th><th>H</th><th>AVG</th><th>K</th><th>HR</th><th>OPS</th>
+      </tr></thead>
+      <tbody>
+        ${h2hData.map(h => {
+          const kPct = h.ab > 0 ? (h.k/h.ab*100).toFixed(0) : "—";
+          const avgDisp = h.avg !== null ? h.avg.toFixed(3) : "—";
+          const opsDisp = h.ops !== null ? h.ops.toFixed(3) : "—";
+          const avgColor = h.avg !== null ? (h.avg < .200 ? "#00ff88" : h.avg > .300 ? "#ff4d6d" : "#94a3b8") : "#94a3b8";
+          const kColor   = parseInt(kPct) >= 30 ? "#00ff88" : parseInt(kPct) <= 10 ? "#ff4d6d" : "#94a3b8";
+          return `<tr>
+            <td style="color:#e2e8f0;font-weight:700">${h.name}</td>
+            <td>${h.ab}</td>
+            <td>${h.hits}</td>
+            <td style="color:${avgColor};font-weight:700">${avgDisp}</td>
+            <td style="color:${kColor};font-weight:700">${h.k} <span style="font-size:9px;opacity:.6">(${kPct}%)</span></td>
+            <td style="color:${h.hr>0?"#ff4d6d":"#94a3b8"}">${h.hr}</td>
+            <td style="color:${opsDisp!=="—"&&parseFloat(opsDisp)>0.800?"#ff4d6d":opsDisp!=="—"&&parseFloat(opsDisp)<0.600?"#00ff88":"#94a3b8"}">${opsDisp}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+// ── LINE MOVEMENT BADGE RENDER ────────────────────────────────────────────────
+function renderLineMovement(lineMov) {
+  if (!lineMov) return "";
+  const isUp   = lineMov.dir === "up";
+  const color  = isUp ? "#ff4d6d" : "#00ff88";
+  const arrow  = isUp ? "▲" : "▼";
+  const label  = isUp ? "Line moved UP (sharp money on Over?)" : "Line moved DOWN (sharp money on Under?)";
+  return `<div class="line-moved" style="display:inline-flex;align-items:center;gap:6px;background:${color}18;border:1px solid ${color}55;border-radius:5px;padding:3px 10px;font-size:11px;font-weight:700;color:${color};margin-left:4px">
+    ${arrow} ${lineMov.from} → ${lineMov.to} <span style="font-size:9px;opacity:.8">${label}</span>
+  </div>`;
+}
+
+function renderNRFICard(g) {
+  const color = confColor(g.confidence);
+  const id    = `c${g.gamePk}`;
+  const apKPct = g.awayKPct || 22, hpKPct = g.homeKPct || 22;
+  const awRecChip = g.awayNRFIRec ? `<span style="font-size:10px;color:${g.awayNRFIRec.pct>=54?"#00ff88":g.awayNRFIRec.pct>=48?"#ffd60a":"#ff4d6d"};font-weight:700;margin-left:6px">${g.awayNRFIRec.w}-${g.awayNRFIRec.l}</span>` : "";
+  const hmRecChip = g.homeNRFIRec ? `<span style="font-size:10px;color:${g.homeNRFIRec.pct>=54?"#00ff88":g.homeNRFIRec.pct>=48?"#ffd60a":"#ff4d6d"};font-weight:700;margin-left:6px">${g.homeNRFIRec.w}-${g.homeNRFIRec.l}</span>` : "";
+  return `
+    <div class="game-card" id="${id}">
+      <div class="card-hd" onclick="toggle('${id}')">
+        <div style="flex:1;min-width:0">
+          <div class="card-teams">${g.away}${awRecChip} <span style="color:#64748b">@</span> ${g.home}${hmRecChip}</div>
+          <div class="pitcher-row">
+            <div class="pitcher-line">
+              ${srcTag(g.awayPitcherSrc||"est")}
+              <span class="pitcher-name" style="color:#00d4ff">${g.awayPitcher}</span>
+              <span class="hand-tag">${g.awayHand}HP</span>
+              ${eraChip(g.awayERA)}${kpChip(apKPct)}${k9Chip(g.awayK9)}
+              ${g.awayRecentERA!==null?`<span class="stat-chip ${g.awayRecentERA<3.5?"good":g.awayRecentERA<4.5?"warn":"bad"}">L5 ERA ${g.awayRecentERA}</span>`:""}
+              ${g.clAway ? clNrfiChip(g.clAway) : ""}
+            </div>
+            <div class="pitcher-line">
+              ${srcTag(g.homePitcherSrc||"est")}
+              <span class="pitcher-name" style="color:#00d4ff">${g.homePitcher}</span>
+              <span class="hand-tag">${g.homeHand}HP</span>
+              ${eraChip(g.homeERA)}${kpChip(hpKPct)}${k9Chip(g.homeK9)}
+              ${g.homeRecentERA!==null?`<span class="stat-chip ${g.homeRecentERA<3.5?"good":g.homeRecentERA<4.5?"warn":"bad"}">L5 ERA ${g.homeRecentERA}</span>`:""}
+              ${g.clHome ? clNrfiChip(g.clHome) : ""}
+            </div>
+          </div>
+        </div>
+        <div class="card-right">
+          <div class="conf-num" style="color:${color}">${g.confidence}%</div>
+          <span class="badge" style="background:${color}22;color:${color};border:1px solid ${color}44">${g.confidence>=50?"NRFI":"YRFI"}</span>
+          ${g.ppNRFILine ? `<div style="font-size:9px;color:#a78bfa;margin-top:4px;font-weight:700">📊 PP: ${g.ppNRFILine.pick}</div>` : ""}
+          ${g.ump && g.ump.src === "known" ? `<div style="font-size:9px;color:${g.ump.kAdj >= 1.06 ? "#00ff88" : g.ump.kAdj <= 0.93 ? "#ff4d6d" : "#64748b"};margin-top:4px;font-weight:700">⚖️ ×${g.ump.kAdj.toFixed(2)}</div>` : ""}
+          ${g.weather && !g.weather.isRoof && g.weather.windSpeed >= 8 ? `<div style="font-size:9px;color:${g.weather.weatherScore > 1.5 ? "#00ff88" : g.weather.weatherScore < -1.5 ? "#ff4d6d" : "#64748b"};margin-top:2px;font-weight:700">🌬 ${g.weather.windSpeed}mph</div>` : ""}
+        </div>
+      </div>
+      <div class="card-bd" id="${id}-bd">
+        <div class="take-box" style="background:${color}15;border:2px solid ${color}55;margin-top:14px">
+          <div class="take-label" style="color:${color}">MODEL PICK</div>
+          <div class="take-value" style="color:${color}">${g.confidence>=50?"NRFI":"YRFI"} — ${g.away} @ ${g.home}</div>
+          <div class="take-sub" style="color:${color}">Confidence: ${g.confidence}% · Model score ${(g.modelScore||0)>0?"+":""}${(g.modelScore||0).toFixed(1)}</div>
+          ${g.ppNRFILine ? `
+          <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="background:#a78bfa22;border:1px solid #a78bfaaa;color:#a78bfa;border-radius:5px;padding:3px 10px;font-size:12px;font-weight:700;letter-spacing:.04em">📊 PP: ${g.ppNRFILine.statType||"NRFI/YRFI"}</span>
+            <span style="color:#94a3b8;font-size:11px">Line: ${g.ppNRFILine.line} · Pick: ${g.ppNRFILine.pick}</span>
+            ${(g.ppNRFILine.pick==="NRFI"&&g.confidence>=50)||(g.ppNRFILine.pick==="YRFI"&&g.confidence<50)
+              ? `<span style="color:#00ff88;font-size:11px;font-weight:700">✓ PP agrees with model</span>`
+              : g.ppNRFILine.pick!=="NRFI/YRFI"
+                ? `<span style="color:#ffd60a;font-size:11px;font-weight:700">⚠ PP disagrees with model</span>`
+                : ""}
+          </div>` : ""}
+          ${(g.awayNRFIRec || g.homeNRFIRec) ? `
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+            ${g.awayNRFIRec?`<span style="background:rgba(0,0,0,.3);border:1px solid ${g.awayNRFIRec.pct>=54?"#00ff88":g.awayNRFIRec.pct>=48?"#ffd60a":"#ff4d6d"}44;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700;color:${g.awayNRFIRec.pct>=54?"#00ff88":g.awayNRFIRec.pct>=48?"#ffd60a":"#ff4d6d"}">${g.away} NRFI: ${g.awayNRFIRec.w}-${g.awayNRFIRec.l}</span>`:""}
+            ${g.homeNRFIRec?`<span style="background:rgba(0,0,0,.3);border:1px solid ${g.homeNRFIRec.pct>=54?"#00ff88":g.homeNRFIRec.pct>=48?"#ffd60a":"#ff4d6d"}44;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700;color:${g.homeNRFIRec.pct>=54?"#00ff88":g.homeNRFIRec.pct>=48?"#ffd60a":"#ff4d6d"}">${g.home} NRFI: ${g.homeNRFIRec.w}-${g.homeNRFIRec.l}</span>`:""}
+          </div>` : ""}
+        </div>
+        ${(g.clAway || g.clHome || g.parkNRFI) ? `
+        <div style="background:rgba(0,212,255,.07);border:1px solid rgba(0,212,255,.2);border-radius:8px;padding:12px 14px;margin-top:14px">
+          <div style="font-size:10px;font-weight:700;color:#00d4ff;letter-spacing:.08em;margin-bottom:8px">📊 THE CROWD'S LINE — FIRST INNING RECORDS <span style="font-weight:400;color:#64748b;font-size:9px">${(g.clAway&&g.clAway.src==="live")||(g.clHome&&g.clHome.src==="live") ? "· live" : "· seed data"}</span></div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+            ${g.clAway ? `<div>
+              <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">${g.awayPitcher} (Away SP)</div>
+              ${bar("Career NRFI%", g.clAway.nrfiPct, 100, "#00ff88")}
+              ${g.clAway.l10Pct!=null ? bar("Last 10 NRFI%", g.clAway.l10Pct, 100, "#ffd60a") : ""}
+              ${g.clAway.careerRec ? `<div style="font-size:10px;color:#64748b;margin-top:2px">Career 1st-inn W-L: ${g.clAway.careerRec}</div>` : ""}
+              ${g.clAway.streak ? `<div style="font-size:11px;margin-top:4px">${g.clAway.streak.includes("NRFI")?"🔥":"❄️"} Streak: ${g.clAway.streak}</div>` : ""}
+            </div>` : ""}
+            ${g.clHome ? `<div>
+              <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">${g.homePitcher} (Home SP)</div>
+              ${bar("Career NRFI%", g.clHome.nrfiPct, 100, "#00ff88")}
+              ${g.clHome.l10Pct!=null ? bar("Last 10 NRFI%", g.clHome.l10Pct, 100, "#ffd60a") : ""}
+              ${g.clHome.careerRec ? `<div style="font-size:10px;color:#64748b;margin-top:2px">Career 1st-inn W-L: ${g.clHome.careerRec}</div>` : ""}
+              ${g.clHome.streak ? `<div style="font-size:11px;margin-top:4px">${g.clHome.streak.includes("NRFI")?"🔥":"❄️"} Streak: ${g.clHome.streak}</div>` : ""}
+            </div>` : ""}
+            ${g.parkNRFI ? `<div>
+              <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">${g.home} Park (2025)</div>
+              ${bar("Park NRFI%", g.parkNRFI.n, 100, "#00d4ff")}
+              <div style="font-size:10px;color:#64748b;margin-top:2px">Avg runs/game 1st: ${g.parkNRFI.r}</div>
+            </div>` : ""}
+            ${g.homeTeam1st ? `<div>
+              <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Team 1st-Inn Offense (2025)</div>
+              <div style="font-size:11px;color:#94a3b8">${g.away}: ${g.awayTeam1st ? g.awayTeam1st.rs.toFixed(1) : "—"}% score rate</div>
+              <div style="font-size:11px;color:#94a3b8">${g.home}: ${g.homeTeam1st.rs.toFixed(1)}% score rate</div>
+            </div>` : ""}
+            ${(g.awayNRFIRec || g.homeNRFIRec) ? `<div>
+              <div style="font-size:11px;color:#94a3b8;margin-bottom:6px;font-weight:700">📋 2025 NRFI RECORDS</div>
+              ${g.awayNRFIRec ? `<div style="margin-bottom:4px">
+                <div style="font-size:11px;color:#e2e8f0;font-weight:700">${g.away}</div>
+                <div style="font-size:12px;color:${g.awayNRFIRec.pct>=54?"#00ff88":g.awayNRFIRec.pct>=48?"#ffd60a":"#ff4d6d"};font-weight:700">${g.awayNRFIRec.w}-${g.awayNRFIRec.l} <span style="font-size:10px;opacity:.8">(${g.awayNRFIRec.pct.toFixed(1)}%)</span></div>
+              </div>` : ""}
+              ${g.homeNRFIRec ? `<div>
+                <div style="font-size:11px;color:#e2e8f0;font-weight:700">${g.home}</div>
+                <div style="font-size:12px;color:${g.homeNRFIRec.pct>=54?"#00ff88":g.homeNRFIRec.pct>=48?"#ffd60a":"#ff4d6d"};font-weight:700">${g.homeNRFIRec.w}-${g.homeNRFIRec.l} <span style="font-size:10px;opacity:.8">(${g.homeNRFIRec.pct.toFixed(1)}%)</span></div>
+              </div>` : ""}
+            </div>` : ""}
+          </div>
+        </div>` : ""}
+        ${renderWeatherUmpPanel(g.weather, g.ump)}
+        ${renderParkPanel(g.homeAbbr, g.parkDims)}
+        ${g.awayCatcher || g.homeCatcher ? `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <div>${g.awayCatcher ? renderCatcherPanel(g.awayCatcher, g.away + " (Batting)") : ""}</div>
+          <div>${g.homeCatcher ? renderCatcherPanel(g.homeCatcher, g.home + " (Batting)") : ""}</div>
+        </div>` : ""}
+        ${g.ump && g.ump.src === "known" ? renderUmpZoneChart(g.ump.name) : ""}
+        <div class="pitcher-grid" style="margin-top:14px">
+          <div>
+            <div class="pitcher-col-title" style="color:#00d4ff">${g.awayPitcher} (Away SP)</div>
+            ${bar("ERA (weighted)", g.awayERA, 7, "#00d4ff")}
+            ${bar("K%", apKPct, 40, "#00ff88")}
+            ${bar("K/9", g.awayK9, 15, "#00ff88")}
+            ${g.awayRecentERA!==null?bar(g.awaySpringERA!==null?"🌱 ST ERA":"L5 ERA", g.awayRecentERA, 7, "#ffd60a"):""}
+            ${g.awaySpringK9!==null?bar("🌱 ST K/9", g.awaySpringK9, 15, "#ffd60a"):""}
+            ${g.awaySpringIP?`<div style="font-size:10px;color:#64748b;margin-top:2px">🌱 ST: ${g.awaySpringIP.toFixed(1)} IP logged</div>`:""}
+          </div>
+          <div>
+            <div class="pitcher-col-title" style="color:#00d4ff">${g.homePitcher} (Home SP)</div>
+            ${bar("ERA (weighted)", g.homeERA, 7, "#00d4ff")}
+            ${bar("K%", hpKPct, 40, "#00ff88")}
+            ${bar("K/9", g.homeK9, 15, "#00ff88")}
+            ${g.homeRecentERA!==null?bar(g.homeSpringERA!==null?"🌱 ST ERA":"L5 ERA", g.homeRecentERA, 7, "#ffd60a"):""}
+            ${g.homeSpringK9!==null?bar("🌱 ST K/9", g.homeSpringK9, 15, "#ffd60a"):""}
+            ${g.homeSpringIP?`<div style="font-size:10px;color:#64748b;margin-top:2px">🌱 ST: ${g.homeSpringIP.toFixed(1)} IP logged</div>`:""}
+          </div>
+          <div>
+            <div class="pitcher-col-title" style="color:#64748b">${g.away} top-3 vs ${g.homeHand}HP</div>
+            ${bar("OBP", g.awayOBP, 0.42, "#ff4d6d")}
+            ${bar("Lineup K%", g.awayLineupKPct||g.awayTeamKPct, 35, "#ffd60a", g.awayLineupKPct?"top 3 batters":"team avg")}
+          </div>
+          <div>
+            <div class="pitcher-col-title" style="color:#64748b">${g.home} top-3 vs ${g.awayHand}HP</div>
+            ${bar("OBP", g.homeOBP, 0.42, "#ff4d6d")}
+            ${bar("Lineup K%", g.homeLineupKPct||g.homeTeamKPct, 35, "#ffd60a", g.homeLineupKPct?"top 3 batters":"team avg")}
+          </div>
+        </div>
+        <hr class="divider" />
+        ${renderLineup(g.lineupAway, g.away, g.homeHand)}
+        ${renderLineup(g.lineupHome, g.home, g.awayHand)}
+        <div class="analysis-box" style="border:1px solid ${color}33;margin-top:10px">
+          <div class="analysis-lbl">MODEL ANALYSIS</div>
+          <div class="analysis-txt">${g.analysis}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderSOCard(g) {
+  const color = confColor(g.confidence);
+  const id    = `c${g.gamePk}-${g.pitcher.replace(/\s/g,"")}`;
+  const dir   = g.edge >= 0 ? "OVER" : "UNDER";
+  return `
+    <div class="game-card" id="${id}">
+      <div class="card-hd" onclick="toggle('${id}')">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px">
+            ${g.lineSrc==="prizepicks"
+              ? `<span style="background:#00d4ff22;border:1px solid #00d4ffaa;color:#00d4ff;border-radius:5px;padding:3px 10px;font-size:12px;font-weight:700;letter-spacing:.04em">📊 PP: ${g.line} K</span>`
+              : `<span style="background:rgba(100,116,139,.18);border:1px solid rgba(100,116,139,.35);color:#64748b;border-radius:5px;padding:3px 10px;font-size:11px;font-weight:700">CALC: ${g.line} K</span>`}
+            ${g.lineMov ? renderLineMovement(g.lineMov) : ""}
+            <span style="color:#94a3b8;font-size:12px">${g.away} @ ${g.home}</span>
+          </div>
+          <div class="pitcher-line">
+            ${srcTag(g.pitcherSrc||"est")}
+            <span class="pitcher-name" style="color:#fff;font-size:14px">${g.pitcher}</span>
+            <span class="hand-tag">${g.hand}HP</span>
+            ${kpChip(g.kPct)}${k9Chip(g.usedK9)}${eraChip(g.era)}
+            ${g.recentERA!==null?`<span class="stat-chip ${g.recentERA<3.5?"good":g.recentERA<4.5?"warn":"bad"}">L5 ERA ${g.recentERA}</span>`:""}
+          </div>
+          <div style="margin-top:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            ${g.lineupKUsed
+              ? `<span style="font-size:10px;color:#00ff88;font-weight:700">✓ LINEUP POSTED · per-batter K% used</span>`
+              : g.lineupFromPrevDay
+                ? `<span style="font-size:10px;color:#ffd60a;font-weight:700">📋 Prev-day lineup used as proxy</span>`
+                : `<span style="font-size:10px;color:#64748b">⏳ Lineup pending — team avg used</span>`}
+            ${g.ppOutsLine!=null ? `<span style="font-size:10px;color:#ffd60a;font-weight:700">· ~${(g.ppOutsLine/3).toFixed(1)} IP implied</span>` : ""}
+          </div>
+        </div>
+        <div class="card-right">
+          <div class="conf-num" style="color:${color}">${g.confidence}%</div>
+          <span class="badge" style="background:${color}22;color:${color};border:1px solid ${color}44">${g.strikeoutPick}</span>
+        </div>
+      </div>
+      <div class="card-bd" id="${id}-bd">
+        <div class="take-box" style="background:${color}15;border:2px solid ${color}55">
+          <div class="take-label" style="color:${color}">TAKE THIS BET</div>
+          <div class="take-value" style="color:${color}">${g.pitcher} ${dir} ${g.line} Strikeouts</div>
+          <div class="take-sub" style="color:${color}">
+            Projection: ${g.projection}K · Edge: ${g.edge>0?"+":""}${g.edge} · ${g.confidence}% confidence
+          </div>
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            ${g.lineSrc==="prizepicks"
+              ? `<span style="background:#00d4ff22;border:1px solid #00d4ff55;color:#00d4ff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">📊 PRIZEPICKS LINE</span>
+                 ${g.ppAllLines && g.ppAllLines.length > 1 ? `<span style="color:#64748b;font-size:10px">all lines: ${g.ppAllLines.join(" / ")}</span>` : ""}`
+              : `<span style="background:rgba(100,116,139,.2);border:1px solid rgba(100,116,139,.3);color:#64748b;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">CALCULATED LINE</span>`}
+            ${g.ppOutsLine != null
+              ? `<span style="background:rgba(255,214,10,.1);border:1px solid rgba(255,214,10,.3);color:#ffd60a;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">📊 PP ${g.ppOutsLine} outs (~${(g.ppOutsLine/3).toFixed(1)} IP)</span>
+                 ${g.ppOutsAllLines && g.ppOutsAllLines.length > 1 ? `<span style="color:#64748b;font-size:10px">outs: ${g.ppOutsAllLines.join(" / ")}</span>` : ""}`
+              : ""}
+            ${g.ump && g.ump.src === "known" ? `<span style="background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.3);color:#00d4ff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">⚖️ Ump ×${g.ump.kAdj.toFixed(2)}</span>` : ""}
+            ${g.weather && !g.weather.isRoof && g.weather.windSpeed >= 5 ? `<span style="background:rgba(100,116,139,.15);border:1px solid rgba(100,116,139,.25);color:#94a3b8;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">🌬 ${g.weather.windSpeed}mph ${g.weather.windLabel}</span>` : ""}
+          </div>
+        </div>
+        ${renderWeatherUmpPanel(g.weather, g.ump)}
+        <div class="pitcher-grid" style="margin-top:16px">
+          <div>
+            <div class="pitcher-col-title" style="color:#00d4ff">${g.pitcher} — Pitcher Stats</div>
+            ${bar("K% (strikeout rate)", g.kPct, 40, "#00ff88")}
+            ${bar("K/9 (weighted)", g.usedK9, 15, "#00d4ff")}
+            ${bar("K/9 (season)", g.k9, 15, "#64748b")}
+            ${g.stRecentK9!==null?bar("🌱 ST K/9", g.stRecentK9, 15, "#ffd60a"):""}
+            ${g.recentK9!==null&&g.stRecentK9===null?bar("K/9 (last 5 starts)", g.recentK9, 15, "#ffd60a"):""}
+            ${bar("ERA", g.era, 7, "#ffd60a")}
+            ${g.stRecentERA!==null?bar("🌱 ST ERA", g.stRecentERA, 7, "#00d4ff"):""}
+            ${bar("WHIP", g.whip, 2, "#ffd60a")}
+            ${bar("Proj. Innings", g.projInnings, 9, "#64748b", g.ppOutsLine!=null?"PrizePicks outs + season blend":"season avg")}
+            ${g.ppOutsLine!=null?`<div style="font-size:10px;color:#64748b;margin-top:2px">📊 ${g.ppOutsLine} outs line → ~${(g.ppOutsLine/3).toFixed(1)} IP implied, ~${g.projInnings} IP used in model</div>`:""}
+            ${g.pitcherSpringIP?`<div style="font-size:10px;color:#64748b;margin-top:2px">🌱 ${g.pitcherSpringIP.toFixed(1)} IP logged in spring</div>`:""}
+          </div>
+          <div>
+            <div class="pitcher-col-title" style="color:#64748b">Opponent Lineup vs ${g.hand}HP</div>
+            ${bar(`K% vs ${g.hand}HP`, g.oppKPct, 35, "#ff4d6d", g.lineupKUsed?"per-batter":"team avg")}
+            ${bar("Opp OBP", g.oppOBP, 0.42, "#ff4d6d")}
+            <div class="info-row" style="margin-top:12px">
+              <div class="info-lbl">${g.lineSrc==="prizepicks" ? "📊 PrizePicks Line" : "Calculated Line"}</div>
+              <p style="font-size:22px;font-family:'Bebas Neue',sans-serif;color:#00d4ff;margin-bottom:2px">${g.line} K's</p>
+              <p style="font-size:11px;color:#64748b">Proj ${g.projection} · K/9 adj ${g.adjK9} · Edge ${g.edge>0?"+":""}${g.edge}</p>
+              ${g.ppOutsLine!=null?`<p style="font-size:11px;color:#ffd60a;margin-top:3px">📊 PrizePicks ${g.ppOutsLine} outs (~${(g.ppOutsLine/3).toFixed(1)} IP) blended to ~${g.expectedIP ?? g.projInnings} IP for projection</p>`:""}
+            </div>
+          </div>
+        </div>
+        ${renderLineup(g.oppLineup, g.oppTeam + " (Opp)", g.hand)}
+        ${renderGameLog(g.gameLog, g.hand)}
+        ${g.h2hData && g.h2hData.length ? renderH2H(g.h2hData, g.pitcher) : ""}
+        ${g.catcherInfo ? renderCatcherPanel(g.catcherInfo, g.oppTeam + " (Batting)") : ""}
+        ${g.ump && g.ump.src === "known" ? renderUmpZoneChart(g.ump.name) : ""}
+        <div class="analysis-box" style="border:1px solid ${color}33;margin-top:8px">
+          <div class="analysis-lbl">MODEL ANALYSIS</div>
+          <div class="analysis-txt">${g.analysis}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function toggle(id) {
+  const card = document.getElementById(id);
+  const bd   = document.getElementById(id + "-bd");
+  const open = bd.classList.toggle("open");
+  card.classList.toggle("open", open);
+}
+
+// ─── UI HELPERS ───────────────────────────────────────────────────────────────
+function setStatus(msg) { document.getElementById("load-status").textContent = msg; }
+function setLoading(on) {
+  document.getElementById("loader").style.display = on ? "flex" : "none";
+  document.getElementById("refresh-btn").disabled = on;
+}
+function setError(msg) {
+  const b = document.getElementById("error-box");
+  b.style.display = msg ? "flex" : "none";
+  document.getElementById("error-msg").textContent = msg ? "⚠ " + msg : "";
+}
+
+function renderFilters(tab) {
+  const opts = tab === "nrfi"
+    ? ["all","strong","nrfi","yrfi"]
+    : ["all","strong","over","under"];
+  const f = document.getElementById("filters");
+  f.innerHTML = opts.map(o => `
+    <button class="filter-btn${o===activeFilter?" active":""}" onclick="setFilter('${o}')">${o==="strong"?"70%+":o.toUpperCase()}</button>
+  `).join("") + `<span id="game-count"></span>`;
+  f.style.display = "flex";
+}
+
+function filterData(data) {
+  return data.filter(g => {
+    if (activeFilter==="all")    return true;
+    if (activeFilter==="strong") return g.confidence>=70;
+    if (activeFilter==="nrfi")   return g.confidence>=50;
+    if (activeFilter==="yrfi")   return g.confidence<50;
+    if (activeFilter==="over")   return g.edge>0;
+    if (activeFilter==="under")  return g.edge<=0;
+    return true;
+  });
+}
+
+function renderSummary(data, tab) {
+  const ppCount = tab === "strikeouts" ? data.filter(g=>g.lineSrc==="prizepicks").length : 0;
+  const clCount = tab === "nrfi" ? data.filter(g=>g.clUsed).length : 0;
+  const stats = tab === "nrfi"
+    ? [
+        { l:"NRFI Plays",     v:data.filter(g=>g.confidence>=50).length, c:"#00ff88" },
+        { l:"Strong (70%+)",  v:data.filter(g=>g.confidence>=70).length, c:"#00d4ff" },
+        { l:"📊 PP Lines",    v:data.filter(g=>g.ppNRFILine!=null).length, c:"#a78bfa" },
+      ]
+    : [
+        { l:"📊 PP Lines",   v:ppCount,                                   c:"#00d4ff" },
+        { l:"Over Plays",    v:data.filter(g=>g.edge>0).length,           c:"#00ff88" },
+        { l:"Under Plays",   v:data.filter(g=>g.edge<=0).length,          c:"#ff4d6d" },
+      ];
+  const grid = document.getElementById("summary-grid");
+  grid.innerHTML = stats.map(s => `
+    <div class="sum-card">
+      <div class="sum-val" style="color:${s.c}">${s.v}</div>
+      <div class="sum-lbl">${s.l}</div>
+    </div>`).join("");
+  grid.style.display = "grid";
+}
+
+function renderCards(data, tab) {
+  const filtered = filterData(data);
+  document.getElementById("cards").innerHTML = filtered.map(g =>
+    tab === "nrfi" ? renderNRFICard(g) : renderSOCard(g)
+  ).join("");
+  const cnt = document.getElementById("game-count");
+  if (cnt) cnt.textContent = filtered.length + " games";
+  document.getElementById("disclaimer").style.display = "block";
+}
+
+function setFilter(f) {
+  activeFilter = f;
+  renderFilters(activeTab);
+  const d = cache[activeTab];
+  if (d) { renderSummary(d, activeTab); renderCards(d, activeTab); }
+}
+
+// ─── MAIN LOAD ────────────────────────────────────────────────────────────────
+async function loadTab(tab) {
+  setLoading(true);
+  setError("");
+  document.getElementById("cards").innerHTML = "";
+  document.getElementById("summary-grid").style.display = "none";
+  document.getElementById("disclaimer").style.display = "none";
+  document.getElementById("filters").style.display = "none";
+
+  const date    = selectedDate || today();
+  const dateYear= parseInt(date.split("-")[0], 10);
+  const dateMon = parseInt(date.split("-")[1], 10);
+  const season  = dateMon < 4 ? dateYear - 1 : dateYear;
+  const isSpring = dateMon <= 2;
+
+  const label = new Date(`${date}T12:00:00`).toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"});
+  document.getElementById("subtitle").textContent =
+    `${label} · ${isSpring ? "Spring Training · " : ""}Stats from ${season} season`;
+
+  try {
+    setStatus("Fetching schedule…");
+    const games = await getSchedule(date);
+
+    if (!games.length) {
+      setLoading(false);
+      document.getElementById("cards").innerHTML = `
+        <div style="text-align:center;padding:50px 0">
+          <div style="font-size:44px;margin-bottom:14px">⚾</div>
+          <p style="color:#e2e8f0;font-size:15px;font-weight:700;margin-bottom:8px">No games found for ${date}</p>
+          <p style="color:#64748b;font-size:12px;margin-bottom:22px">Try a date during the MLB season (Apr–Oct):</p>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+            ${["2025-09-25","2025-08-15","2025-07-04","2025-06-01","2025-05-01"].map(d =>
+              `<button onclick="jumpTo('${d}')" class="btn btn-accent">${d}</button>`
+            ).join("")}
+          </div>
+        </div>`;
+      return;
+    }
+
+    // Load PrizePicks lines — used for pitcher resolution on BOTH tabs
+    await loadPPLines();
+    if (tab === "strikeouts") {
+      document.getElementById("pp-debug-btn").style.display = "inline-block";
+    }
+
+    setStatus(`Resolving pitchers, weather & umpires for ${games.length} games…`);
+    const data = tab === "nrfi"
+      ? await buildNRFI(games, season)
+      : await buildSO(games, season);
+
+    cache[tab] = data;
+    activeFilter = "all";
+    renderFilters(tab);
+    renderSummary(data, tab);
+    renderCards(data, tab);
+    document.getElementById("updated").textContent = "Updated " + new Date().toLocaleTimeString();
+  } catch(e) {
+    setError(e.message || "Failed to load. Check internet connection.");
+  }
+  setLoading(false);
+}
+
+// ─── EVENTS ───────────────────────────────────────────────────────────────────
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    activeTab = btn.dataset.tab;
+    if (cache[activeTab]) {
+      renderFilters(activeTab);
+      renderSummary(cache[activeTab], activeTab);
+      renderCards(cache[activeTab], activeTab);
+    } else {
+      loadTab(activeTab);
+    }
+  });
+});
+
+document.getElementById("refresh-btn").addEventListener("click", () => {
+  cache = { nrfi: null, strikeouts: null };
+  ppLoaded = false; ppLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
+  _umpData = {}; _weather = {};
+  [_lineup, _batterKPct, _pitcher, _teamSplit, _personBats].forEach(c => Object.keys(c).forEach(k => delete c[k]));
+  loadTab(activeTab);
+});
+document.getElementById("retry-btn").addEventListener("click", () => loadTab(activeTab));
+document.getElementById("date-picker").addEventListener("change", e => {
+  selectedDate = e.target.value;
+  cache = { nrfi: null, strikeouts: null };
+  ppLoaded = false; ppLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
+  _umpData = {}; _weather = {};
+  [_lineup, _batterKPct, _pitcher, _teamSplit, _personBats].forEach(c => Object.keys(c).forEach(k => delete c[k]));
+  loadTab(activeTab);
+});
+
+function jumpTo(date) {
+  selectedDate = date;
+  document.getElementById("date-picker").value = date;
+  cache = { nrfi: null, strikeouts: null };
+  loadTab(activeTab);
+}
+
+// Start
+selectedDate = today();
+document.getElementById("date-picker").value = selectedDate;
+loadTab("nrfi");
+</script>
+</body>
+</html>

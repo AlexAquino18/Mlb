@@ -1,0 +1,17 @@
+[build]
+  publish = "."
+
+# ── Edge Functions ─────────────────────────────────────────────────────────────
+# pp.js lives in netlify/edge-functions/pp.js
+# It runs on Deno at the CDN edge — no cold starts, full fetch + crypto APIs.
+[[edge_functions]]
+  path     = "/.netlify/functions/pp"
+  function = "pp"
+
+# ── Headers ───────────────────────────────────────────────────────────────────
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options         = "DENY"
+    Referrer-Policy         = "strict-origin-when-cross-origin"
