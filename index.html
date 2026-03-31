@@ -2293,7 +2293,19 @@ async function buildNRFI(games, season) {
 async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) {
   // 1. Standard MLB schedule / boxscore fallback
   const mlb = await resolvePitcher(schedProb, gamePk, side, gameInfo);
-  if (mlb) return { prob: mlb, src: schedProb?.id ? "probable" : "confirmed" };
+  if (mlb) {
+    // Cross-check: if PP data is loaded and has this pitcher on a DIFFERENT team, it's stale/bad data
+    const expectedAbbr = mlbTeam?.abbreviation?.toUpperCase();
+    const ppEntry = mlb.fullName ? lookupPP(mlb.fullName) : null;
+    const ppLoaded = Object.keys(ppLines).length > 0;
+    const wrongTeam = ppLoaded && ppEntry?.team && expectedAbbr
+                      && ppEntry.team.toUpperCase() !== expectedAbbr;
+    if (!wrongTeam) {
+      return { prob: mlb, src: schedProb?.id ? "probable" : "confirmed" };
+    }
+    console.warn(`[MLB] Pitcher team mismatch: ${mlb.fullName} (PP team=${ppEntry.team}, expected=${expectedAbbr}) — skipping`);
+    // fall through to PP team-map lookup
+  }
 
   // 2. PP team map: find the PP entry for this team, then look up the MLB ID by name
   const ppEntries = getPPForTeam(mlbTeam);
