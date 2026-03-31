@@ -2324,11 +2324,34 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) 
   if (mlb && mlb.id) {
     const expectedAbbr = mlbTeam?.abbreviation?.toUpperCase();
     const teamId       = mlbTeam?.id;
-    if (expectedAbbr && teamId) {
-      // Primary check: is this player actually on the team's active roster?
-      const onRoster = await isPlayerOnTeam(mlb.id, teamId);
-      if (!onRoster) {
-        console.warn(`[MLB] ${mlb.fullName} (id=${mlb.id}) NOT on ${expectedAbbr} active roster — skipping schedule pitcher`);
+    if (expectedAbbr && mlb.fullName) {
+      const nk = normName(mlb.fullName);
+      let mismatchReason = null;
+
+      // Fast check A: PP K/outs line has this pitcher under a DIFFERENT team
+      const ppEntry  = lookupPP(mlb.fullName);
+      const ppLoaded = Object.keys(ppLines).length > 0;
+      console.log(`[MLB] resolvePitcher: ${mlb.fullName} expected=${expectedAbbr} ppEntry.team=${ppEntry?.team||"none"} ppLoaded=${ppLoaded}`);
+      if (ppLoaded && ppEntry?.team && ppEntry.team.toUpperCase() !== expectedAbbr) {
+        mismatchReason = `PP-K team=${ppEntry.team}`;
+      }
+
+      // Fast check B: PP hitter lines have this player as a batter on a DIFFERENT team
+      if (!mismatchReason) {
+        const hitterEntry = ppHitterLines[nk];
+        if (hitterEntry?.team && hitterEntry.team.toUpperCase() !== expectedAbbr) {
+          mismatchReason = `PP-batter team=${hitterEntry.team}`;
+        }
+      }
+
+      // Roster check C: only if we have a teamId and fast checks didn't find a mismatch
+      if (!mismatchReason && teamId) {
+        const onRoster = await isPlayerOnTeam(mlb.id, teamId);
+        if (!onRoster) mismatchReason = `not on ${expectedAbbr} active roster`;
+      }
+
+      if (mismatchReason) {
+        console.warn(`[MLB] Skipping ${mlb.fullName} for ${expectedAbbr}: ${mismatchReason}`);
         // fall through to PP team map
       } else {
         return { prob: mlb, src: schedProb?.id ? "probable" : "confirmed" };
