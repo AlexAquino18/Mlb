@@ -2397,26 +2397,24 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) 
   const expectedTeamId = mlbTeam?.id;
   if (ppEntries && ppEntries.length > 0) {
     for (const ppE of ppEntries) {
-      // Fast check: if this player is in ppHitterLines for a different team, skip them
+      // Key check: if PP's own data is internally inconsistent
+      // (player's batter-line team ≠ their K-line team), the K-line is misassigned
       const hE = ppHitterLines[normName(ppE.rawName)];
-      if (hE?.team && hE.team.toUpperCase() !== expectedAbbr2) {
-        console.warn(`[MLB] PP fallback skip (batter team): ${ppE.rawName} is ${hE.team} batter ≠ ${expectedAbbr2}`);
+      if (hE?.team && ppE.team && hE.team.toUpperCase() !== ppE.team.toUpperCase()) {
+        console.warn(`[MLB] PP fallback skip: ${ppE.rawName} K-line team=${ppE.team} ≠ batter team=${hE.team}`);
         continue;
       }
 
       const mlbId = await findMLBId(ppE.rawName);
       if (!mlbId) continue;
 
-      // Verify via MLB people API — try abbreviation first, then team ID
-      const [currentAbbr, currentTeamId] = await Promise.all([
-        getPitcherCurrentTeamAbbr(mlbId),
-        getPitcherCurrentTeamId(mlbId),
-      ]);
-      const abbrMismatch = currentAbbr && expectedAbbr2 && currentAbbr !== expectedAbbr2;
-      const idMismatch   = currentTeamId && expectedTeamId && currentTeamId !== expectedTeamId;
-      if (abbrMismatch || idMismatch) {
-        console.warn(`[MLB] PP fallback skip: ${ppE.rawName} currentTeam=${currentAbbr||currentTeamId} ≠ ${expectedAbbr2||expectedTeamId}`);
-        continue;
+      // Secondary: MLB people API team ID check (works even when abbreviation is absent)
+      if (expectedTeamId) {
+        const currentTeamId = await getPitcherCurrentTeamId(mlbId);
+        if (currentTeamId && currentTeamId !== expectedTeamId) {
+          console.warn(`[MLB] PP fallback skip: ${ppE.rawName} teamId=${currentTeamId} ≠ ${expectedTeamId}`);
+          continue;
+        }
       }
       return { prob: { id: mlbId, fullName: ppE.rawName }, src: "pp-sourced" };
     }
@@ -2510,14 +2508,10 @@ async function buildSO(games, season) {
       const teamAbbr  = e.pitchTeam?.abbreviation || e.pitchTeam?.teamName || "";
       let ppEntry = lookupPP(pitcherName) || lookupPPByTeam(pitcherName, teamAbbr);
 
-      // Definitive team check: if PP has this pitcher on a different team, reject them
+      // Team check: only compare when we have a non-empty teamAbbr to compare against
       const ppDataLoaded = Object.keys(ppLines).length > 0;
-      if (e.prob && ppDataLoaded && ppEntry?.team && ppEntry.team.toUpperCase() !== teamAbbr.toUpperCase()) {
+      if (e.prob && ppDataLoaded && teamAbbr && ppEntry?.team && ppEntry.team.toUpperCase() !== teamAbbr.toUpperCase()) {
         console.warn(`[MLB] SO: ${pitcherName} is a ${ppEntry.team} pitcher, not ${teamAbbr} — resetting to TBD`);
-        e.prob = null; p = AVG_PITCHER; pitcherName = "TBD"; ppEntry = null;
-      } else if (e.prob && ppDataLoaded && !ppEntry && p.currentTeamAbbr && p.currentTeamAbbr !== teamAbbr.toUpperCase()) {
-        // PP has no line for them but MLB people API shows wrong team
-        console.warn(`[MLB] SO: ${pitcherName} currentTeam=${p.currentTeamAbbr} ≠ ${teamAbbr} — resetting to TBD`);
         e.prob = null; p = AVG_PITCHER; pitcherName = "TBD"; ppEntry = null;
       }
 
@@ -3332,13 +3326,13 @@ async function buildHitters(games, season) {
     // Validate pitchers: PP K-line team check (most reliable — uses cached PP data)
     const ppDataLoaded = Object.keys(ppLines).length > 0;
     const checkPitcherTeam = (prob, expectedAbbr) => {
-      if (!prob || !expectedAbbr) return prob;
+      if (!prob) return prob;
       const ppE = lookupPP(prob.fullName);
-      if (ppDataLoaded && ppE?.team && ppE.team.toUpperCase() !== expectedAbbr.toUpperCase()) {
+      // Only compare when we have a real non-empty expected abbreviation
+      if (ppDataLoaded && ppE?.team && expectedAbbr && ppE.team.toUpperCase() !== expectedAbbr.toUpperCase()) {
         console.warn(`[MLB] Hitters: ${prob.fullName} PP team=${ppE.team} ≠ ${expectedAbbr} — resetting to TBD`);
         return null;
       }
-      // Fallback: currentTeamAbbr from MLB people API (if available)
       return prob;
     };
     awProb = checkPitcherTeam(awProb, aw.team.abbreviation);
