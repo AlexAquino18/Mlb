@@ -2290,21 +2290,47 @@ async function buildNRFI(games, season) {
 }
 
 // Resolve a pitcher for one side of a game, falling back to PP team data
+const _pitcherTeamCache = {};
+async function getPitcherCurrentTeamAbbr(playerId) {
+  if (!playerId) return null;
+  if (_pitcherTeamCache[playerId] !== undefined) return _pitcherTeamCache[playerId];
+  try {
+    const d = await mlbGet(`/people/${playerId}`);
+    const abbr = d?.people?.[0]?.currentTeam?.abbreviation?.toUpperCase() || null;
+    _pitcherTeamCache[playerId] = abbr;
+    return abbr;
+  } catch { _pitcherTeamCache[playerId] = null; return null; }
+}
+
 async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) {
   // 1. Standard MLB schedule / boxscore fallback
   const mlb = await resolvePitcher(schedProb, gamePk, side, gameInfo);
-  if (mlb) {
-    // Cross-check: if PP data is loaded and has this pitcher on a DIFFERENT team, it's stale/bad data
+  if (mlb && mlb.id) {
     const expectedAbbr = mlbTeam?.abbreviation?.toUpperCase();
-    const ppEntry = mlb.fullName ? lookupPP(mlb.fullName) : null;
-    const ppLoaded = Object.keys(ppLines).length > 0;
-    const wrongTeam = ppLoaded && ppEntry?.team && expectedAbbr
-                      && ppEntry.team.toUpperCase() !== expectedAbbr;
-    if (!wrongTeam) {
+    if (expectedAbbr) {
+      // First try the fast PP-line check (no extra API call needed)
+      const ppEntry = mlb.fullName ? lookupPP(mlb.fullName) : null;
+      const ppLoaded = Object.keys(ppLines).length > 0;
+      const ppWrongTeam = ppLoaded && ppEntry?.team && ppEntry.team.toUpperCase() !== expectedAbbr;
+
+      if (ppWrongTeam) {
+        console.warn(`[MLB] Pitcher PP mismatch: ${mlb.fullName} PP=${ppEntry.team} expected=${expectedAbbr} — skipping`);
+        // fall through
+      } else {
+        // PP check passed (or no PP entry). Verify via MLB people API — cached after first call.
+        const currentTeam = await getPitcherCurrentTeamAbbr(mlb.id);
+        if (currentTeam && currentTeam !== expectedAbbr) {
+          console.warn(`[MLB] Pitcher team mismatch: ${mlb.fullName} currentTeam=${currentTeam} expected=${expectedAbbr} — skipping`);
+          // fall through
+        } else {
+          return { prob: mlb, src: schedProb?.id ? "probable" : "confirmed" };
+        }
+      }
+    } else {
       return { prob: mlb, src: schedProb?.id ? "probable" : "confirmed" };
     }
-    console.warn(`[MLB] Pitcher team mismatch: ${mlb.fullName} (PP team=${ppEntry.team}, expected=${expectedAbbr}) — skipping`);
-    // fall through to PP team-map lookup
+  } else if (mlb) {
+    return { prob: mlb, src: "confirmed" };
   }
 
   // 2. PP team map: find the PP entry for this team, then look up the MLB ID by name
