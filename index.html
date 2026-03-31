@@ -2427,10 +2427,10 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) 
       const mlbId = await findMLBId(ppE.rawName);
       if (!mlbId) continue;
 
-      // Check 4: MLB people API team ID confirmation (fail-closed: skip if mismatch OR unknown)
+      // Check 4: MLB people API team ID confirmation (fail-open: only reject on confirmed mismatch)
       if (expTeamId) {
         const currentTeamId = await getPitcherCurrentTeamId(mlbId);
-        if (!currentTeamId || currentTeamId !== expTeamId) {
+        if (currentTeamId && currentTeamId !== expTeamId) {
           console.warn(`[MLB] PP fallback skip: ${ppE.rawName} teamId=${currentTeamId} ≠ ${expTeamId}`);
           continue;
         }
