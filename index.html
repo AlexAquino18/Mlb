@@ -107,6 +107,10 @@
     .hitter-section-title { font-size: 12px; font-weight: 700; color: #94a3b8; margin: 14px 0 8px; letter-spacing: .04em; }
     .hand-tag { display: inline-block; background: rgba(100,116,139,.2); border: 1px solid rgba(100,116,139,.3); border-radius: 4px; padding: 1px 5px; font-size: 10px; color: #94a3b8; margin-left: 5px; }
     .divider { border: none; border-top: 1px solid #1e2d45; margin: 14px 0; }
+    .batter-row { cursor: pointer; }
+    .batter-row:hover { background: rgba(0,212,255,.03); border-radius: 6px; }
+    .batter-gl { display: none; padding: 6px 0 2px; }
+    .batter-gl.open { display: block; }
     #disclaimer { background: #111827; border: 1px solid #1e2d45; border-radius: 10px; padding: 16px; margin-top: 20px; color: #64748b; font-size: 11px; line-height: 1.6; }
 
     /* ── GAME LOG TABLE ──────────────────────────────────────────────────── */
@@ -822,7 +826,7 @@ async function loadPPLines() {
         const oSrc = (oAct.length ? oAct : oE).sort((a,b) => a.line - b.line);
         outsLine     = oSrc[0].line;
         outsStatType = oSrc[0].statType;
-        outsAllLines = oSrc.map(e => e.line);
+        outsAllLines = [...new Set(oSrc.map(e => e.line))];
       }
 
       const key = normName(name);
@@ -831,7 +835,7 @@ async function loadPPLines() {
         statType: src[0].statType,
         rawName:  name,
         team:     team,
-        allLines: src.map(e => e.line),
+        allLines: [...new Set(src.map(e => e.line))],
         outsLine,
         outsStatType,
         outsAllLines,
@@ -3142,6 +3146,29 @@ async function getHitterGameLog(playerId, season) {
   } catch(_) { _hitterStats[key] = []; return []; }
 }
 
+// Fetch last 5 regular-season games for a batter
+async function getHitterGameLog(playerId, season) {
+  const key = `hgl_${playerId}_${season}`;
+  if (_hitterStats[key] !== undefined) return _hitterStats[key];
+  try {
+    const d = await mlbGet(`/people/${playerId}/stats?stats=gameLog&group=hitting&gameType=R&season=${season}&limit=5`);
+    const splits = d?.stats?.[0]?.splits || [];
+    const result = splits.slice(0, 5).map(sp => ({
+      date: (sp.date || "").slice(5),
+      opp:  sp.opponent?.abbreviation || "?",
+      ab:   sp.stat?.atBats          || 0,
+      h:    sp.stat?.hits            || 0,
+      hr:   sp.stat?.homeRuns        || 0,
+      rbi:  sp.stat?.rbi             || 0,
+      bb:   sp.stat?.baseOnBalls     || 0,
+      sb:   sp.stat?.stolenBases     || 0,
+      tb:   sp.stat?.totalBases      || 0,
+    }));
+    _hitterStats[key] = result;
+    return result;
+  } catch(_) { _hitterStats[key] = []; return []; }
+}
+
 // Fetch active roster for a team — used as fallback when lineup isn't posted
 const _rosterCache = {};
 async function getTeamRoster(teamId, season) {
@@ -3290,6 +3317,7 @@ async function buildHitters(games, season) {
       ppLineCount, topProps,
       hasLineup: gameInfo.away?.length > 0 || gameInfo.home?.length > 0,
       rosterFallback: (!gameInfo.away?.length && awayData.length > 0) || (!gameInfo.home?.length && homeData.length > 0),
+      season,
     });
   }));
   results.sort((a,b) => new Date(a.gameTime) - new Date(b.gameTime));
@@ -3359,12 +3387,13 @@ function renderHitterCard(g) {
       }
 
       return `
-        <div class="batter-row">
+        <div class="batter-row" onclick="toggleBatterLog(${b.id}, ${g.season})">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:4px;margin-bottom:3px">
             <div>
               <span class="pitcher-name">${b.order ? `#${b.order} ` : ""}${b.name}</span>
               <span class="stat-chip" style="margin-left:5px">${b.pos}</span>
               <span class="stat-chip" style="margin-left:3px">B:${b.bats}</span>
+              <span style="font-size:9px;color:#334155;margin-left:6px">▾ L5</span>
             </div>
             <div>${bestStr}</div>
           </div>
@@ -3374,6 +3403,7 @@ function renderHitterCard(g) {
           </div>
           ${platoonHtml ? `<div style="margin-top:4px">${platoonHtml}</div>` : ""}
           ${chips ? `<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">${chips}</div>` : ""}
+          <div class="batter-gl" id="bgl-${b.id}"></div>
         </div>`;
     }).join("");
   };
@@ -3419,6 +3449,43 @@ function renderHitterCard(g) {
     </div>`;
 }
 
+
+const _batterGLLoaded = new Set();
+async function toggleBatterLog(playerId, season) {
+  const el = document.getElementById(`bgl-${playerId}`);
+  if (!el) return;
+  el.classList.toggle("open");
+  if (!el.classList.contains("open") || _batterGLLoaded.has(playerId)) return;
+  _batterGLLoaded.add(playerId);
+  el.innerHTML = `<div style="color:#475569;font-size:11px;padding:4px 0">Loading…</div>`;
+  const log = await getHitterGameLog(playerId, season);
+  if (!log.length) {
+    el.innerHTML = `<div style="color:#475569;font-size:11px;padding:4px 0">No recent game data</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <table class="game-log-table" style="margin-top:4px">
+      <thead><tr>
+        <th>DATE</th><th>OPP</th><th>AB</th>
+        <th>H</th><th>HR</th><th>RBI</th><th>BB</th><th>TB</th>
+      </tr></thead>
+      <tbody>
+        ${log.map(g => {
+          const hColor = g.h >= 3 ? "#00ff88" : g.h === 0 ? "#ff4d6d" : "#e2e8f0";
+          return `<tr>
+            <td>${g.date}</td>
+            <td style="color:#e2e8f0;font-weight:700">${g.opp}</td>
+            <td>${g.ab}</td>
+            <td style="color:${hColor};font-weight:700">${g.h}</td>
+            <td style="color:${g.hr>0?"#ff4d6d":"#64748b"}">${g.hr}</td>
+            <td>${g.rbi}</td>
+            <td>${g.bb}</td>
+            <td>${g.tb}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>`;
+}
 
 function renderSOCard(g) {
   const color = confColor(g.confidence);
