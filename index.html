@@ -1613,6 +1613,29 @@ function parseIP(s) {
 function pct(v, max) { return Math.min(100, Math.max(0, (v/max)*100)).toFixed(1); }
 function confColor(c) { return c>=70?"#00ff88":c>=50?"#ffd60a":"#ff4d6d"; }
 
+/** Career H2H vs today's SP: 0–100 for Top 10 ranking (penalize cold splits when sample is real). */
+function computeH2hVsSpScore(h2h, seasonAvg) {
+  const sa = (seasonAvg != null && !Number.isNaN(seasonAvg)) ? seasonAvg : 0.255;
+  const out = { score: 16, tier: "none", short: "" };
+  if (!h2h || !h2h.ab) return out;
+  const ab = h2h.ab;
+  const avg3 = Math.round(h2h.avg * 1000).toString().padStart(3, "0");
+  out.short = `${h2h.hits}-${ab} (.${avg3})`;
+  if (ab < 5) { out.tier = "tiny"; out.score = 22; return out; }
+  const d = h2h.avg - sa;
+  const sampleTrust = Math.min(1, (ab - 4) / 22);
+  let tier, raw;
+  if (d >= 0.038) { tier = "hot"; raw = 88; }
+  else if (d >= 0.012) { tier = "good"; raw = 68; }
+  else if (d >= -0.018) { tier = "mid"; raw = 44; }
+  else if (d >= -0.042) { tier = "weak"; raw = 22; }
+  else { tier = "cold"; raw = 6; }
+  out.tier = tier;
+  let s = raw * (0.42 + 0.58 * sampleTrust) + (tier === "cold" || tier === "weak" ? d * 45 : d * 58);
+  out.score = Math.max(0, Math.min(100, s));
+  return out;
+}
+
 // ─── CACHES ───────────────────────────────────────────────────────────────────
 const _pitcher = {}, _teamAll = {}, _teamSplit = {}, _lineup = {}, _batterKPct = {}, _personBats = {};
 let ppHitterLines = {};
@@ -1762,7 +1785,7 @@ async function getPitcherData(id, season) {
     currentTeamAbbr, currentTeamId,
   };
 
-  // pybaseball: FanGraphs scrape and/or Statcast Savant CSV — /api/fangraphs_pitcher
+  // Pitcher advanced: FanGraphs and/or Savant Statcast CSV — /api/fangraphs_pitcher
   try {
     const fr = await fetchTimeout(`/api/fangraphs_pitcher?mlbam=${id}&season=${season}`, 28000);
     if (fr) {
@@ -2591,7 +2614,7 @@ function probOverStrikeouts(meanK, lineHalf) {
   return Math.max(0.03, Math.min(0.97, 1 - normalCDF(z)));
 }
 
-/** pybaseball/FanGraphs: rates may be 0–1 or 0–100 depending on scrape */
+/** FanGraphs: rates may be 0–1 or 0–100 depending on scrape */
 function fgRateToPct100(v) {
   if (v == null || Number.isNaN(Number(v))) return null;
   const n = Number(v);
@@ -2726,7 +2749,7 @@ async function buildSO(games, season) {
         ? parseFloat(Math.min(8, Math.max(3, ppIpFromOuts * 0.70 + seasonIP * 0.30)).toFixed(1))
         : seasonIP;
 
-      // ── Strikeout model: E[K] ≈ E[BF] × K% — prioritize FanGraphs (pybaseball) when loaded ──
+      // ── Strikeout model: E[K] ≈ E[BF] × K% — prioritize FanGraphs advanced rates when loaded ──
       const LG_K = 22.5;
       const fgK100 = fgRateToPct100(p.fgKPct);
       const fgBB100 = fgRateToPct100(p.fgBBPct);
@@ -2841,13 +2864,13 @@ async function buildSO(games, season) {
         return parts.length ? ` Weather: ${parts.join(", ")} (K adj ×${(weatherSO.soKAdj||1).toFixed(3)}).` : "";
       })();
       const marketNote = ppEntry
-        ? ` Raw model ${analyticalK} K → blended ${projection} K (${((1 - MARKET_SHRINK) * 100).toFixed(0)}% model / ${(MARKET_SHRINK * 100).toFixed(0)}% PP line${hasFG ? "; pybaseball advanced anchor" : ""}).`
+        ? ` Raw model ${analyticalK} K → blended ${projection} K (${((1 - MARKET_SHRINK) * 100).toFixed(0)}% model / ${(MARKET_SHRINK * 100).toFixed(0)}% PP line${hasFG ? "; FG/Savant advanced anchor" : ""}).`
         : "";
       const fgAnchorTxt = !hasFG
         ? ""
         : p.fgSource === "statcast"
-          ? "Statcast (pybaseball) K%/whiff process · "
-          : "FanGraphs (pybaseball) K% anchor + CSW/SwStr process · ";
+          ? "Statcast K%/whiff process · "
+          : "FanGraphs K% anchor + CSW/SwStr process · ";
       const analysis = [
         `${e.prob?.fullName||"TBD"} (${p.hand}HP): BF×K% — ${fgAnchorTxt}${statcastMatchup?.kPctAdj != null ? `Statcast mix×whiff adj ${statcastMatchup.kPctAdj >= 0 ? "+" : ""}${statcastMatchup.kPctAdj} pp · ` : ""}~${expectedBF.toFixed(0)} BF × ${effKPct.toFixed(1)}% eff K% ⇒ ${analyticalK} K.`,
         `K/9 display ${useK9.toFixed(1)} · implied ${adjK9.toFixed(1)} K/9 from BF path.`,
@@ -3662,7 +3685,7 @@ async function buildHitters(games, season) {
         let pHits = pAvg * abPG * parkHit.hit;
         let pTB   = (useAvg > 0 ? pHits * (useSlg / useAvg) : pHits * 1.55) * parkHit.tb;
         let pHR   = hrR * abPG * hrFactor;
-        // pybaseball Statcast: xwOBA vs wOBA (positive regression), barrel% (HR power)
+        // Savant Statcast: xwOBA vs wOBA (positive regression), barrel% (HR power)
         const pyLuck = (stats.scXwoba != null && stats.scWoba != null && stats.scWoba > 0.2)
           ? (1 + Math.max(-0.085, Math.min(0.085, (stats.scXwoba - stats.scWoba) * 0.52)))
           : 1;
@@ -3720,10 +3743,13 @@ async function buildHitters(games, season) {
         if (h2h && h2h.ab >= 8 && h2h.avg >= stats.avg + 0.025) matchupScore += 6;
         else if (h2h && h2h.ab >= 15 && h2h.avg >= 0.28) matchupScore += 4;
 
+        const h2hVsSp = computeH2hVsSpScore(h2h, stats.avg);
+        const top10Rank = h2hVsSp.score * 0.62 + Math.min(85, matchupScore) * 0.38;
+
         return { id:b.id, name:b.name, pos:b.pos, order:fromRoster ? null : idx+1,
           bats:stats.bats, stats, h2h, ppEntry:ppE, platoon, platoonLabel,
           proj:{hits:pHits, tb:pTB, hr:pHR, bb:pBB, runs:pRuns, rbi:pRBI, hrr:pHRR},
-          propList, bestProp, conf, matchupScore, oppPitcherName:oppName, oppHand, fromRoster };
+          propList, bestProp, conf, matchupScore, h2hVsSp, top10Rank, oppPitcherName:oppName, oppHand, fromRoster };
       }));
     };
 
@@ -3763,13 +3789,46 @@ function renderTop10Hitters(games) {
     for (const b of g.awayBatters || []) rows.push({ b, g, side: "away" });
     for (const b of g.homeBatters || []) rows.push({ b, g, side: "home" });
   }
-  const ranked = rows
-    .filter((x) => x.b.bestProp && x.b.matchupScore != null)
-    .sort((a, b) => b.b.matchupScore - a.b.matchupScore)
-    .slice(0, 10);
+  const coldBadH2h = (b) => {
+    const h = b.h2h;
+    if (!h || !h.ab || h.ab < 10) return false;
+    return b.h2hVsSp && b.h2hVsSp.tier === "cold";
+  };
+  /** OVER TB at min line (0.5) — skip Top 10 unless career vs-SP H2H is good or hot */
+  const cheapTbOverWithoutStrongH2h = (b) => {
+    const bp = b.bestProp;
+    if (!bp || bp.stat !== "TB") return false;
+    const line = Number(bp.line);
+    if (Number.isNaN(line) || line > 0.5) return false;
+    if (bp.edge < 0) return false;
+    const t = b.h2hVsSp && b.h2hVsSp.tier;
+    return t !== "good" && t !== "hot";
+  };
+  const pool = rows
+    .filter((x) => x.b.bestProp && x.b.top10Rank != null)
+    .sort((a, b) => b.b.top10Rank - a.b.top10Rank);
+  const ranked = [];
+  for (const x of pool) {
+    if (ranked.length >= 10) break;
+    if (coldBadH2h(x.b)) continue;
+    if (cheapTbOverWithoutStrongH2h(x.b)) continue;
+    ranked.push(x);
+  }
+  for (const x of pool) {
+    if (ranked.length >= 10) break;
+    if (ranked.includes(x)) continue;
+    if (cheapTbOverWithoutStrongH2h(x.b)) continue;
+    ranked.push(x);
+  }
   if (!ranked.length) return "";
   const pit = (x) => (x.side === "away" ? x.g.homePitcher : x.g.awayPitcher);
   const team = (x) => (x.side === "away" ? x.g.awayTeam : x.g.homeTeam);
+  const h2hLine = (b) => {
+    const t = b.h2hVsSp && b.h2hVsSp.tier;
+    const icon = t === "hot" || t === "good" ? "🔥" : t === "cold" || t === "weak" ? "🥶" : "";
+    const h = b.h2hVsSp && b.h2hVsSp.short ? `H2H vs SP: ${b.h2hVsSp.short} ${icon}`.trim() : "H2H vs SP: —";
+    return h;
+  };
   const html = ranked.map((x, i) => {
     const { b, g } = x;
     const cc = confColor(b.conf);
@@ -3781,10 +3840,11 @@ function renderTop10Hitters(games) {
           <span style="font-weight:800;font-size:13px;color:#e2e8f0">${b.name}</span>
           <span class="stat-chip" style="font-size:9px;margin-left:4px">${team(x)}</span>
           <div style="font-size:10px;color:#64748b;margin-top:3px">vs ${pit(x) || "TBD"} · ${edge >= 0 ? "OVER" : "UNDER"} ${b.bestProp.stat} ${b.bestProp.line}</div>
+          <div style="font-size:9px;color:#475569;margin-top:2px">${h2hLine(b)}</div>
         </div>
         <div style="text-align:right;flex-shrink:0">
           <span style="background:${cc}22;border:1px solid ${cc}44;color:${cc};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">${b.conf}%</span>
-          <div style="font-size:10px;color:#64748b;margin-top:2px">match ${b.matchupScore.toFixed(1)}</div>
+          <div style="font-size:10px;color:#64748b;margin-top:2px">rank ${b.top10Rank.toFixed(1)} · edge ${b.matchupScore.toFixed(1)}</div>
         </div>
       </div>`;
   }).join("");
@@ -3793,7 +3853,7 @@ function renderTop10Hitters(games) {
       <div class="card-hd" style="cursor:default;padding:14px 18px">
         <div>
           <div style="font-size:11px;font-weight:800;color:#00d4ff;letter-spacing:.08em">TOP 10 MATCHUPS</div>
-          <div style="font-size:10px;color:#64748b;margin-top:4px">Statcast (pybaseball) + prop edge + H2H · click to jump</div>
+          <div style="font-size:10px;color:#64748b;margin-top:4px">Savant edge + prop line · career H2H vs SP weighted · click to jump</div>
         </div>
       </div>
       <div style="padding:0">${html}</div>
@@ -4046,9 +4106,9 @@ function renderSOCard(g) {
               : `<span style="background:rgba(100,116,139,.18);border:1px solid rgba(100,116,139,.35);color:#64748b;border-radius:5px;padding:3px 10px;font-size:11px;font-weight:700">CALC: ${g.line} K</span>`}
             ${g.lineMov ? renderLineMovement(g.lineMov) : ""}
             ${g.fanGraphsInModel ? (g.fgSource === "statcast"
-              ? `<span style="font-size:10px;font-weight:700;color:#c4b5fd;border:1px solid rgba(196,181,253,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="Savant Statcast rates via pybaseball (K%, whiff%)">Statcast + pybaseball</span>`
-              : `<span style="font-size:10px;font-weight:700;color:#c4b5fd;border:1px solid rgba(196,181,253,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="K% anchored on FanGraphs (pybaseball) + CSW%/SwStr%">FanGraphs + pybaseball</span>`) : ""}
-            ${g.statcastMatchup && g.statcastMatchup.expectedWhiffVsMix != null ? `<span style="font-size:10px;font-weight:700;color:#a78bfa;border:1px solid rgba(167,139,250,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="Savant pitch mix × batter whiff% (pybaseball Statcast)">Mix×whiff</span>` : ""}
+              ? `<span style="font-size:10px;font-weight:700;color:#c4b5fd;border:1px solid rgba(196,181,253,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="Savant Statcast rates (K%, whiff%)">Statcast</span>`
+              : `<span style="font-size:10px;font-weight:700;color:#c4b5fd;border:1px solid rgba(196,181,253,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="FanGraphs K% + CSW%/SwStr%">FanGraphs</span>`) : ""}
+            ${g.statcastMatchup && g.statcastMatchup.expectedWhiffVsMix != null ? `<span style="font-size:10px;font-weight:700;color:#a78bfa;border:1px solid rgba(167,139,250,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="Savant pitch mix × batter whiff%">Mix×whiff</span>` : ""}
             <span style="color:#94a3b8;font-size:12px">${g.away} @ ${g.home}</span>
           </div>
           <div class="pitcher-line">
@@ -4102,7 +4162,7 @@ function renderSOCard(g) {
           <div class="take-label" style="color:${color}">TAKE THIS BET</div>
           <div class="take-value" style="color:${color}">${g.pitcher} ${dir} ${g.line} Strikeouts</div>
           <div class="take-sub" style="color:${color}">
-            Projection: ${g.projection}K · Edge: ${g.edge>0?"+":""}${g.edge} · ${g.confidence}% confidence${g.fanGraphsInModel ? (g.fgSource === "statcast" ? " · Statcast K%/whiff (pybaseball)" : " · FG-backed K%/CSW") : ""}
+            Projection: ${g.projection}K · Edge: ${g.edge>0?"+":""}${g.edge} · ${g.confidence}% confidence${g.fanGraphsInModel ? (g.fgSource === "statcast" ? " · Statcast K%/whiff" : " · FG-backed K%/CSW") : ""}
           </div>
           <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             ${g.lineSrc==="prizepicks"
@@ -4122,8 +4182,8 @@ function renderSOCard(g) {
           <div>
             <div class="pitcher-col-title" style="color:#00d4ff">${g.pitcher} — Pitcher Stats</div>
             ${bar("K% (strikeout rate)", g.kPct, 40, "#00ff88")}
-            ${g.fgCSW!=null&&!Number.isNaN(g.fgCSW)?bar("CSW% (FanGraphs / pybaseball)", g.fgCSW>1?g.fgCSW:g.fgCSW*100, 40, "#c4b5fd", g.fgSeason?`season ${g.fgSeason}`:""):""}
-            ${g.fgSwStr!=null&&!Number.isNaN(g.fgSwStr)?bar(g.fgSource==="statcast"?"Whiff% (Statcast / pybaseball)":"SwStr% (FanGraphs)", g.fgSwStr>1?g.fgSwStr:g.fgSwStr*100, 45, "#a78bfa", g.fgSeason?`season ${g.fgSeason}`:""):""}
+            ${g.fgCSW!=null&&!Number.isNaN(g.fgCSW)?bar("CSW% (FanGraphs)", g.fgCSW>1?g.fgCSW:g.fgCSW*100, 40, "#c4b5fd", g.fgSeason?`season ${g.fgSeason}`:""):""}
+            ${g.fgSwStr!=null&&!Number.isNaN(g.fgSwStr)?bar(g.fgSource==="statcast"?"Whiff% (Statcast)":"SwStr% (FanGraphs)", g.fgSwStr>1?g.fgSwStr:g.fgSwStr*100, 45, "#a78bfa", g.fgSeason?`season ${g.fgSeason}`:""):""}
             ${bar("K/9 (weighted)", g.usedK9, 15, "#00d4ff")}
             ${bar("K/9 (season)", g.k9, 15, "#64748b")}
             ${g.stRecentK9!==null?bar("🌱 ST K/9", g.stRecentK9, 15, "#ffd60a"):""}
@@ -4140,7 +4200,7 @@ function renderSOCard(g) {
               const rows = (sm.pitchMix || []).slice(0, 5);
               const mixTxt = rows.map((m) => `${m.name || m.pitch} ${m.usagePct}%`).join(" · ");
               return `<div style="margin-top:12px;padding:10px;background:rgba(167,139,250,.07);border:1px solid rgba(167,139,250,.22);border-radius:8px">
-                <div style="font-size:10px;font-weight:800;color:#a78bfa;letter-spacing:.06em;margin-bottom:6px">STATCAST · MIX × WHIFF (pybaseball)</div>
+                <div style="font-size:10px;font-weight:800;color:#a78bfa;letter-spacing:.06em;margin-bottom:6px">STATCAST · MIX × WHIFF</div>
                 <div style="font-size:12px;color:#e2e8f0">Exp. whiff vs this arsenal: <strong style="color:#c4b5fd">${sm.expectedWhiffVsMix}%</strong>
                   ${sm.kPctAdj != null ? ` · K% adj <strong>${sm.kPctAdj >= 0 ? "+" : ""}${sm.kPctAdj}</strong> pp` : ""}
                   <span style="color:#64748b;font-size:10px"> · Savant ${sm.season}</span>
