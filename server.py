@@ -89,7 +89,7 @@ def fangraphs_pitcher_route():
     mlbam = request.args.get("mlbam")
     season = request.args.get("season")
     try:
-        from lib.fangraphs_pitcher import get_pitcher_advanced
+        from fangraphs_impl import get_pitcher_advanced
         if not mlbam or not season:
             return Response(
                 json.dumps({"ok": False, "error": "missing mlbam or season"}),
