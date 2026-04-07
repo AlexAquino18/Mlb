@@ -22,8 +22,32 @@ const UA_POOL = [
   "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
   "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.82 Safari/537.36",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
 ];
+
+/** Extra headers for Chrome-family UAs (PrizePicks often checks Sec-CH-UA). */
+function ppFetchHeaders(ua) {
+  const h = {
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "User-Agent": ua,
+    "Referer": "https://app.prizepicks.com/",
+    "Origin": "https://app.prizepicks.com",
+    "X-Device-ID": crypto.randomUUID(),
+    "X-App-Version": "9.0.0",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site",
+  };
+  if (ua.includes("Chrome")) {
+    h["sec-ch-ua"] = '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"';
+    h["sec-ch-ua-mobile"] = ua.includes("iPhone") || ua.includes("Android") ? "?1" : "?0";
+    h["sec-ch-ua-platform"] = ua.includes("Windows") ? '"Windows"' : ua.includes("Mac") ? '"macOS"' : '"Android"';
+  }
+  return h;
+}
 
 function corsHeaders() {
   return {
@@ -66,29 +90,15 @@ export default {
       try {
         const resp = await fetch(target, {
           method: "GET",
-          headers: {
-            "Accept":           "application/json, text/plain, */*",
-            "Accept-Language":  "en-US,en;q=0.9",
-            "User-Agent":       ua,
-            "Referer":          "https://app.prizepicks.com/",
-            "Origin":           "https://app.prizepicks.com",
-            "X-Device-ID":      crypto.randomUUID(),
-            "X-App-Version":    "9.0.0",
-            "Cache-Control":    "no-cache",
-            "Pragma":           "no-cache",
-            "Sec-Fetch-Dest":   "empty",
-            "Sec-Fetch-Mode":   "cors",
-            "Sec-Fetch-Site":   "same-site",
-          },
+          headers: ppFetchHeaders(ua),
         });
 
-        if (resp.status === 403) {
-          // Hard block — no point retrying
-          const text = await resp.text();
-          return new Response(text, { status: 403, headers: { ...corsHeaders(), "Content-Type": "application/json" } });
+        if (resp.status === 403 && attempt < 2) {
+          await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+          lastErr = new Error("PP returned 403");
+          continue;
         }
         if (resp.status === 429 && attempt < 2) {
-          // Rate limited — wait longer before retry
           await new Promise(r => setTimeout(r, 3000 * (attempt + 1)));
           lastErr = new Error(`PP returned 429`);
           continue;

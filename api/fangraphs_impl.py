@@ -1,5 +1,5 @@
 """
-FanGraphs / pybaseball pitcher advanced stats — single module for Vercel + Flask.
+FanGraphs / pybaseball — MUST live under api/ so Vercel Python bundles it with the handler.
 """
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ def _num_from_row(r: pd.Series, *names: str) -> Optional[float]:
 
 
 def _seasons_to_try(season: int) -> List[int]:
-    """Current year first, then prior seasons (early-year / missing FG data)."""
     out = []
     for y in (season, season - 1, season - 2, season - 3):
         if y >= 2000 and y not in out:
@@ -47,10 +46,6 @@ def _row_for_fg_id(df: pd.DataFrame, fg_id: int) -> Optional[pd.Series]:
 
 
 def get_pitcher_advanced(mlbam: int, season: int) -> Dict[str, Any]:
-    """
-    Map MLBAM -> FanGraphs ID, pull pitching leaders row (SwStr%, CSW%, K%, BB%).
-    Never raises — returns {ok: False, ...} on failure.
-    """
     try:
         from pybaseball import pitching_stats, playerid_reverse_lookup
     except ImportError as e:

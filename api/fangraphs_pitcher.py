@@ -1,6 +1,6 @@
 """
-Vercel Python serverless — GET /api/fangraphs_pitcher?mlbam=594798&season=2025
-Imports repo-root fangraphs_impl.py (lib/ is not always on Vercel's Python path).
+Vercel Python — GET /api/fangraphs_pitcher?mlbam=594798&season=2026
+Imports fangraphs_impl from the same api/ directory (bundled on deploy).
 """
 import json
 import os
@@ -8,9 +8,9 @@ import sys
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
+_API_DIR = os.path.dirname(os.path.abspath(__file__))
+if _API_DIR not in sys.path:
+    sys.path.insert(0, _API_DIR)
 
 from fangraphs_impl import get_pitcher_advanced  # noqa: E402
 
@@ -37,8 +37,6 @@ class handler(BaseHTTPRequestHandler):
         raw_season = (qs.get("season") or [None])[0]
 
         out: dict = {"ok": False, "error": "bad_request"}
-        # Use 200 for almost all JSON responses so the browser does not log hard failures;
-        # clients should check `ok`.
         status = 200
 
         try:

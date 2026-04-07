@@ -89,6 +89,11 @@ def fangraphs_pitcher_route():
     mlbam = request.args.get("mlbam")
     season = request.args.get("season")
     try:
+        import os as _os
+        import sys as _sys
+        _apid = _os.path.join(_os.path.dirname(__file__), "api")
+        if _apid not in _sys.path:
+            _sys.path.insert(0, _apid)
         from fangraphs_impl import get_pitcher_advanced
         if not mlbam or not season:
             return Response(
