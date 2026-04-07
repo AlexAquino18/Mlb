@@ -1754,11 +1754,28 @@ async function getPitcherData(id, season) {
   const result = {
     hand, era, k9, kPct, ip, gs, whip, bb9,
     bfPerIp, recentKPct, kMinusBbPct, strikePct,
+    fgSwStr: null, fgCSW: null, fgKPct: null, fgBBPct: null, fgSeason: null,
     recentERA, recentK9, recentStarts, gameLog,
     springERA, springK9, springKPct, springIP, springStarts,
     stRecentERA, stRecentK9,
     currentTeamAbbr, currentTeamId,
   };
+
+  // FanGraphs advanced rates (pybaseball) — SwStr% / CSW% via /api/fangraphs_pitcher
+  try {
+    const fr = await fetchTimeout(`/api/fangraphs_pitcher?mlbam=${id}&season=${season}`, 6500);
+    if (fr && fr.ok) {
+      const j = await fr.json();
+      if (j && j.ok) {
+        result.fgSwStr = j.swStr != null ? Number(j.swStr) : null;
+        result.fgCSW = j.csw != null ? Number(j.csw) : null;
+        result.fgKPct = j.kPct != null ? Number(j.kPct) : null;
+        result.fgBBPct = j.bbPct != null ? Number(j.bbPct) : null;
+        result.fgSeason = j.season != null ? Number(j.season) : null;
+      }
+    }
+  } catch (_) {}
+
   _pitcher[key] = result;
   return result;
 }
@@ -2047,6 +2064,7 @@ async function resolvePitcher(probFromSchedule, gamePk, side, gameInfo) {
 const AVG_PITCHER = {
   hand:"R", era:4.20, k9:8.8, kPct:22, ip:160, gs:28, whip:1.30, bb9:3.2,
   bfPerIp:4.35, recentKPct:null, kMinusBbPct:14, strikePct:0.645,
+  fgSwStr:null, fgCSW:null, fgKPct:null, fgBBPct:null, fgSeason:null,
   recentERA:null, recentK9:null, recentStarts:0,
   springERA:null, springK9:null, springKPct:null, springIP:null, springStarts:0,
   stRecentERA:null, stRecentK9:null,
@@ -2685,8 +2703,15 @@ async function buildSO(games, season) {
         blendKPct = parseFloat((p.kPct * 0.42 + p.recentKPct * 0.58).toFixed(2));
       }
       blendKPct += kmbSkill;
-      const strikeBonus = ((p.strikePct || 0.645) - 0.645) * 9;
-      blendKPct += Math.min(1.2, Math.max(-1.2, strikeBonus));
+      let strikeSkillAdj = Math.min(1.2, Math.max(-1.2, ((p.strikePct || 0.645) - 0.645) * 9));
+      if (p.fgCSW != null && !Number.isNaN(p.fgCSW)) {
+        const csw = p.fgCSW > 1 ? p.fgCSW / 100 : p.fgCSW;
+        strikeSkillAdj = Math.min(2.2, Math.max(-2.2, (csw - 0.285) * 22));
+      } else if (p.fgSwStr != null && !Number.isNaN(p.fgSwStr)) {
+        const sw = p.fgSwStr > 1 ? p.fgSwStr / 100 : p.fgSwStr;
+        strikeSkillAdj = Math.min(1.8, Math.max(-1.8, (sw - 0.105) * 14));
+      }
+      blendKPct += strikeSkillAdj;
 
       const envKMult = (0.88 + 0.12 * umpSO.kAdj) * (0.94 + 0.06 * (weatherSO.soKAdj || 1.0));
       let effKPct = blendKPct * envKMult;
@@ -2790,6 +2815,7 @@ async function buildSO(games, season) {
         oppTeam: oppTeamName,
         away: aw.team.teamName||aw.team.name,
         home: hm.team.teamName||hm.team.name,
+        fgCSW: p.fgCSW, fgSwStr: p.fgSwStr, fgSeason: p.fgSeason,
         k9: p.k9, recentK9: p.recentK9, usedK9: useK9,
         adjK9: parseFloat(adjK9.toFixed(1)),
         kPct: p.kPct, era: p.era, recentERA: p.recentERA,
@@ -3938,6 +3964,8 @@ function renderSOCard(g) {
           <div>
             <div class="pitcher-col-title" style="color:#00d4ff">${g.pitcher} — Pitcher Stats</div>
             ${bar("K% (strikeout rate)", g.kPct, 40, "#00ff88")}
+            ${g.fgCSW!=null&&!Number.isNaN(g.fgCSW)?bar("CSW% (FanGraphs / pybaseball)", g.fgCSW>1?g.fgCSW:g.fgCSW*100, 40, "#c4b5fd", g.fgSeason?`season ${g.fgSeason}`:""):""}
+            ${g.fgSwStr!=null&&!Number.isNaN(g.fgSwStr)?bar("SwStr% (FanGraphs)", g.fgSwStr>1?g.fgSwStr:g.fgSwStr*100, 20, "#a78bfa"):""}
             ${bar("K/9 (weighted)", g.usedK9, 15, "#00d4ff")}
             ${bar("K/9 (season)", g.k9, 15, "#64748b")}
             ${g.stRecentK9!==null?bar("🌱 ST K/9", g.stRecentK9, 15, "#ffd60a"):""}

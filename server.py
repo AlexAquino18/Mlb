@@ -3,7 +3,8 @@ MLB Edge — Python dev server + PrizePicks proxy
 Uses curl_cffi to impersonate Chrome TLS fingerprint, bypassing Cloudflare bot detection.
 
 Install once:
-    pip install curl_cffi flask
+    pip install curl_cffi flask pybaseball
+    (or: pip install -r requirements.txt curl_cffi flask)
 
 Run:
     python server.py
@@ -78,6 +79,35 @@ def proxy_prizepicks(path_param: str):
 
     return Response(json.dumps({"error": last_err or "Proxy failed"}), status=502,
                     headers={**CORS_HEADERS, "Content-Type": "application/json"})
+
+
+@app.route("/api/fangraphs_pitcher")
+def fangraphs_pitcher_route():
+    """FanGraphs SwStr% / CSW% via pybaseball — same contract as Vercel /api/fangraphs_pitcher."""
+    if request.method == "OPTIONS":
+        return Response(status=204, headers=CORS_HEADERS)
+    mlbam = request.args.get("mlbam")
+    season = request.args.get("season")
+    try:
+        from lib.fangraphs_pitcher import get_pitcher_advanced
+        if not mlbam or not season:
+            return Response(
+                json.dumps({"ok": False, "error": "missing mlbam or season"}),
+                status=400,
+                headers={**CORS_HEADERS, "Content-Type": "application/json"},
+            )
+        out = get_pitcher_advanced(int(mlbam), int(season))
+        return Response(
+            json.dumps(out, default=str),
+            status=200,
+            headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "public, max-age=3600"},
+        )
+    except Exception as e:
+        return Response(
+            json.dumps({"ok": False, "error": "server_error", "detail": str(e)}),
+            status=500,
+            headers={**CORS_HEADERS, "Content-Type": "application/json"},
+        )
 
 
 @app.route("/.netlify/functions/pp")
