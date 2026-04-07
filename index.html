@@ -1267,6 +1267,8 @@ const UMP_DATA = {
   "fairchild chad":   {kAdj:1.03, runsAdj:-0.03, note:"Above avg K zone"},
   "hamari adam":      {kAdj:1.05, runsAdj:-0.05, note:"Pitcher-friendly, wide zone"},
   "livensparger shane":{kAdj:1.06,runsAdj:-0.06, note:"High K caller"},
+  "beck adam":        {kAdj:1.02, runsAdj:-0.02, note:"Near average"},
+  "mackay alex":      {kAdj:1.01, runsAdj:-0.01, note:"Near average (crew chief)"},
 };
 
 // Cache for umpire and weather data
@@ -1683,9 +1685,15 @@ async function getPitcherData(id, season) {
   const gs  = s ? (s.gamesStarted||20) : 20;
   const whip= s ? parseFloat(s.whip)||1.30 : 1.30;
   const bb9 = s && ip ? ((s.baseOnBalls||0)*9/ip) : 3.2;
+  const bbPct = s ? ((s.baseOnBalls||0)/(s.battersFaced||1)*100) : 8.0;
+  const kMinusBbPct = kPct - bbPct;
+  const bfPerIp = s && ip > 0 ? (s.battersFaced||0) / ip : 4.35;
+  const strikePct = s
+    ? (parseFloat(s.strikePercentage) || ((s.strikes||0) / Math.max(1, s.numberOfPitches||0)))
+    : 0.645;
 
   // Recent form – last 5 regular-season starts
-  let recentERA = null, recentK9 = null, recentStarts = 0;
+  let recentERA = null, recentK9 = null, recentKPct = null, recentStarts = 0;
   if (logData.status === "fulfilled") {
     const splits = logData.value?.stats?.[0]?.splits || [];
     const starts = splits.filter(sp => sp.stat?.gamesStarted > 0).slice(0,5);
@@ -1694,8 +1702,10 @@ async function getPitcherData(id, season) {
       const totalER = starts.reduce((a,sp)=>a+(sp.stat.earnedRuns||0),0);
       const totalIP = starts.reduce((a,sp)=>a+parseIP(sp.stat.inningsPitched),0);
       const totalK  = starts.reduce((a,sp)=>a+(sp.stat.strikeOuts||0),0);
+      const totalBF = starts.reduce((a,sp)=>a+(sp.stat.battersFaced||0),0);
       recentERA = totalIP ? parseFloat((totalER*9/totalIP).toFixed(2)) : null;
       recentK9  = totalIP ? parseFloat((totalK*9/totalIP).toFixed(1))  : null;
+      if (totalBF >= 25) recentKPct = parseFloat(((totalK/totalBF)*100).toFixed(2));
     }
   }
 
@@ -1743,6 +1753,7 @@ async function getPitcherData(id, season) {
 
   const result = {
     hand, era, k9, kPct, ip, gs, whip, bb9,
+    bfPerIp, recentKPct, kMinusBbPct, strikePct,
     recentERA, recentK9, recentStarts, gameLog,
     springERA, springK9, springKPct, springIP, springStarts,
     stRecentERA, stRecentK9,
@@ -2035,6 +2046,7 @@ async function resolvePitcher(probFromSchedule, gamePk, side, gameInfo) {
 // ─── MODELS ───────────────────────────────────────────────────────────────────
 const AVG_PITCHER = {
   hand:"R", era:4.20, k9:8.8, kPct:22, ip:160, gs:28, whip:1.30, bb9:3.2,
+  bfPerIp:4.35, recentKPct:null, kMinusBbPct:14, strikePct:0.645,
   recentERA:null, recentK9:null, recentStarts:0,
   springERA:null, springK9:null, springKPct:null, springIP:null, springStarts:0,
   stRecentERA:null, stRecentK9:null,
@@ -2542,6 +2554,23 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) 
   return { prob: null, src: "est" };
 }
 
+// Normal CDF (Abramowitz approx.) — used to calibrate SO prop confidence vs a half-line
+function normalCDF(x) {
+  const a1 =  0.254829592, a2 = -0.284496736, a3 = 1.421413741, a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x) / Math.SQRT2;
+  const t = 1 / (1 + p * ax);
+  const y = 1 - (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-ax * ax));
+  return 0.5 * (1 + sign * y);
+}
+/** P(total K > half-line) using normal approx.; line 7.5 → need 8+ K */
+function probOverStrikeouts(meanK, lineHalf) {
+  const needK = lineHalf + 0.5;
+  const sd = Math.max(1.15, Math.sqrt(Math.max(2.2, meanK)) * 1.06);
+  const z = (needK - meanK) / sd;
+  return Math.max(0.03, Math.min(0.97, 1 - normalCDF(z)));
+}
+
 async function buildSO(games, season) {
   setStatus(`Building strikeout model for ${games.length} games…`);
   const results = [];
@@ -2641,53 +2670,56 @@ async function buildSO(games, season) {
       }
 
       // Expected IP: blend PP outs line with season avg IP/start
-      // Season avg IP/start is capped 4–7 realistically
       const seasonIP = (p.gs && p.ip) ? Math.min(7.0, Math.max(4.0, p.ip / Math.max(p.gs, 1))) : 5.0;
       const ppIpFromOuts = ppEntry?.outsLine != null ? ppEntry.outsLine / 3 : null;
       const expectedIP = ppIpFromOuts != null
-        // PP outs line is a strong signal for expected workload; blend 70/30 with season
         ? parseFloat(Math.min(8, Math.max(3, ppIpFromOuts * 0.70 + seasonIP * 0.30)).toFixed(1))
         : seasonIP;
 
-      // ── Apply umpire K% adjustment ──────────────────────────────────────────
-      const umpAdjK9 = useK9 * umpSO.kAdj;
+      // ── Strikeout model: E[K] ≈ E[BF] × K% (K% beats K/9 for cross-lineup compare) ──
+      const LG_K = 22.5;
+      const kmb = p.kMinusBbPct != null ? p.kMinusBbPct : p.kPct - 8;
+      const kmbSkill = Math.min(2.8, Math.max(-2.8, (kmb - 14) * 0.11));
+      let blendKPct = p.kPct;
+      if (p.recentKPct != null) {
+        blendKPct = parseFloat((p.kPct * 0.42 + p.recentKPct * 0.58).toFixed(2));
+      }
+      blendKPct += kmbSkill;
+      const strikeBonus = ((p.strikePct || 0.645) - 0.645) * 9;
+      blendKPct += Math.min(1.2, Math.max(-1.2, strikeBonus));
 
-      // ── Apply weather K adjustment ──────────────────────────────────────────
-      const weatherAdjK9 = umpAdjK9 * (weatherSO.soKAdj || 1.0);
+      const envKMult = (0.88 + 0.12 * umpSO.kAdj) * (0.94 + 0.06 * (weatherSO.soKAdj || 1.0));
+      let effKPct = blendKPct * envKMult;
+      const lineupKMult = 1 + ((oppKPct - LG_K) / LG_K) * 0.20;
+      effKPct *= lineupKMult;
+      effKPct = Math.max(14, Math.min(42, effKPct));
 
-      // ── Lineup-adjusted K/9 ────────────────────────────────────────────────
-      // Adjusts for how this specific lineup performs vs pitcher's hand
-      // Two-factor model: lineup K% relative to league avg, and pitcher K% skill
-      const LG_K = 22.5;  // league-avg K% baseline
-      // Lineup K% adjustment: more Ks vs this lineup → higher projection
-      const lineupKAdj = (oppKPct - LG_K) / LG_K;
-      // Pitcher K-skill adjustment (second-order effect — already baked into K/9, small addition)
-      const pitcherKSkill = (p.kPct - LG_K) / LG_K * 0.06;
-      // OBP adjustment: lower OBP = fewer baserunners = slightly fewer K opportunities
-      const obpAdj = (0.320 - oppOBP) * 0.8;  // high OBP lineup = more PA = more Ks
-      const adjK9 = weatherAdjK9 * (1 + lineupKAdj * 0.30 + pitcherKSkill) + obpAdj;
-      const projection = parseFloat(Math.max(0.5, (adjK9 * expectedIP / 9)).toFixed(2));
+      const bfPerIp = Math.min(5.15, Math.max(3.85, p.bfPerIp || 4.35));
+      const expectedBF = expectedIP * bfPerIp;
+      const analyticalK = parseFloat(Math.max(0.5, expectedBF * (effKPct / 100)).toFixed(2));
 
-      // Line: use PrizePicks MLB if available, else calculate
+      // PrizePicks line as sharp prior — blend analytical toward market (reduces false "70%" edges)
+      const MARKET_SHRINK = ppEntry ? 0.55 : 0;
       const line    = ppEntry
         ? ppEntry.line
-        : Math.max(0.5, Math.round(projection * 2) / 2);
+        : Math.max(0.5, Math.round(analyticalK * 2) / 2);
       const lineSrc = ppEntry ? "prizepicks" : "calculated";
+      const projection = ppEntry
+        ? parseFloat((line + (1 - MARKET_SHRINK) * (analyticalK - line)).toFixed(2))
+        : analyticalK;
       const edge    = parseFloat((projection - line).toFixed(2));
 
-      // Confidence: edge size, lineup quality, ump, weather, pitcher recent form
-      let conf = 50
-        + Math.min(22, Math.abs(edge) * (ppEntry ? 10 : 7.5))
-        + (oppKPct - 22.5) * 0.55
-        + (useK9 - 8.8)    * 0.60
-        + (umpSO.kAdj - 1.0) * 10
-        + (p.kPct - 22.5) * 0.15;
-      if (!lineupKData) conf -= 4;       // slight penalty when using team avg
-      if (lineupFromPrevDay) conf -= 2;  // slight penalty for prev-day lineup proxy
-      if (edge < 0) conf -= 4;
-      if (p.recentK9 !== null) conf += Math.min(3, Math.abs(p.recentK9 - p.k9) * 0.5); // recent form signal
-      const confidence = Math.max(5, Math.min(95, Math.round(conf)));
-      const pick = `${edge >= 0 ? "Over" : "Under"} ${line.toFixed(1)}`;
+      const adjK9 = parseFloat(((effKPct / 100) * bfPerIp * 9).toFixed(2));
+
+      const pOver = probOverStrikeouts(projection, line);
+      const takeOver = projection > line || (projection === line && analyticalK >= line);
+      const winProb = takeOver ? pOver : (1 - pOver);
+      let confidence = Math.round(50 + (winProb - 0.5) * 78);
+      if (!lineupKData) confidence -= 5;
+      if (lineupFromPrevDay) confidence -= 3;
+      if (!ppEntry) confidence -= 4;
+      confidence = Math.max(48, Math.min(88, confidence));
+      const pick = `${takeOver ? "Over" : "Under"} ${line.toFixed(1)}`;
 
       // Source label for this pitcher
       const starter = e.isHome ? gameInfo.homeStarter : gameInfo.awayStarter;
@@ -2720,13 +2752,17 @@ async function buildSO(games, season) {
         if (weatherSO.tempF < 50) parts.push(`${weatherSO.tempF}°F`);
         return parts.length ? ` Weather: ${parts.join(", ")} (K adj ×${(weatherSO.soKAdj||1).toFixed(3)}).` : "";
       })();
+      const marketNote = ppEntry
+        ? ` Raw model ${analyticalK} K → blended ${projection} K (45% model / 55% PP line prior).`
+        : "";
       const analysis = [
-        `${e.prob?.fullName||"TBD"} (${p.hand}HP) K/9 ${useK9.toFixed(1)}`,
-        `→ ump adj ×${umpSO.kAdj.toFixed(2)} → weather adj → ${adjK9.toFixed(1)} effective.`,
+        `${e.prob?.fullName||"TBD"} (${p.hand}HP): BF×K% model — ~${expectedBF.toFixed(0)} BF × ${effKPct.toFixed(1)}% eff K% ⇒ ${analyticalK} K.`,
+        `K/9 display ${useK9.toFixed(1)} · implied ${adjK9.toFixed(1)} K/9 from BF path.`,
         `${e.oppTeam.teamName||e.oppTeam.name} K% vs ${p.hand}HP: ${oppKPct.toFixed(1)}%. ${lineupSrc}.`,
         recentNote + ipNote,
         umpSONote + weatherSONote,
-        `${lineNote} · Projection ${projection} K · Edge ${edge>0?"+":""}${edge} → ${pick} at ${confidence}%.`,
+        marketNote,
+        `${lineNote} · Final proj ${projection} K · Edge ${edge>0?"+":""}${edge} → ${pick} (~${(takeOver ? pOver : 1-pOver).toFixed(0)}% win prob vs line).`,
       ].join(" ").trim();
 
       const oppTeamName = e.oppTeam.teamName || e.oppTeam.name;
@@ -2773,7 +2809,8 @@ async function buildSO(games, season) {
         line, lineSrc, ppLine: ppEntry ? ppEntry.line : null,
         ppAllLines: ppEntry?.allLines || null,
         ppOutsAllLines: ppEntry?.outsAllLines || null,
-        projection, edge,
+        projection, edge, analyticalK, expectedBF,
+        pickOver: takeOver, pWinVsLine: takeOver ? pOver : 1 - pOver,
         weather: weatherSO, ump: umpSO,
         strikeoutPick: pick, confidence, analysis,
         gameLog: p.gameLog || [],
@@ -3818,7 +3855,7 @@ async function toggleBatterLog(playerId, season) {
 function renderSOCard(g) {
   const color = confColor(g.confidence);
   const id    = `c${g.gamePk}-${g.pitcher.replace(/\s/g,"")}`;
-  const dir   = g.edge >= 0 ? "OVER" : "UNDER";
+  const dir   = g.pickOver != null ? (g.pickOver ? "OVER" : "UNDER") : (g.edge >= 0 ? "OVER" : "UNDER");
   return `
     <div class="game-card" id="${id}">
       <div class="card-hd" onclick="toggle('${id}')">
@@ -3908,6 +3945,7 @@ function renderSOCard(g) {
             ${bar("ERA", g.era, 7, "#ffd60a")}
             ${g.stRecentERA!==null?bar("🌱 ST ERA", g.stRecentERA, 7, "#00d4ff"):""}
             ${bar("WHIP", g.whip, 2, "#ffd60a")}
+            ${g.expectedBF!=null?bar("Exp. batters faced", g.expectedBF, 32, "#a78bfa", "~IP×BF/IP"):""}
             ${bar("Proj. Innings", g.projInnings, 9, "#64748b", g.ppOutsLine!=null?"PrizePicks outs + season blend":"season avg")}
             ${g.ppOutsLine!=null?`<div style="font-size:10px;color:#64748b;margin-top:2px">📊 ${g.ppOutsLine} outs line → ~${(g.ppOutsLine/3).toFixed(1)} IP implied, ~${g.projInnings} IP used in model</div>`:""}
             ${g.pitcherSpringIP?`<div style="font-size:10px;color:#64748b;margin-top:2px">🌱 ${g.pitcherSpringIP.toFixed(1)} IP logged in spring</div>`:""}
@@ -3919,7 +3957,7 @@ function renderSOCard(g) {
             <div class="info-row" style="margin-top:12px">
               <div class="info-lbl">${g.lineSrc==="prizepicks" ? "📊 PrizePicks Line" : "Calculated Line"}</div>
               <p style="font-size:22px;font-family:'Bebas Neue',sans-serif;color:#00d4ff;margin-bottom:2px">${g.line} K's</p>
-              <p style="font-size:11px;color:#64748b">Proj ${g.projection} · K/9 adj ${g.adjK9} · Edge ${g.edge>0?"+":""}${g.edge}</p>
+              <p style="font-size:11px;color:#64748b">Proj ${g.projection}${g.analyticalK!=null?` (raw ${g.analyticalK})`:""} · eff K/9 ${g.adjK9} · Edge ${g.edge>0?"+":""}${g.edge}${g.pWinVsLine!=null?` · ~${(g.pWinVsLine*100).toFixed(0)}% vs line`:""}</p>
               ${g.ppOutsLine!=null?`<p style="font-size:11px;color:#ffd60a;margin-top:3px">📊 PrizePicks ${g.ppOutsLine} outs (~${(g.ppOutsLine/3).toFixed(1)} IP) blended to ~${g.expectedIP ?? g.projInnings} IP for projection</p>`:""}
             </div>
           </div>
