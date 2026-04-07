@@ -115,6 +115,51 @@ def fangraphs_pitcher_route():
         )
 
 
+@app.route("/api/so_matchup")
+def so_matchup_route():
+    """Statcast pitcher mix × batter whiff% — same contract as Vercel /api/so_matchup."""
+    if request.method == "OPTIONS":
+        return Response(status=204, headers=CORS_HEADERS)
+    try:
+        import os as _os
+        import sys as _sys
+        _apid = _os.path.join(_os.path.dirname(__file__), "api")
+        if _apid not in _sys.path:
+            _sys.path.insert(0, _apid)
+        from matchup_impl import compute_so_matchup
+
+        raw_p = request.args.get("pitcher_mlbam")
+        raw_b = request.args.get("batters") or ""
+        raw_season = request.args.get("season")
+        if not raw_p or not raw_season or not raw_b.strip():
+            return Response(
+                json.dumps({"ok": False, "error": "missing pitcher_mlbam, batters, or season"}),
+                status=400,
+                headers={**CORS_HEADERS, "Content-Type": "application/json"},
+            )
+        pid = int(raw_p)
+        season = int(raw_season)
+        bats = [int(x) for x in raw_b.split(",") if x.strip().isdigit()]
+        out = compute_so_matchup(pid, bats, season)
+        return Response(
+            json.dumps(out, default=str),
+            status=200,
+            headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "public, max-age=900"},
+        )
+    except ValueError:
+        return Response(
+            json.dumps({"ok": False, "error": "invalid_int"}),
+            status=400,
+            headers={**CORS_HEADERS, "Content-Type": "application/json"},
+        )
+    except Exception as e:
+        return Response(
+            json.dumps({"ok": False, "error": "server_error", "detail": str(e)}),
+            status=500,
+            headers={**CORS_HEADERS, "Content-Type": "application/json"},
+        )
+
+
 @app.route("/.netlify/functions/pp")
 def pp_proxy():
     if request.method == "OPTIONS":

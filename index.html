@@ -2655,11 +2655,29 @@ async function buildSO(games, season) {
         }
       }
 
-      const [teamSplit, lineupKData] = await Promise.all([
+      const statcastMatchupPromise = (async () => {
+        if (!e.prob || effectiveBatters.length < 5) return null;
+        try {
+          const batIds = effectiveBatters.slice(0, 9).map((b) => b.id).filter(Boolean);
+          if (batIds.length < 5) return null;
+          const mx = await fetchTimeout(
+            `/api/so_matchup?pitcher_mlbam=${e.prob.id}&batters=${batIds.join(",")}&season=${season}`,
+            14000
+          );
+          if (!mx || !mx.ok) return null;
+          const mj = await mx.json();
+          return mj && mj.ok ? mj : null;
+        } catch (_) {
+          return null;
+        }
+      })();
+
+      const [teamSplit, lineupKData, statcastMatchup] = await Promise.all([
         getTeamVsHand(e.oppId, season, p.hand),
         effectiveBatters.length >= 5
           ? getLineupKPct(effectiveBatters, p.hand, season)
           : Promise.resolve(null),
+        statcastMatchupPromise,
       ]);
 
       // Prefer per-batter lineup K%, fall back to team split
@@ -2757,6 +2775,9 @@ async function buildSO(games, season) {
       let effKPct = blendKPct * envKMult;
       const lineupKMult = 1 + ((oppKPct - LG_K) / LG_K) * 0.20;
       effKPct *= lineupKMult;
+      if (statcastMatchup != null && statcastMatchup.kPctAdj != null) {
+        effKPct += statcastMatchup.kPctAdj;
+      }
       effKPct = Math.max(14, Math.min(42, effKPct));
 
       const bfPerIp = Math.min(5.15, Math.max(3.85, p.bfPerIp || 4.35));
@@ -2822,7 +2843,7 @@ async function buildSO(games, season) {
         ? ` Raw model ${analyticalK} K → blended ${projection} K (${((1 - MARKET_SHRINK) * 100).toFixed(0)}% model / ${(MARKET_SHRINK * 100).toFixed(0)}% PP line${hasFG ? "; FanGraphs anchor" : ""}).`
         : "";
       const analysis = [
-        `${e.prob?.fullName||"TBD"} (${p.hand}HP): BF×K% — ${hasFG ? `FanGraphs (pybaseball) K% anchor + CSW/SwStr process · ` : ""}~${expectedBF.toFixed(0)} BF × ${effKPct.toFixed(1)}% eff K% ⇒ ${analyticalK} K.`,
+        `${e.prob?.fullName||"TBD"} (${p.hand}HP): BF×K% — ${hasFG ? `FanGraphs (pybaseball) K% anchor + CSW/SwStr process · ` : ""}${statcastMatchup?.kPctAdj != null ? `Statcast mix×whiff adj ${statcastMatchup.kPctAdj >= 0 ? "+" : ""}${statcastMatchup.kPctAdj} pp · ` : ""}~${expectedBF.toFixed(0)} BF × ${effKPct.toFixed(1)}% eff K% ⇒ ${analyticalK} K.`,
         `K/9 display ${useK9.toFixed(1)} · implied ${adjK9.toFixed(1)} K/9 from BF path.`,
         `${e.oppTeam.teamName||e.oppTeam.name} K% vs ${p.hand}HP: ${oppKPct.toFixed(1)}%. ${lineupSrc}.`,
         recentNote + ipNote,
@@ -2878,6 +2899,7 @@ async function buildSO(games, season) {
         ppOutsAllLines: ppEntry?.outsAllLines || null,
         projection, edge, analyticalK, expectedBF,
         fanGraphsInModel: hasFG,
+        statcastMatchup: statcastMatchup || null,
         pickOver: takeOver, pWinVsLine: takeOver ? pOver : 1 - pOver,
         weather: weatherSO, ump: umpSO,
         strikeoutPick: pick, confidence, analysis,
@@ -3934,6 +3956,7 @@ function renderSOCard(g) {
               : `<span style="background:rgba(100,116,139,.18);border:1px solid rgba(100,116,139,.35);color:#64748b;border-radius:5px;padding:3px 10px;font-size:11px;font-weight:700">CALC: ${g.line} K</span>`}
             ${g.lineMov ? renderLineMovement(g.lineMov) : ""}
             ${g.fanGraphsInModel ? `<span style="font-size:10px;font-weight:700;color:#c4b5fd;border:1px solid rgba(196,181,253,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="K% anchored on FanGraphs (pybaseball) + CSW%/SwStr%">FanGraphs + pybaseball</span>` : ""}
+            ${g.statcastMatchup && g.statcastMatchup.expectedWhiffVsMix != null ? `<span style="font-size:10px;font-weight:700;color:#a78bfa;border:1px solid rgba(167,139,250,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="Savant pitch mix × batter whiff% (pybaseball Statcast)">Mix×whiff</span>` : ""}
             <span style="color:#94a3b8;font-size:12px">${g.away} @ ${g.home}</span>
           </div>
           <div class="pitcher-line">
@@ -4020,6 +4043,19 @@ function renderSOCard(g) {
             ${bar("Proj. Innings", g.projInnings, 9, "#64748b", g.ppOutsLine!=null?"PrizePicks outs + season blend":"season avg")}
             ${g.ppOutsLine!=null?`<div style="font-size:10px;color:#64748b;margin-top:2px">📊 ${g.ppOutsLine} outs line → ~${(g.ppOutsLine/3).toFixed(1)} IP implied, ~${g.projInnings} IP used in model</div>`:""}
             ${g.pitcherSpringIP?`<div style="font-size:10px;color:#64748b;margin-top:2px">🌱 ${g.pitcherSpringIP.toFixed(1)} IP logged in spring</div>`:""}
+            ${g.statcastMatchup && g.statcastMatchup.expectedWhiffVsMix != null ? (() => {
+              const sm = g.statcastMatchup;
+              const rows = (sm.pitchMix || []).slice(0, 5);
+              const mixTxt = rows.map((m) => `${m.name || m.pitch} ${m.usagePct}%`).join(" · ");
+              return `<div style="margin-top:12px;padding:10px;background:rgba(167,139,250,.07);border:1px solid rgba(167,139,250,.22);border-radius:8px">
+                <div style="font-size:10px;font-weight:800;color:#a78bfa;letter-spacing:.06em;margin-bottom:6px">STATCAST · MIX × WHIFF (pybaseball)</div>
+                <div style="font-size:12px;color:#e2e8f0">Exp. whiff vs this arsenal: <strong style="color:#c4b5fd">${sm.expectedWhiffVsMix}%</strong>
+                  ${sm.kPctAdj != null ? ` · K% adj <strong>${sm.kPctAdj >= 0 ? "+" : ""}${sm.kPctAdj}</strong> pp` : ""}
+                  <span style="color:#64748b;font-size:10px"> · Savant ${sm.season}</span>
+                </div>
+                ${mixTxt ? `<div style="margin-top:6px;font-size:10px;color:#94a3b8;line-height:1.45">${mixTxt}</div>` : ""}
+              </div>`;
+            })() : ""}
           </div>
           <div>
             <div class="pitcher-col-title" style="color:#64748b">Opponent Lineup vs ${g.hand}HP</div>
