@@ -1763,7 +1763,7 @@ async function getPitcherData(id, season) {
 
   // FanGraphs advanced rates (pybaseball) — SwStr% / CSW% via /api/fangraphs_pitcher
   try {
-    const fr = await fetchTimeout(`/api/fangraphs_pitcher?mlbam=${id}&season=${season}`, 6500);
+    const fr = await fetchTimeout(`/api/fangraphs_pitcher?mlbam=${id}&season=${season}`, 9000);
     if (fr && fr.ok) {
       const j = await fr.json();
       if (j && j.ok) {
@@ -2589,6 +2589,18 @@ function probOverStrikeouts(meanK, lineHalf) {
   return Math.max(0.03, Math.min(0.97, 1 - normalCDF(z)));
 }
 
+/** pybaseball/FanGraphs: rates may be 0–1 or 0–100 depending on scrape */
+function fgRateToPct100(v) {
+  if (v == null || Number.isNaN(Number(v))) return null;
+  const n = Number(v);
+  return n > 1 ? n : n * 100;
+}
+function fgRateTo01(v) {
+  if (v == null || Number.isNaN(Number(v))) return null;
+  const n = Number(v);
+  return n > 1 ? n / 100 : n;
+}
+
 async function buildSO(games, season) {
   setStatus(`Building strikeout model for ${games.length} games…`);
   const results = [];
@@ -2694,24 +2706,51 @@ async function buildSO(games, season) {
         ? parseFloat(Math.min(8, Math.max(3, ppIpFromOuts * 0.70 + seasonIP * 0.30)).toFixed(1))
         : seasonIP;
 
-      // ── Strikeout model: E[K] ≈ E[BF] × K% (K% beats K/9 for cross-lineup compare) ──
+      // ── Strikeout model: E[K] ≈ E[BF] × K% — prioritize FanGraphs (pybaseball) when loaded ──
       const LG_K = 22.5;
-      const kmb = p.kMinusBbPct != null ? p.kMinusBbPct : p.kPct - 8;
-      const kmbSkill = Math.min(2.8, Math.max(-2.8, (kmb - 14) * 0.11));
-      let blendKPct = p.kPct;
-      if (p.recentKPct != null) {
-        blendKPct = parseFloat((p.kPct * 0.42 + p.recentKPct * 0.58).toFixed(2));
+      const fgK100 = fgRateToPct100(p.fgKPct);
+      const fgBB100 = fgRateToPct100(p.fgBBPct);
+      const hasFG = fgK100 != null;
+      const csw01 = fgRateTo01(p.fgCSW);
+      const sw01 = fgRateTo01(p.fgSwStr);
+
+      let blendKPct;
+      if (hasFG) {
+        const mlbRec = p.recentKPct != null
+          ? (p.kPct * 0.26 + p.recentKPct * 0.74)
+          : p.kPct;
+        blendKPct = parseFloat((fgK100 * 0.62 + mlbRec * 0.26 + p.kPct * 0.12).toFixed(3));
+      } else {
+        blendKPct = p.kPct;
+        if (p.recentKPct != null) {
+          blendKPct = parseFloat((p.kPct * 0.42 + p.recentKPct * 0.58).toFixed(3));
+        }
+      }
+
+      // K−BB% (command): FG K% & BB% when available — else MLB-derived
+      const LG_KMB_PTS = 16;
+      let kmbSkill;
+      if (hasFG && fgBB100 != null) {
+        const kmbPts = fgK100 - fgBB100;
+        kmbSkill = Math.min(3, Math.max(-3, (kmbPts - LG_KMB_PTS) * 0.065));
+      } else {
+        const kmb = p.kMinusBbPct != null ? p.kMinusBbPct : p.kPct - 8;
+        kmbSkill = Math.min(2.8, Math.max(-2.8, (kmb - 14) * 0.11));
       }
       blendKPct += kmbSkill;
-      let strikeSkillAdj = Math.min(1.2, Math.max(-1.2, ((p.strikePct || 0.645) - 0.645) * 9));
-      if (p.fgCSW != null && !Number.isNaN(p.fgCSW)) {
-        const csw = p.fgCSW > 1 ? p.fgCSW / 100 : p.fgCSW;
-        strikeSkillAdj = Math.min(2.2, Math.max(-2.2, (csw - 0.285) * 22));
-      } else if (p.fgSwStr != null && !Number.isNaN(p.fgSwStr)) {
-        const sw = p.fgSwStr > 1 ? p.fgSwStr / 100 : p.fgSwStr;
-        strikeSkillAdj = Math.min(1.8, Math.max(-1.8, (sw - 0.105) * 14));
+
+      // CSW% + SwStr%: strongest process predictors; scale down when FG K% already anchors (avoid double-count)
+      let procAdj = 0;
+      if (csw01 != null) {
+        procAdj += (csw01 - 0.285) * 20;
+        if (sw01 != null) procAdj += (sw01 - 0.105) * 8;
+      } else if (sw01 != null) {
+        procAdj += (sw01 - 0.105) * 14;
+      } else {
+        procAdj = Math.min(1.2, Math.max(-1.2, ((p.strikePct || 0.645) - 0.645) * 9));
       }
-      blendKPct += strikeSkillAdj;
+      const procW = hasFG ? 0.48 : 1;
+      blendKPct += Math.min(3, Math.max(-3, procAdj * procW));
 
       const envKMult = (0.88 + 0.12 * umpSO.kAdj) * (0.94 + 0.06 * (weatherSO.soKAdj || 1.0));
       let effKPct = blendKPct * envKMult;
@@ -2723,8 +2762,8 @@ async function buildSO(games, season) {
       const expectedBF = expectedIP * bfPerIp;
       const analyticalK = parseFloat(Math.max(0.5, expectedBF * (effKPct / 100)).toFixed(2));
 
-      // PrizePicks line as sharp prior — blend analytical toward market (reduces false "70%" edges)
-      const MARKET_SHRINK = ppEntry ? 0.55 : 0;
+      // PrizePicks line as sharp prior — trust FG-backed model a bit more vs raw MLB-only
+      const MARKET_SHRINK = ppEntry ? (hasFG ? 0.48 : 0.55) : 0;
       const line    = ppEntry
         ? ppEntry.line
         : Math.max(0.5, Math.round(analyticalK * 2) / 2);
@@ -2743,6 +2782,7 @@ async function buildSO(games, season) {
       if (!lineupKData) confidence -= 5;
       if (lineupFromPrevDay) confidence -= 3;
       if (!ppEntry) confidence -= 4;
+      if (hasFG) confidence += 2;
       confidence = Math.max(48, Math.min(88, confidence));
       const pick = `${takeOver ? "Over" : "Under"} ${line.toFixed(1)}`;
 
@@ -2778,10 +2818,10 @@ async function buildSO(games, season) {
         return parts.length ? ` Weather: ${parts.join(", ")} (K adj ×${(weatherSO.soKAdj||1).toFixed(3)}).` : "";
       })();
       const marketNote = ppEntry
-        ? ` Raw model ${analyticalK} K → blended ${projection} K (45% model / 55% PP line prior).`
+        ? ` Raw model ${analyticalK} K → blended ${projection} K (${((1 - MARKET_SHRINK) * 100).toFixed(0)}% model / ${(MARKET_SHRINK * 100).toFixed(0)}% PP line${hasFG ? "; FanGraphs anchor" : ""}).`
         : "";
       const analysis = [
-        `${e.prob?.fullName||"TBD"} (${p.hand}HP): BF×K% model — ~${expectedBF.toFixed(0)} BF × ${effKPct.toFixed(1)}% eff K% ⇒ ${analyticalK} K.`,
+        `${e.prob?.fullName||"TBD"} (${p.hand}HP): BF×K% — ${hasFG ? `FanGraphs (pybaseball) K% anchor + CSW/SwStr process · ` : ""}~${expectedBF.toFixed(0)} BF × ${effKPct.toFixed(1)}% eff K% ⇒ ${analyticalK} K.`,
         `K/9 display ${useK9.toFixed(1)} · implied ${adjK9.toFixed(1)} K/9 from BF path.`,
         `${e.oppTeam.teamName||e.oppTeam.name} K% vs ${p.hand}HP: ${oppKPct.toFixed(1)}%. ${lineupSrc}.`,
         recentNote + ipNote,
@@ -2836,6 +2876,7 @@ async function buildSO(games, season) {
         ppAllLines: ppEntry?.allLines || null,
         ppOutsAllLines: ppEntry?.outsAllLines || null,
         projection, edge, analyticalK, expectedBF,
+        fanGraphsInModel: hasFG,
         pickOver: takeOver, pWinVsLine: takeOver ? pOver : 1 - pOver,
         weather: weatherSO, ump: umpSO,
         strikeoutPick: pick, confidence, analysis,
@@ -3891,6 +3932,7 @@ function renderSOCard(g) {
               ? `<span style="background:#00d4ff22;border:1px solid #00d4ffaa;color:#00d4ff;border-radius:5px;padding:3px 10px;font-size:12px;font-weight:700;letter-spacing:.04em">📊 PP: ${g.line} K</span>`
               : `<span style="background:rgba(100,116,139,.18);border:1px solid rgba(100,116,139,.35);color:#64748b;border-radius:5px;padding:3px 10px;font-size:11px;font-weight:700">CALC: ${g.line} K</span>`}
             ${g.lineMov ? renderLineMovement(g.lineMov) : ""}
+            ${g.fanGraphsInModel ? `<span style="font-size:10px;font-weight:700;color:#c4b5fd;border:1px solid rgba(196,181,253,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="K% anchored on FanGraphs (pybaseball) + CSW%/SwStr%">FanGraphs + pybaseball</span>` : ""}
             <span style="color:#94a3b8;font-size:12px">${g.away} @ ${g.home}</span>
           </div>
           <div class="pitcher-line">
@@ -3944,7 +3986,7 @@ function renderSOCard(g) {
           <div class="take-label" style="color:${color}">TAKE THIS BET</div>
           <div class="take-value" style="color:${color}">${g.pitcher} ${dir} ${g.line} Strikeouts</div>
           <div class="take-sub" style="color:${color}">
-            Projection: ${g.projection}K · Edge: ${g.edge>0?"+":""}${g.edge} · ${g.confidence}% confidence
+            Projection: ${g.projection}K · Edge: ${g.edge>0?"+":""}${g.edge} · ${g.confidence}% confidence${g.fanGraphsInModel ? " · FG-backed K%/CSW" : ""}
           </div>
           <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             ${g.lineSrc==="prizepicks"
