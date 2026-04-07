@@ -1,30 +1,16 @@
 """
-Statcast batter advanced metrics via pybaseball (Savant CSVs).
-Used to tune hitter prop projections (x/wOBA, barrel%).
+Statcast batter advanced metrics — Savant CSV via requests (no pybaseball).
 """
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+from savant_http import batter_exitvelo_barrels, batter_expected_stats
+
 _SC_EXP: Dict[int, pd.DataFrame] = {}
 _SC_BRL: Dict[int, pd.DataFrame] = {}
-
-
-def _init_cache() -> None:
-    if os.environ.get("_PYBASEBALL_CACHE_INIT"):
-        return
-    base = "/tmp/.pybaseball/cache" if os.name != "nt" else os.path.join(os.environ.get("TEMP", "."), ".pybaseball", "cache")
-    os.environ.setdefault("PYBASEBALL_CACHE", base)
-    try:
-        from pybaseball import cache as pbc
-
-        pbc.enable()
-    except Exception:
-        pass
-    os.environ["_PYBASEBALL_CACHE_INIT"] = "1"
 
 
 def _seasons_to_try(season: int) -> List[int]:
@@ -50,16 +36,10 @@ def _num(r: pd.Series, *names: str) -> Optional[float]:
 
 
 def get_batter_advanced(mlbam: int, season: int) -> Dict[str, Any]:
-    _init_cache()
-    try:
-        from pybaseball import statcast_batter_exitvelo_barrels, statcast_batter_expected_stats
-    except ImportError as e:
-        return {"ok": False, "error": "pybaseball_import", "detail": str(e)}
-
     for yr in _seasons_to_try(season):
         if yr not in _SC_EXP:
             try:
-                _SC_EXP[yr] = statcast_batter_expected_stats(yr, minPA=0)
+                _SC_EXP[yr] = batter_expected_stats(yr, min_pa=0)
             except Exception:
                 _SC_EXP[yr] = pd.DataFrame()
         exp = _SC_EXP[yr]
@@ -77,7 +57,7 @@ def get_batter_advanced(mlbam: int, season: int) -> Dict[str, Any]:
         brl_pct = None
         if yr not in _SC_BRL:
             try:
-                _SC_BRL[yr] = statcast_batter_exitvelo_barrels(yr, minBBE=0)
+                _SC_BRL[yr] = batter_exitvelo_barrels(yr, min_bbe=0)
             except Exception:
                 _SC_BRL[yr] = pd.DataFrame()
         br = _SC_BRL[yr]

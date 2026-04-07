@@ -1,6 +1,6 @@
 """
-Statcast matchup via pybaseball: pitcher pitch mix × batter whiff% vs each pitch type.
-Uses Savant leaderboards: statcast_pitcher_arsenal_stats, statcast_batter_pitch_arsenal.
+Statcast matchup: pitcher pitch mix × batter whiff% vs each pitch type.
+Savant CSVs via requests (no pybaseball) — fits Vercel size limits.
 """
 from __future__ import annotations
 
@@ -8,29 +8,25 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-# Module-level cache (warm per cold start; avoids re-downloading 3k+ rows each batter)
+from savant_http import batter_pitch_arsenal_stats, pitcher_pitch_arsenal_stats
+
+# Module-level cache (warm per cold start)
 _ARS_P: Dict[int, pd.DataFrame] = {}
 _ARS_B: Dict[int, pd.DataFrame] = {}
 
-LG_WHIFF = 24.0  # ~league avg swing-and-miss% (Statcast), used when a cell is missing
+LG_WHIFF = 24.0
 
 
 def _load_arsenals(year: int):
-    """Fetch pitcher/batter pitch-type stat tables for a season (cached)."""
-    try:
-        from pybaseball import statcast_batter_pitch_arsenal, statcast_pitcher_arsenal_stats
-    except ImportError:
-        return None, None
-
     if year not in _ARS_P:
         try:
-            _ARS_P[year] = statcast_pitcher_arsenal_stats(year, minPA=10)
+            _ARS_P[year] = pitcher_pitch_arsenal_stats(year, min_pa=10)
         except Exception:
             _ARS_P[year] = pd.DataFrame()
 
     if year not in _ARS_B:
         try:
-            _ARS_B[year] = statcast_batter_pitch_arsenal(year, minPA=10)
+            _ARS_B[year] = batter_pitch_arsenal_stats(year, min_pa=10)
         except Exception:
             _ARS_B[year] = pd.DataFrame()
 
@@ -38,11 +34,6 @@ def _load_arsenals(year: int):
 
 
 def compute_so_matchup(pitcher_mlbam: int, batter_ids: List[int], season: int) -> Dict[str, Any]:
-    """
-    Expected whiff% if this lineup faces this pitcher's actual mix:
-      sum_p usage_p * (lineup-weighted batter whiff% vs pitch p)
-    Returns kPctAdj (percentage points to add to effective K%) — small, capped.
-    """
     if not pitcher_mlbam or not batter_ids:
         return {"ok": False, "error": "missing_ids"}
 
@@ -61,7 +52,10 @@ def compute_so_matchup(pitcher_mlbam: int, batter_ids: List[int], season: int) -
         p_all, b_all = _load_arsenals(yr)
         if p_all is None or b_all is None or p_all.empty or b_all.empty:
             continue
-        pm = p_all[p_all["player_id"] == int(pitcher_mlbam)]
+        try:
+            pm = p_all[p_all["player_id"] == int(pitcher_mlbam)]
+        except Exception:
+            continue
         if pm.empty:
             continue
         p_df = pm
@@ -72,7 +66,6 @@ def compute_so_matchup(pitcher_mlbam: int, batter_ids: List[int], season: int) -
     if p_df is None or b_df is None or p_df.empty:
         return {"ok": False, "error": "no_pitcher_arsenal", "seasonTried": season}
 
-    # Pitch mix: usage sums ~100 across pitch types for this pitcher
     mix_rows = []
     for _, prow in p_df.iterrows():
         pt = str(prow.get("pitch_type") or "").strip()
@@ -99,7 +92,6 @@ def compute_so_matchup(pitcher_mlbam: int, batter_ids: List[int], season: int) -
 
     mix_rows.sort(key=lambda x: -x["usagePct"])
 
-    # Weighted lineup: for each batter, expected whiff vs THIS mix
     lineup_whs: List[float] = []
     for i, bid in enumerate(batter_ids):
         w = weights[i] if i < len(weights) else 0.8
@@ -132,7 +124,6 @@ def compute_so_matchup(pitcher_mlbam: int, batter_ids: List[int], season: int) -
 
     weighted_whiff = sum(lineup_whs) / max(0.001, total_w)
 
-    # Scale to K% adjustment: higher whiff expectation vs this mix → more Ks
     k_pct_adj = (weighted_whiff - LG_WHIFF) * 0.14
     k_pct_adj = max(-2.8, min(2.8, k_pct_adj))
 

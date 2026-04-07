@@ -1,4 +1,4 @@
-"""GET /api/batter_advanced?mlbam=660271&season=2026 — Statcast xwOBA / barrels via pybaseball."""
+"""GET /api/batter_advanced?mlbam=660271&season=2026 — Statcast xwOBA / barrels (Savant CSV)."""
 import json
 import os
 import sys
