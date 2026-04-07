@@ -65,29 +65,30 @@ def get_pitcher_advanced(mlbam: int, season: int) -> Dict[str, Any]:
 
     fg_id = int(fg_cell)
 
+    # qual=1 = FanGraphs qualified IP cutoff (excludes many rookies); qual=0 includes all
     for yr in _seasons_to_try(season):
-        df = None
-        try:
-            df = pitching_stats(yr, yr, qual=1)
-        except Exception:
-            continue
-        r = _row_for_fg_id(df, fg_id)
-        if r is None:
-            continue
-        sw = _num_from_row(r, "SwStr%")
-        csw = _num_from_row(r, "CSW%")
-        k_pct = _num_from_row(r, "K%")
-        bb_pct = _num_from_row(r, "BB%")
-        name = str(r.get("Name", "") or "")
-        return {
-            "ok": True,
-            "season": yr,
-            "fgId": fg_id,
-            "name": name,
-            "swStr": sw,
-            "csw": csw,
-            "kPct": k_pct,
-            "bbPct": bb_pct,
-        }
+        for qual in (1, 0):
+            try:
+                df = pitching_stats(yr, yr, qual=qual)
+            except Exception:
+                continue
+            r = _row_for_fg_id(df, fg_id)
+            if r is None:
+                continue
+            sw = _num_from_row(r, "SwStr%")
+            csw = _num_from_row(r, "CSW%")
+            k_pct = _num_from_row(r, "K%")
+            bb_pct = _num_from_row(r, "BB%")
+            name = str(r.get("Name", "") or "")
+            return {
+                "ok": True,
+                "season": yr,
+                "fgId": fg_id,
+                "name": name,
+                "swStr": sw,
+                "csw": csw,
+                "kPct": k_pct,
+                "bbPct": bb_pct,
+            }
 
     return {"ok": False, "error": "no_pitching_row", "fgId": fg_id}

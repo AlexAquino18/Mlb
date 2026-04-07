@@ -2849,7 +2849,7 @@ async function buildSO(games, season) {
         recentNote + ipNote,
         umpSONote + weatherSONote,
         marketNote,
-        `${lineNote} · Final proj ${projection} K · Edge ${edge>0?"+":""}${edge} → ${pick} (~${(takeOver ? pOver : 1-pOver).toFixed(0)}% win prob vs line).`,
+        `${lineNote} · Final proj ${projection} K · Edge ${edge>0?"+":""}${edge} → ${pick} (~${((takeOver ? pOver : 1 - pOver) * 100).toFixed(0)}% win prob vs line).`,
       ].join(" ").trim();
 
       const oppTeamName = e.oppTeam.teamName || e.oppTeam.name;
