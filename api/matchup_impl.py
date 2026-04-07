@@ -15,6 +15,9 @@ _ARS_P: Dict[int, pd.DataFrame] = {}
 _ARS_B: Dict[int, pd.DataFrame] = {}
 
 LG_WHIFF = 24.0
+# Expected whiff vs lineup (gap vs LG_WHIFF) → additive K% points in SO model — slightly stronger than raw gap so mix×whiff matters more
+WHIFF_TO_KPCT = 0.19
+KPCT_ADJ_CAP = 3.2
 
 
 def _load_arsenals(year: int):
@@ -124,8 +127,8 @@ def compute_so_matchup(pitcher_mlbam: int, batter_ids: List[int], season: int) -
 
     weighted_whiff = sum(lineup_whs) / max(0.001, total_w)
 
-    k_pct_adj = (weighted_whiff - LG_WHIFF) * 0.14
-    k_pct_adj = max(-2.8, min(2.8, k_pct_adj))
+    k_pct_adj = (weighted_whiff - LG_WHIFF) * WHIFF_TO_KPCT
+    k_pct_adj = max(-KPCT_ADJ_CAP, min(KPCT_ADJ_CAP, k_pct_adj))
 
     return {
         "ok": True,
