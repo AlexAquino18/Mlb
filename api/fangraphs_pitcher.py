@@ -1,6 +1,6 @@
 """
 Vercel Python — GET /api/fangraphs_pitcher?mlbam=594798&season=2026
-Imports fangraphs_impl from the same api/ directory (bundled on deploy).
+Uses fangraphs_impl (Statcast Savant CSVs; slim deps — no pybaseball in bundle).
 Always responds with HTTP 200 + JSON when possible so the browser can read { ok, error, detail }.
 """
 import json
