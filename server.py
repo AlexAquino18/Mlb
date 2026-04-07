@@ -116,6 +116,40 @@ def fangraphs_pitcher_route():
         )
 
 
+@app.route("/api/batter_advanced")
+def batter_advanced_route():
+    """Statcast xwOBA / barrels for batters — same contract as Vercel /api/batter_advanced."""
+    if request.method == "OPTIONS":
+        return Response(status=204, headers=CORS_HEADERS)
+    mlbam = request.args.get("mlbam")
+    season = request.args.get("season")
+    try:
+        import os as _os
+        import sys as _sys
+        _apid = _os.path.join(_os.path.dirname(__file__), "api")
+        if _apid not in _sys.path:
+            _sys.path.insert(0, _apid)
+        from batter_impl import get_batter_advanced
+        if not mlbam or not season:
+            return Response(
+                json.dumps({"ok": False, "error": "missing mlbam or season"}),
+                status=400,
+                headers={**CORS_HEADERS, "Content-Type": "application/json"},
+            )
+        out = get_batter_advanced(int(mlbam), int(season))
+        return Response(
+            json.dumps(out, default=str),
+            status=200,
+            headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "public, max-age=1800"},
+        )
+    except Exception as e:
+        return Response(
+            json.dumps({"ok": False, "error": "server_error", "detail": str(e)}),
+            status=200,
+            headers={**CORS_HEADERS, "Content-Type": "application/json"},
+        )
+
+
 @app.route("/api/so_matchup")
 def so_matchup_route():
     """Statcast pitcher mix × batter whiff% — same contract as Vercel /api/so_matchup."""

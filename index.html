@@ -1755,16 +1755,16 @@ async function getPitcherData(id, season) {
   const result = {
     hand, era, k9, kPct, ip, gs, whip, bb9,
     bfPerIp, recentKPct, kMinusBbPct, strikePct,
-    fgSwStr: null, fgCSW: null, fgKPct: null, fgBBPct: null, fgSeason: null,
+    fgSwStr: null, fgCSW: null, fgKPct: null, fgBBPct: null, fgSeason: null, fgSource: null,
     recentERA, recentK9, recentStarts, gameLog,
     springERA, springK9, springKPct, springIP, springStarts,
     stRecentERA, stRecentK9,
     currentTeamAbbr, currentTeamId,
   };
 
-  // FanGraphs advanced rates (pybaseball) — SwStr% / CSW% via /api/fangraphs_pitcher
+  // pybaseball: FanGraphs scrape and/or Statcast Savant CSV — /api/fangraphs_pitcher
   try {
-    const fr = await fetchTimeout(`/api/fangraphs_pitcher?mlbam=${id}&season=${season}`, 9000);
+    const fr = await fetchTimeout(`/api/fangraphs_pitcher?mlbam=${id}&season=${season}`, 28000);
     if (fr) {
       const j = await fr.json().catch(() => null);
       if (j && j.ok) {
@@ -1773,6 +1773,7 @@ async function getPitcherData(id, season) {
         result.fgKPct = j.kPct != null ? Number(j.kPct) : null;
         result.fgBBPct = j.bbPct != null ? Number(j.bbPct) : null;
         result.fgSeason = j.season != null ? Number(j.season) : null;
+        result.fgSource = j.source || null;
       }
     }
   } catch (_) {}
@@ -2065,7 +2066,7 @@ async function resolvePitcher(probFromSchedule, gamePk, side, gameInfo) {
 const AVG_PITCHER = {
   hand:"R", era:4.20, k9:8.8, kPct:22, ip:160, gs:28, whip:1.30, bb9:3.2,
   bfPerIp:4.35, recentKPct:null, kMinusBbPct:14, strikePct:0.645,
-  fgSwStr:null, fgCSW:null, fgKPct:null, fgBBPct:null, fgSeason:null,
+  fgSwStr:null, fgCSW:null, fgKPct:null, fgBBPct:null, fgSeason:null, fgSource:null,
   recentERA:null, recentK9:null, recentStarts:0,
   springERA:null, springK9:null, springKPct:null, springIP:null, springStarts:0,
   stRecentERA:null, stRecentK9:null,
@@ -2840,10 +2841,15 @@ async function buildSO(games, season) {
         return parts.length ? ` Weather: ${parts.join(", ")} (K adj ×${(weatherSO.soKAdj||1).toFixed(3)}).` : "";
       })();
       const marketNote = ppEntry
-        ? ` Raw model ${analyticalK} K → blended ${projection} K (${((1 - MARKET_SHRINK) * 100).toFixed(0)}% model / ${(MARKET_SHRINK * 100).toFixed(0)}% PP line${hasFG ? "; FanGraphs anchor" : ""}).`
+        ? ` Raw model ${analyticalK} K → blended ${projection} K (${((1 - MARKET_SHRINK) * 100).toFixed(0)}% model / ${(MARKET_SHRINK * 100).toFixed(0)}% PP line${hasFG ? "; pybaseball advanced anchor" : ""}).`
         : "";
+      const fgAnchorTxt = !hasFG
+        ? ""
+        : p.fgSource === "statcast"
+          ? "Statcast (pybaseball) K%/whiff process · "
+          : "FanGraphs (pybaseball) K% anchor + CSW/SwStr process · ";
       const analysis = [
-        `${e.prob?.fullName||"TBD"} (${p.hand}HP): BF×K% — ${hasFG ? `FanGraphs (pybaseball) K% anchor + CSW/SwStr process · ` : ""}${statcastMatchup?.kPctAdj != null ? `Statcast mix×whiff adj ${statcastMatchup.kPctAdj >= 0 ? "+" : ""}${statcastMatchup.kPctAdj} pp · ` : ""}~${expectedBF.toFixed(0)} BF × ${effKPct.toFixed(1)}% eff K% ⇒ ${analyticalK} K.`,
+        `${e.prob?.fullName||"TBD"} (${p.hand}HP): BF×K% — ${fgAnchorTxt}${statcastMatchup?.kPctAdj != null ? `Statcast mix×whiff adj ${statcastMatchup.kPctAdj >= 0 ? "+" : ""}${statcastMatchup.kPctAdj} pp · ` : ""}~${expectedBF.toFixed(0)} BF × ${effKPct.toFixed(1)}% eff K% ⇒ ${analyticalK} K.`,
         `K/9 display ${useK9.toFixed(1)} · implied ${adjK9.toFixed(1)} K/9 from BF path.`,
         `${e.oppTeam.teamName||e.oppTeam.name} K% vs ${p.hand}HP: ${oppKPct.toFixed(1)}%. ${lineupSrc}.`,
         recentNote + ipNote,
@@ -2877,7 +2883,7 @@ async function buildSO(games, season) {
         oppTeam: oppTeamName,
         away: aw.team.teamName||aw.team.name,
         home: hm.team.teamName||hm.team.name,
-        fgCSW: p.fgCSW, fgSwStr: p.fgSwStr, fgSeason: p.fgSeason,
+        fgCSW: p.fgCSW, fgSwStr: p.fgSwStr, fgSeason: p.fgSeason, fgSource: p.fgSource ?? null,
         k9: p.k9, recentK9: p.recentK9, usedK9: useK9,
         adjK9: parseFloat(adjK9.toFixed(1)),
         kPct: p.kPct, era: p.era, recentERA: p.recentERA,
@@ -3445,7 +3451,11 @@ function extractPPHitterLines(allProj, playerMap) {
 async function getHitterStats(playerId, season) {
   const key = `h_${playerId}_${season}`;
   if (_hitterStats[key]) return _hitterStats[key];
-  const DEF = { bats:"R", avg:0.255, obp:0.320, slg:0.415, ops:0.735, pa:450, ab:400, hits:102, hr:12, bb:38, tb:167, rbi:52, runs:65, sb:5 };
+  const sc0 = {
+    scXwoba: null, scWoba: null, scXba: null, scBa: null, scXslg: null, scSlg: null,
+    scBrlPct: null, scSeason: null, scOk: false,
+  };
+  const DEF = { bats:"R", avg:0.255, obp:0.320, slg:0.415, ops:0.735, pa:450, ab:400, hits:102, hr:12, bb:38, tb:167, rbi:52, runs:65, sb:5, ...sc0 };
   try {
     const [cur, prev, person] = await Promise.allSettled([
       mlbGet(`/people/${playerId}/stats?stats=season&group=hitting&gameType=R&season=${season}`),
@@ -3459,7 +3469,7 @@ async function getHitterStats(playerId, season) {
       return { bats, avg:parseFloat(s.avg)||0.255, obp:parseFloat(s.obp)||0.320,
         slg:parseFloat(s.slg)||0.415, ops:parseFloat(s.ops)||0.735,
         pa:s.plateAppearances||0, ab:s.atBats||0, hits:s.hits||0, hr:s.homeRuns||0,
-        bb:s.baseOnBalls||0, tb:s.totalBases||0, rbi:s.rbi||0, runs:s.runs||0, sb:s.stolenBases||0 };
+        bb:s.baseOnBalls||0, tb:s.totalBases||0, rbi:s.rbi||0, runs:s.runs||0, sb:s.stolenBases||0, ...sc0 };
     };
     const c = parse(cur), p = parse(prev);
     let result;
@@ -3469,10 +3479,27 @@ async function getHitterStats(playerId, season) {
       const w = Math.min(1, c.pa / 60);
       result = { bats, avg:w*c.avg+(1-w)*p.avg, obp:w*c.obp+(1-w)*p.obp,
         slg:w*c.slg+(1-w)*p.slg, ops:w*c.ops+(1-w)*p.ops,
-        pa:c.pa, ab:c.ab, hits:c.hits, hr:c.hr, bb:c.bb, tb:c.tb, rbi:c.rbi, sb:c.sb };
+        pa:c.pa, ab:c.ab, hits:c.hits, hr:c.hr, bb:c.bb, tb:c.tb, rbi:c.rbi, sb:c.sb, ...sc0 };
     } else {
       result = p || { ...DEF, bats };
     }
+    try {
+      const fr = await fetchTimeout(`/api/batter_advanced?mlbam=${playerId}&season=${season}`, 22000);
+      if (fr) {
+        const j = await fr.json().catch(() => null);
+        if (j && j.ok) {
+          result.scXwoba = j.xwoba != null ? Number(j.xwoba) : null;
+          result.scWoba = j.woba != null ? Number(j.woba) : null;
+          result.scXba = j.xba != null ? Number(j.xba) : null;
+          result.scBa = j.ba != null ? Number(j.ba) : null;
+          result.scXslg = j.xslg != null ? Number(j.xslg) : null;
+          result.scSlg = j.slg != null ? Number(j.slg) : null;
+          result.scBrlPct = j.brl_percent != null ? Number(j.brl_percent) : null;
+          result.scSeason = j.season != null ? Number(j.season) : null;
+          result.scOk = true;
+        }
+      }
+    } catch (_) {}
     _hitterStats[key] = result;
     return result;
   } catch(_) { _hitterStats[key] = { ...DEF }; return _hitterStats[key]; }
@@ -3632,17 +3659,28 @@ async function buildHitters(games, season) {
         else if (h2h && h2h.ab >= 5) pAvg = 0.80*pAvg + 0.20*h2h.avg;
 
         // Park hit/TB/HR factors
-        const pHits = pAvg * abPG * parkHit.hit;
-        const pTB   = (useAvg > 0 ? pHits * (useSlg / useAvg) : pHits * 1.55) * parkHit.tb;
-        const pHR   = hrR * abPG * hrFactor;
+        let pHits = pAvg * abPG * parkHit.hit;
+        let pTB   = (useAvg > 0 ? pHits * (useSlg / useAvg) : pHits * 1.55) * parkHit.tb;
+        let pHR   = hrR * abPG * hrFactor;
+        // pybaseball Statcast: xwOBA vs wOBA (positive regression), barrel% (HR power)
+        const pyLuck = (stats.scXwoba != null && stats.scWoba != null && stats.scWoba > 0.2)
+          ? (1 + Math.max(-0.085, Math.min(0.085, (stats.scXwoba - stats.scWoba) * 0.52)))
+          : 1;
+        const pyBarrel = (stats.scBrlPct != null)
+          ? (1 + Math.max(-0.055, Math.min(0.075, (stats.scBrlPct - 8.5) * 0.009)))
+          : 1;
+        const pyBlend = pyLuck * pyBarrel;
+        pHits *= pyBlend;
+        pTB *= pyBlend;
+        pHR *= pyBlend * (stats.scBrlPct != null ? (1 + Math.max(-0.04, Math.min(0.1, (stats.scBrlPct - 8.5) * 0.011))) : 1);
         // Umpire: tight zone (negative runsAdj) slightly reduces hits/BB
         const umpMult = 1 + umpRunsAdj * 0.04;
         const pBB   = bbR * PA * Math.max(0.80, umpMult);
         // Runs and RBIs: per-PA rates from season stats scaled to today's PAs
         const runsR = stats.pa > 0 ? stats.runs / stats.pa : 0.14;
         const rbiR  = stats.pa > 0 ? stats.rbi  / stats.pa : 0.12;
-        const pRuns = runsR * PA * Math.max(0.80, umpMult);
-        const pRBI  = rbiR  * PA * hrFactor;  // park HR factor lightly affects RBI too
+        const pRuns = runsR * PA * Math.max(0.80, umpMult) * pyBlend;
+        const pRBI  = rbiR  * PA * hrFactor * pyBlend;
         // Hits+Runs+RBIs combo
         const pHRR  = pHits + pRuns + pRBI;
 
@@ -3670,12 +3708,22 @@ async function buildHitters(games, season) {
           if (platoon && platoon.pa >= 30) conf += 4;
           if (bestProp.edge < 0) conf -= 3;
         } else { conf = 44; }
+        if (stats.scOk) conf += 3;
         conf = Math.max(10, Math.min(92, Math.round(conf)));
+
+        let matchupScore = 0;
+        if (bestProp) matchupScore += Math.abs(bestProp.edge) * 11 + (conf - 50) * 0.12;
+        if (stats.scOk && stats.scXwoba != null && stats.scWoba != null) {
+          matchupScore += Math.max(0, stats.scXwoba - stats.scWoba) * 95;
+        }
+        if (stats.scBrlPct != null) matchupScore += Math.max(0, stats.scBrlPct - 7) * 0.55;
+        if (h2h && h2h.ab >= 8 && h2h.avg >= stats.avg + 0.025) matchupScore += 6;
+        else if (h2h && h2h.ab >= 15 && h2h.avg >= 0.28) matchupScore += 4;
 
         return { id:b.id, name:b.name, pos:b.pos, order:fromRoster ? null : idx+1,
           bats:stats.bats, stats, h2h, ppEntry:ppE, platoon, platoonLabel,
           proj:{hits:pHits, tb:pTB, hr:pHR, bb:pBB, runs:pRuns, rbi:pRBI, hrr:pHRR},
-          propList, bestProp, conf, oppPitcherName:oppName, oppHand, fromRoster };
+          propList, bestProp, conf, matchupScore, oppPitcherName:oppName, oppHand, fromRoster };
       }));
     };
 
@@ -3709,6 +3757,48 @@ async function buildHitters(games, season) {
   return results;
 }
 
+function renderTop10Hitters(games) {
+  const rows = [];
+  for (const g of games) {
+    for (const b of g.awayBatters || []) rows.push({ b, g, side: "away" });
+    for (const b of g.homeBatters || []) rows.push({ b, g, side: "home" });
+  }
+  const ranked = rows
+    .filter((x) => x.b.bestProp && x.b.matchupScore != null)
+    .sort((a, b) => b.b.matchupScore - a.b.matchupScore)
+    .slice(0, 10);
+  if (!ranked.length) return "";
+  const pit = (x) => (x.side === "away" ? x.g.homePitcher : x.g.awayPitcher);
+  const team = (x) => (x.side === "away" ? x.g.awayTeam : x.g.homeTeam);
+  const html = ranked.map((x, i) => {
+    const { b, g } = x;
+    const cc = confColor(b.conf);
+    const edge = b.bestProp.edge;
+    return `
+      <div onclick="event.stopPropagation();focusBatter(${g.gamePk}, ${b.id})" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid #1e2d45;cursor:pointer;transition:background .15s" onmouseover="this.style.background='rgba(0,212,255,.07)'" onmouseout="this.style.background=''">
+        <div style="min-width:0">
+          <span style="color:#475569;font-size:11px;font-weight:800;margin-right:8px">#${i + 1}</span>
+          <span style="font-weight:800;font-size:13px;color:#e2e8f0">${b.name}</span>
+          <span class="stat-chip" style="font-size:9px;margin-left:4px">${team(x)}</span>
+          <div style="font-size:10px;color:#64748b;margin-top:3px">vs ${pit(x) || "TBD"} · ${edge >= 0 ? "OVER" : "UNDER"} ${b.bestProp.stat} ${b.bestProp.line}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <span style="background:${cc}22;border:1px solid ${cc}44;color:${cc};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">${b.conf}%</span>
+          <div style="font-size:10px;color:#64748b;margin-top:2px">match ${b.matchupScore.toFixed(1)}</div>
+        </div>
+      </div>`;
+  }).join("");
+  return `
+    <div class="game-card" style="margin-bottom:14px;border-color:rgba(0,212,255,.35)" id="hitters-top10-panel">
+      <div class="card-hd" style="cursor:default;padding:14px 18px">
+        <div>
+          <div style="font-size:11px;font-weight:800;color:#00d4ff;letter-spacing:.08em">TOP 10 MATCHUPS</div>
+          <div style="font-size:10px;color:#64748b;margin-top:4px">Statcast (pybaseball) + prop edge + H2H · click to jump</div>
+        </div>
+      </div>
+      <div style="padding:0">${html}</div>
+    </div>`;
+}
 
 function renderHitterCard(g) {
   const time = g.gameTime
@@ -3716,7 +3806,7 @@ function renderHitterCard(g) {
     : "";
   const avg3 = v => Math.round(v*1000).toString().padStart(3,"0");
 
-  const renderSide = (batters, sideLabel, pitcherName, pitcherHand) => {
+  const renderSide = (batters, sideLabel, pitcherName, pitcherHand, gamePk) => {
     if (!batters.length) return `
       <div class="info-row" style="text-align:center;padding:16px">
         <div style="color:#64748b;font-size:12px">📋 ${sideLabel} lineup not yet posted — no PP lines found</div>
@@ -3772,7 +3862,7 @@ function renderHitterCard(g) {
       }
 
       return `
-        <div class="batter-row" onclick="toggleBatterLog(${b.id}, ${g.season})">
+        <div class="batter-row" id="batter-${gamePk}-${b.id}" onclick="toggleBatterLog(${b.id}, ${g.season})">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:4px;margin-bottom:3px">
             <div>
               <span class="pitcher-name">${b.order ? `#${b.order} ` : ""}${b.name}</span>
@@ -3785,6 +3875,7 @@ function renderHitterCard(g) {
           <div style="margin-bottom:4px;font-size:12px">${h2hHtml}</div>
           <div class="batter-stats-line">
             .${avg3(stats.avg)} AVG · .${avg3(stats.slg)} SLG · ${stats.hr} HR · ${stats.runs} R · ${stats.rbi} RBI · ${stats.bb} BB (${stats.pa} PA)
+            ${stats.scOk && stats.scXwoba != null ? `<span style="color:#a78bfa;font-size:10px;margin-left:6px">· Savant xwOBA ${stats.scXwoba.toFixed(3)}${stats.scSeason ? ` (${stats.scSeason})` : ""}</span>` : ""}
           </div>
           ${platoonHtml ? `<div style="margin-top:4px">${platoonHtml}</div>` : ""}
           ${chips ? `<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">${chips}</div>` : ""}
@@ -3819,7 +3910,6 @@ function renderHitterCard(g) {
     if (b.h2h.avg !== a.h2h.avg) return b.h2h.avg - a.h2h.avg;
     return b.conf - a.conf;
   }).slice(0, 6);
-  console.log("[MLB] topH2H picks:", topH2H.length, topH2H.map(b => b.name + " h2h:" + (b.h2h?.avg||0).toFixed(3) + " ab:" + b.h2h?.ab));
 
   const topH2HSection = topH2H.length ? (() => {
     const rows = topH2H.map(b => {
@@ -3893,9 +3983,9 @@ function renderHitterCard(g) {
         <div style="margin-top:14px">
           ${topH2HSection}
           <div class="hitter-section-title">${g.awayTeam} BATTERS vs <span style="color:#00d4ff">${g.homePitcher}</span> <span class="hand-tag">${g.homePitcherHand||"R"}HP</span></div>
-          ${renderSide(g.awayBatters, g.awayTeam, g.homePitcher, g.homePitcherHand)}
+          ${renderSide(g.awayBatters, g.awayTeam, g.homePitcher, g.homePitcherHand, g.gamePk)}
           <div class="hitter-section-title" style="margin-top:18px">${g.homeTeam} BATTERS vs <span style="color:#00d4ff">${g.awayPitcher}</span> <span class="hand-tag">${g.awayPitcherHand||"R"}HP</span></div>
-          ${renderSide(g.homeBatters, g.homeTeam, g.awayPitcher, g.awayPitcherHand)}
+          ${renderSide(g.homeBatters, g.homeTeam, g.awayPitcher, g.awayPitcherHand, g.gamePk)}
         </div>
       </div>
     </div>`;
@@ -3955,7 +4045,9 @@ function renderSOCard(g) {
               ? `<span style="background:#00d4ff22;border:1px solid #00d4ffaa;color:#00d4ff;border-radius:5px;padding:3px 10px;font-size:12px;font-weight:700;letter-spacing:.04em">📊 PP: ${g.line} K</span>`
               : `<span style="background:rgba(100,116,139,.18);border:1px solid rgba(100,116,139,.35);color:#64748b;border-radius:5px;padding:3px 10px;font-size:11px;font-weight:700">CALC: ${g.line} K</span>`}
             ${g.lineMov ? renderLineMovement(g.lineMov) : ""}
-            ${g.fanGraphsInModel ? `<span style="font-size:10px;font-weight:700;color:#c4b5fd;border:1px solid rgba(196,181,253,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="K% anchored on FanGraphs (pybaseball) + CSW%/SwStr%">FanGraphs + pybaseball</span>` : ""}
+            ${g.fanGraphsInModel ? (g.fgSource === "statcast"
+              ? `<span style="font-size:10px;font-weight:700;color:#c4b5fd;border:1px solid rgba(196,181,253,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="Savant Statcast rates via pybaseball (K%, whiff%)">Statcast + pybaseball</span>`
+              : `<span style="font-size:10px;font-weight:700;color:#c4b5fd;border:1px solid rgba(196,181,253,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="K% anchored on FanGraphs (pybaseball) + CSW%/SwStr%">FanGraphs + pybaseball</span>`) : ""}
             ${g.statcastMatchup && g.statcastMatchup.expectedWhiffVsMix != null ? `<span style="font-size:10px;font-weight:700;color:#a78bfa;border:1px solid rgba(167,139,250,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="Savant pitch mix × batter whiff% (pybaseball Statcast)">Mix×whiff</span>` : ""}
             <span style="color:#94a3b8;font-size:12px">${g.away} @ ${g.home}</span>
           </div>
@@ -4010,7 +4102,7 @@ function renderSOCard(g) {
           <div class="take-label" style="color:${color}">TAKE THIS BET</div>
           <div class="take-value" style="color:${color}">${g.pitcher} ${dir} ${g.line} Strikeouts</div>
           <div class="take-sub" style="color:${color}">
-            Projection: ${g.projection}K · Edge: ${g.edge>0?"+":""}${g.edge} · ${g.confidence}% confidence${g.fanGraphsInModel ? " · FG-backed K%/CSW" : ""}
+            Projection: ${g.projection}K · Edge: ${g.edge>0?"+":""}${g.edge} · ${g.confidence}% confidence${g.fanGraphsInModel ? (g.fgSource === "statcast" ? " · Statcast K%/whiff (pybaseball)" : " · FG-backed K%/CSW") : ""}
           </div>
           <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             ${g.lineSrc==="prizepicks"
@@ -4031,7 +4123,7 @@ function renderSOCard(g) {
             <div class="pitcher-col-title" style="color:#00d4ff">${g.pitcher} — Pitcher Stats</div>
             ${bar("K% (strikeout rate)", g.kPct, 40, "#00ff88")}
             ${g.fgCSW!=null&&!Number.isNaN(g.fgCSW)?bar("CSW% (FanGraphs / pybaseball)", g.fgCSW>1?g.fgCSW:g.fgCSW*100, 40, "#c4b5fd", g.fgSeason?`season ${g.fgSeason}`:""):""}
-            ${g.fgSwStr!=null&&!Number.isNaN(g.fgSwStr)?bar("SwStr% (FanGraphs)", g.fgSwStr>1?g.fgSwStr:g.fgSwStr*100, 20, "#a78bfa"):""}
+            ${g.fgSwStr!=null&&!Number.isNaN(g.fgSwStr)?bar(g.fgSource==="statcast"?"Whiff% (Statcast / pybaseball)":"SwStr% (FanGraphs)", g.fgSwStr>1?g.fgSwStr:g.fgSwStr*100, 45, "#a78bfa", g.fgSeason?`season ${g.fgSeason}`:""):""}
             ${bar("K/9 (weighted)", g.usedK9, 15, "#00d4ff")}
             ${bar("K/9 (season)", g.k9, 15, "#64748b")}
             ${g.stRecentK9!==null?bar("🌱 ST K/9", g.stRecentK9, 15, "#ffd60a"):""}
@@ -4087,6 +4179,29 @@ function toggle(id) {
   const bd   = document.getElementById(id + "-bd");
   const open = bd.classList.toggle("open");
   card.classList.toggle("open", open);
+}
+
+function focusBatter(gamePk, playerId) {
+  const cid = `hg-${gamePk}`;
+  const card = document.getElementById(cid);
+  if (!card) return;
+  const bd = document.getElementById(`${cid}-bd`);
+  if (bd && !bd.classList.contains("open")) {
+    bd.classList.add("open");
+    card.classList.add("open");
+  }
+  setTimeout(() => {
+    const row = document.getElementById(`batter-${gamePk}-${playerId}`);
+    if (row) {
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      row.style.boxShadow = "0 0 0 2px #00d4ff";
+      row.style.borderRadius = "6px";
+      setTimeout(() => {
+        row.style.boxShadow = "";
+        row.style.borderRadius = "";
+      }, 2200);
+    }
+  }, 100);
 }
 
 // ─── UI HELPERS ───────────────────────────────────────────────────────────────
@@ -4157,7 +4272,8 @@ function renderSummary(data, tab) {
 
 function renderCards(data, tab) {
   const filtered = filterData(data);
-  document.getElementById("cards").innerHTML = filtered.map(g =>
+  const top10 = tab === "hitters" ? renderTop10Hitters(filtered) : "";
+  document.getElementById("cards").innerHTML = top10 + filtered.map(g =>
     tab === "nrfi" ? renderNRFICard(g) : tab === "hitters" ? renderHitterCard(g) : renderSOCard(g)
   ).join("");
   const cnt = document.getElementById("game-count");
