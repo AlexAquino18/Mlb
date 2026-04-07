@@ -108,9 +108,10 @@ def fangraphs_pitcher_route():
             headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "public, max-age=3600"},
         )
     except Exception as e:
+        # 200 + JSON so the browser can always read { ok: false, detail } (fetch().json works)
         return Response(
             json.dumps({"ok": False, "error": "server_error", "detail": str(e)}),
-            status=500,
+            status=200,
             headers={**CORS_HEADERS, "Content-Type": "application/json"},
         )
 
@@ -155,7 +156,7 @@ def so_matchup_route():
     except Exception as e:
         return Response(
             json.dumps({"ok": False, "error": "server_error", "detail": str(e)}),
-            status=500,
+            status=200,
             headers={**CORS_HEADERS, "Content-Type": "application/json"},
         )
 

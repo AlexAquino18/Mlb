@@ -2,5 +2,9 @@
   "rewrites": [
     { "source": "/api/pp", "destination": "/api/pp" },
     { "source": "/favicon.ico", "destination": "/favicon.svg" }
-  ]
+  ],
+  "functions": {
+    "api/fangraphs_pitcher.py": { "maxDuration": 60 },
+    "api/so_matchup.py": { "maxDuration": 60 }
+  }
 }

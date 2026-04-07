@@ -1765,8 +1765,8 @@ async function getPitcherData(id, season) {
   // FanGraphs advanced rates (pybaseball) — SwStr% / CSW% via /api/fangraphs_pitcher
   try {
     const fr = await fetchTimeout(`/api/fangraphs_pitcher?mlbam=${id}&season=${season}`, 9000);
-    if (fr && fr.ok) {
-      const j = await fr.json();
+    if (fr) {
+      const j = await fr.json().catch(() => null);
       if (j && j.ok) {
         result.fgSwStr = j.swStr != null ? Number(j.swStr) : null;
         result.fgCSW = j.csw != null ? Number(j.csw) : null;
