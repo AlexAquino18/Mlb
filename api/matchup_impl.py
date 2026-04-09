@@ -15,9 +15,13 @@ _ARS_P: Dict[int, pd.DataFrame] = {}
 _ARS_B: Dict[int, pd.DataFrame] = {}
 
 LG_WHIFF = 24.0
+LG_K_VS_PITCH = 22.0  # league-ish batter K% for missing pitch-type cells
 # Expected whiff vs lineup (gap vs LG_WHIFF) → additive K% points in SO model — slightly stronger than raw gap so mix×whiff matters more
 WHIFF_TO_KPCT = 0.19
 KPCT_ADJ_CAP = 3.2
+# Pitch-mix-weighted batter K% vs each pitch type (e.g. slider-heavy SP vs lineup that chases sliders) — complements whiff%
+K_MIX_TO_KPCT = 0.11
+KPCT_MIX_CAP = 1.65
 
 
 def _load_arsenals(year: int):
@@ -95,46 +99,76 @@ def compute_so_matchup(pitcher_mlbam: int, batter_ids: List[int], season: int) -
 
     mix_rows.sort(key=lambda x: -x["usagePct"])
 
-    lineup_whs: List[float] = []
-    for i, bid in enumerate(batter_ids):
-        w = weights[i] if i < len(weights) else 0.8
-        brows = b_df[b_df["player_id"] == int(bid)]
-        exp = 0.0
-        u_sum = 0.0
-        for _, prow in p_df.iterrows():
-            pt = str(prow.get("pitch_type") or "").strip()
-            if not pt:
-                continue
-            try:
-                usage = float(prow.get("pitch_usage") or 0) / 100.0
-            except (TypeError, ValueError):
-                continue
-            if usage <= 0:
-                continue
-            br = brows[brows["pitch_type"] == pt]
-            if not br.empty:
+    def _lineup_pitch_blend(get_val) -> List[float]:
+        out: List[float] = []
+        for i, bid in enumerate(batter_ids):
+            w = weights[i] if i < len(weights) else 0.8
+            brows = b_df[b_df["player_id"] == int(bid)]
+            exp = 0.0
+            u_sum = 0.0
+            for _, prow in p_df.iterrows():
+                pt = str(prow.get("pitch_type") or "").strip()
+                if not pt:
+                    continue
                 try:
-                    bwh = float(br.iloc[0]["whiff_percent"])
+                    usage = float(prow.get("pitch_usage") or 0) / 100.0
                 except (TypeError, ValueError):
-                    bwh = LG_WHIFF
-            else:
-                bwh = LG_WHIFF
-            exp += usage * bwh
-            u_sum += usage
-        if u_sum > 0 and u_sum < 0.99:
-            exp = exp * (1.0 / u_sum)
-        lineup_whs.append(w * exp)
+                    continue
+                if usage <= 0:
+                    continue
+                br = brows[brows["pitch_type"] == pt]
+                val = get_val(br)
+                exp += usage * val
+                u_sum += usage
+            if u_sum > 0 and u_sum < 0.99:
+                exp = exp * (1.0 / u_sum)
+            out.append(w * exp)
+        return out
+
+    def _whiff_from_row(br) -> float:
+        if br.empty:
+            return LG_WHIFF
+        try:
+            return float(br.iloc[0]["whiff_percent"])
+        except (TypeError, ValueError, KeyError):
+            return LG_WHIFF
+
+    def _k_pct_from_row(br) -> float:
+        if br.empty:
+            return LG_K_VS_PITCH
+        try:
+            row = br.iloc[0]
+            v = row["k_percent"] if "k_percent" in row.index else None
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                return LG_K_VS_PITCH
+            return float(v)
+        except (TypeError, ValueError, KeyError):
+            return LG_K_VS_PITCH
+
+    lineup_whs = _lineup_pitch_blend(_whiff_from_row)
+    lineup_k = _lineup_pitch_blend(_k_pct_from_row)
 
     weighted_whiff = sum(lineup_whs) / max(0.001, total_w)
+    weighted_k_mix = sum(lineup_k) / max(0.001, total_w)
 
-    k_pct_adj = (weighted_whiff - LG_WHIFF) * WHIFF_TO_KPCT
-    k_pct_adj = max(-KPCT_ADJ_CAP, min(KPCT_ADJ_CAP, k_pct_adj))
+    k_pct_adj_whiff = (weighted_whiff - LG_WHIFF) * WHIFF_TO_KPCT
+    k_pct_adj_whiff = max(-KPCT_ADJ_CAP, min(KPCT_ADJ_CAP, k_pct_adj_whiff))
+
+    k_mix_adj = (weighted_k_mix - LG_K_VS_PITCH) * K_MIX_TO_KPCT
+    k_mix_adj = max(-KPCT_MIX_CAP, min(KPCT_MIX_CAP, k_mix_adj))
+
+    k_pct_adj = k_pct_adj_whiff + k_mix_adj
+    k_pct_adj = max(-4.0, min(4.0, k_pct_adj))
 
     return {
         "ok": True,
         "season": used_year,
         "expectedWhiffVsMix": round(weighted_whiff, 2),
+        "expectedKVsMix": round(weighted_k_mix, 2),
         "kPctAdj": round(k_pct_adj, 3),
+        "kPctAdjWhiff": round(k_pct_adj_whiff, 3),
+        "kPctAdjMixK": round(k_mix_adj, 3),
         "pitchMix": mix_rows[:8],
         "baselineWhiff": LG_WHIFF,
+        "baselineKMix": LG_K_VS_PITCH,
     }

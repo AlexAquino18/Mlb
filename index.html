@@ -1848,36 +1848,70 @@ async function getCatcherForTeam(gamePk, side) {
 
 // ── PITCHER VS BATTER HEAD-TO-HEAD ───────────────────────────────────────────
 const _h2hCache = {};
+/** Same order as lineup (slot 1–9). K% vs this pitcher uses PA when available. */
 async function getPitcherVsLineup(pitcherId, batters, season) {
   if (!pitcherId || !batters || batters.length === 0) return [];
-  const results = [];
-  await Promise.all(batters.slice(0,9).map(async (batter) => {
+  const slice = batters.slice(0, 9);
+  return Promise.all(slice.map(async (batter) => {
     const key = `${pitcherId}-${batter.id}-${season}`;
-    if (_h2hCache[key] !== undefined) {
-      results.push(_h2hCache[key]);
-      return;
-    }
+    if (_h2hCache[key] !== undefined) return _h2hCache[key];
     try {
       const d = await mlbGet(`/people/${pitcherId}/stats?stats=vsPlayer&group=pitching&opposingPlayerId=${batter.id}&season=${season}`);
       const s = d.stats?.[0]?.splits?.[0]?.stat;
-      if (s && (s.atBats || 0) >= 3) {
+      const ab = s?.atBats || 0;
+      const bb = s?.baseOnBalls || 0;
+      const hbp = s?.hitByPitch || 0;
+      const pa = s?.plateAppearances != null && s.plateAppearances > 0
+        ? s.plateAppearances
+        : ab + bb + hbp + (s?.sacFlies || 0) + (s?.sacBunts || 0);
+      const k = s?.strikeOuts || 0;
+      if (s && ab >= 3) {
+        const paUse = Math.max(pa, ab);
+        const kPctH2h = paUse > 0 ? parseFloat(((k / paUse) * 100).toFixed(2)) : null;
         const r = {
+          playerId: batter.id,
           name: batter.name,
-          ab:   s.atBats || 0,
-          k:    s.strikeOuts || 0,
+          ab,
+          pa: paUse,
+          k,
+          kPctH2h,
           hits: s.hits || 0,
-          avg:  s.avg ? parseFloat(s.avg) : null,
-          ops:  s.ops ? parseFloat(s.ops) : null,
-          hr:   s.homeRuns || 0,
+          avg: s.avg ? parseFloat(s.avg) : null,
+          ops: s.ops ? parseFloat(s.ops) : null,
+          hr: s.homeRuns || 0,
         };
         _h2hCache[key] = r;
-        results.push(r);
-      } else {
-        _h2hCache[key] = null;
+        return r;
       }
-    } catch(_) { _h2hCache[key] = null; }
+      _h2hCache[key] = null;
+      return null;
+    } catch (_) {
+      _h2hCache[key] = null;
+      return null;
+    }
   }));
-  return results.filter(Boolean).sort((a,b) => b.ab - a.ab);
+}
+
+/** Blend per-batter season K% vs hand with career K% vs this SP (weighted by PA sample). */
+function blendOppKPctWithH2h(lineupKData, h2hSlots) {
+  if (!lineupKData || !lineupKData.batters || !h2hSlots || !h2hSlots.length) return null;
+  const weights = [1.25, 1.20, 1.15, 1.05, 1.00, 0.95, 0.85, 0.80, 0.80];
+  let tw = 0;
+  let tkw = 0;
+  for (let i = 0; i < lineupKData.batters.length; i++) {
+    const b = lineupKData.batters[i];
+    const w = weights[i] || 0.85;
+    const seasonK = b.kPctVsPitcher;
+    const h2h = h2hSlots[i];
+    let kUse = seasonK;
+    if (h2h && h2h.kPctH2h != null && h2h.pa >= 5) {
+      const h2hW = Math.min(1, Math.max(0, (h2h.pa - 5) / 40));
+      kUse = seasonK * (1 - 0.45 * h2hW) + h2h.kPctH2h * (0.45 * h2hW);
+    }
+    tw += w;
+    tkw += kUse * w;
+  }
+  return parseFloat((tkw / tw).toFixed(1));
 }
 
 // Overall team hitting
@@ -2702,16 +2736,23 @@ async function buildSO(games, season) {
         }
       })();
 
-      const [teamSplit, lineupKData, statcastMatchup] = await Promise.all([
+      const [teamSplit, lineupKData, statcastMatchup, h2hSlots] = await Promise.all([
         getTeamVsHand(e.oppId, season, p.hand),
         effectiveBatters.length >= 5
           ? getLineupKPct(effectiveBatters, p.hand, season)
           : Promise.resolve(null),
         statcastMatchupPromise,
+        e.prob && effectiveBatters.length >= 5
+          ? getPitcherVsLineup(e.prob.id, effectiveBatters.slice(0, 9), season)
+          : Promise.resolve([]),
       ]);
 
-      // Prefer per-batter lineup K%, fall back to team split
-      const oppKPct = lineupKData ? lineupKData.kPct : teamSplit.kPct;
+      // Prefer per-batter lineup K%; blend career K% vs this pitcher where PA sample allows
+      let oppKPct = lineupKData ? lineupKData.kPct : teamSplit.kPct;
+      if (lineupKData && h2hSlots && h2hSlots.length) {
+        const blended = blendOppKPctWithH2h(lineupKData, h2hSlots);
+        if (blended != null) oppKPct = blended;
+      }
       const oppOBP  = teamSplit.obp;
 
       // Enrich the lineup batters with their K% for display
@@ -2868,9 +2909,11 @@ async function buildSO(games, season) {
       const ipNote = ppEntry?.outsLine != null
         ? ` PrizePicks ${ppEntry.outsLine} outs (~${(ppEntry.outsLine/3).toFixed(1)} IP implied) → proj workload ~${expectedIP} IP (70% PP outs / 30% season avg).`
         : "";
+      const h2hBlended = lineupKData && h2hSlots && h2hSlots.some((x) => x && x.pa >= 5 && x.kPctH2h != null);
       const lineupSrc = lineupKData
         ? (lineupFromPrevDay ? "Prev-day lineup used (today's not yet posted)" : "Per-batter lineup K% used")
         : "Team split K% used";
+      const h2hKNote = h2hBlended ? " Career vs-this-pitcher K% blended into weighted lineup (PA≥5)." : "";
       const lineNote  = ppEntry
         ? `PrizePicks line ${line} (${ppEntry.statType || "Pitcher Strikeouts"}) — middle line from ${ppEntry.allLines?.length || 1} available`
         : `Calculated line ${line}`;
@@ -2893,9 +2936,9 @@ async function buildSO(games, season) {
           ? "Statcast K%/whiff process · "
           : "FanGraphs K% anchor + CSW/SwStr process · ";
       const analysis = [
-        `${e.prob?.fullName||"TBD"} (${p.hand}HP): BF×K% — ${fgAnchorTxt}${statcastMatchup?.kPctAdj != null ? `Statcast mix×whiff adj ${statcastMatchup.kPctAdj >= 0 ? "+" : ""}${statcastMatchup.kPctAdj} pp · ` : ""}~${expectedBF.toFixed(0)} BF × ${effKPct.toFixed(1)}% eff K% ⇒ ${analyticalK} K.`,
+        `${e.prob?.fullName||"TBD"} (${p.hand}HP): BF×K% — ${fgAnchorTxt}${statcastMatchup?.kPctAdj != null ? `Statcast mix (whiff${statcastMatchup.kPctAdjWhiff != null ? ` ${statcastMatchup.kPctAdjWhiff >= 0 ? "+" : ""}${statcastMatchup.kPctAdjWhiff}` : ""}${statcastMatchup.kPctAdjMixK != null ? ` · pitch-K% ${statcastMatchup.kPctAdjMixK >= 0 ? "+" : ""}${statcastMatchup.kPctAdjMixK}` : ""} → ${statcastMatchup.kPctAdj >= 0 ? "+" : ""}${statcastMatchup.kPctAdj} pp) · ` : ""}~${expectedBF.toFixed(0)} BF × ${effKPct.toFixed(1)}% eff K% ⇒ ${analyticalK} K.`,
         `K/9 display ${useK9.toFixed(1)} · implied ${adjK9.toFixed(1)} K/9 from BF path.`,
-        `${e.oppTeam.teamName||e.oppTeam.name} K% vs ${p.hand}HP: ${oppKPct.toFixed(1)}%. ${lineupSrc}.`,
+        `${e.oppTeam.teamName||e.oppTeam.name} K% vs ${p.hand}HP: ${oppKPct.toFixed(1)}%. ${lineupSrc}.${h2hKNote}`,
         recentNote + ipNote,
         umpSONote + weatherSONote,
         marketNote,
@@ -2908,12 +2951,9 @@ async function buildSO(games, season) {
       // Skip if no PP line AND no real pitcher (pure avg-stat noise)
       if (!ppEntry && !e.prob) return;
 
-      // Fetch catcher framing and H2H data in parallel
-      const catcherSide = e.isHome ? "away" : "home";  // catcher is on the batting team
-      const [catcherInfo, h2hData] = await Promise.all([
-        getCatcherForTeam(g.gamePk, catcherSide),
-        e.prob ? getPitcherVsLineup(e.prob.id, effectiveBatters.slice(0,9), season) : Promise.resolve([]),
-      ]);
+      const catcherSide = e.isHome ? "away" : "home";
+      const catcherInfo = await getCatcherForTeam(g.gamePk, catcherSide);
+      const h2hData = (h2hSlots || []).filter(Boolean).sort((a, b) => b.ab - a.ab);
 
       // Line movement check
       const lineMov = getLineMovement(pitcherName);
@@ -2941,6 +2981,7 @@ async function buildSO(games, season) {
         springERA: p.springERA, springK9: p.springK9,
         pitcherSpringIP: p.springIP,
         oppKPct, oppOBP,
+        h2hKBlended: !!h2hBlended,
         lineupKUsed: !!lineupKData && !lineupFromPrevDay,
         lineupFromPrevDay,
         oppLineup: oppDisplayLineup,
@@ -3261,7 +3302,8 @@ function renderH2H(h2hData, pitcherName) {
       </tr></thead>
       <tbody>
         ${h2hData.map(h => {
-          const kPct = h.ab > 0 ? (h.k/h.ab*100).toFixed(0) : "—";
+          const kDenom = h.pa > 0 ? h.pa : h.ab;
+          const kPct = kDenom > 0 ? (h.k / kDenom * 100).toFixed(0) : "—";
           const avgDisp = h.avg !== null ? h.avg.toFixed(3) : "—";
           const opsDisp = h.ops !== null ? h.ops.toFixed(3) : "—";
           const avgColor = h.avg !== null ? (h.avg < .200 ? "#00ff88" : h.avg > .300 ? "#ff4d6d" : "#94a3b8") : "#94a3b8";
@@ -4220,10 +4262,18 @@ function renderSOCard(g) {
               const sm = g.statcastMatchup;
               const rows = (sm.pitchMix || []).slice(0, 5);
               const mixTxt = rows.map((m) => `${m.name || m.pitch} ${m.usagePct}%`).join(" · ");
+              const whK = sm.kPctAdjWhiff != null ? `${sm.kPctAdjWhiff >= 0 ? "+" : ""}${sm.kPctAdjWhiff}` : null;
+              const pkK = sm.kPctAdjMixK != null ? `${sm.kPctAdjMixK >= 0 ? "+" : ""}${sm.kPctAdjMixK}` : null;
+              const mixKLine = sm.expectedKVsMix != null
+                ? ` · Exp. K% vs mix: <strong style="color:#c4b5fd">${sm.expectedKVsMix}%</strong>`
+                : "";
+              const adjBreak = sm.kPctAdj != null
+                ? `K% adj <strong>${sm.kPctAdj >= 0 ? "+" : ""}${sm.kPctAdj}</strong> pp${whK != null || pkK != null ? ` <span style="color:#64748b;font-size:10px">(whiff ${whK ?? "—"} · pitch-K ${pkK ?? "—"})</span>` : ""}`
+                : "";
               return `<div style="margin-top:12px;padding:10px;background:rgba(167,139,250,.07);border:1px solid rgba(167,139,250,.22);border-radius:8px">
-                <div style="font-size:10px;font-weight:800;color:#a78bfa;letter-spacing:.06em;margin-bottom:6px">STATCAST · MIX × WHIFF</div>
-                <div style="font-size:12px;color:#e2e8f0">Exp. whiff vs this arsenal: <strong style="color:#c4b5fd">${sm.expectedWhiffVsMix}%</strong>
-                  ${sm.kPctAdj != null ? ` · K% adj <strong>${sm.kPctAdj >= 0 ? "+" : ""}${sm.kPctAdj}</strong> pp` : ""}
+                <div style="font-size:10px;font-weight:800;color:#a78bfa;letter-spacing:.06em;margin-bottom:6px">STATCAST · MIX × WHIFF + PITCH K%</div>
+                <div style="font-size:12px;color:#e2e8f0">Exp. whiff vs this arsenal: <strong style="color:#c4b5fd">${sm.expectedWhiffVsMix}%</strong>${mixKLine}
+                  ${adjBreak ? ` · ${adjBreak}` : ""}
                   <span style="color:#64748b;font-size:10px"> · Savant ${sm.season}</span>
                 </div>
                 ${mixTxt ? `<div style="margin-top:6px;font-size:10px;color:#94a3b8;line-height:1.45">${mixTxt}</div>` : ""}
@@ -4232,7 +4282,7 @@ function renderSOCard(g) {
           </div>
           <div>
             <div class="pitcher-col-title" style="color:#64748b">Opponent Lineup vs ${g.hand}HP</div>
-            ${bar(`K% vs ${g.hand}HP`, g.oppKPct, 35, "#ff4d6d", g.lineupKUsed?"per-batter":"team avg")}
+            ${bar(`K% vs ${g.hand}HP`, g.oppKPct, 35, "#ff4d6d", g.lineupKUsed ? (g.h2hKBlended ? "per-batter + vs-SP" : "per-batter") : "team avg")}
             ${bar("Opp OBP", g.oppOBP, 0.42, "#ff4d6d")}
             <div class="info-row" style="margin-top:12px">
               <div class="info-lbl">${g.lineSrc==="prizepicks" ? "📊 PrizePicks Line" : "Calculated Line"}</div>
