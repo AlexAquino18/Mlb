@@ -1673,11 +1673,11 @@ async function getPitcherData(id, season) {
 
   const isSpring = false;
 
-  // Parallel: person (hand), season stats, last-6 game log, spring training stats if applicable
+  // Parallel: person (hand), season stats, game log (enough rows for last-5 + last-3 splits)
   const fetches = [
     mlbGet(`/people/${id}`),
     mlbGet(`/people/${id}/stats?stats=season&group=pitching&gameType=R&season=${season}`),
-    mlbGet(`/people/${id}/stats?stats=gameLog&group=pitching&season=${season}&limit=6`),
+    mlbGet(`/people/${id}/stats?stats=gameLog&group=pitching&season=${season}&limit=12`),
   ];
   if (isSpring) {
     fetches.push(mlbGet(`/people/${id}/stats?stats=season&group=pitching&gameType=S&season=${season + 1}`));
@@ -1716,8 +1716,8 @@ async function getPitcherData(id, season) {
     ? (parseFloat(s.strikePercentage) || ((s.strikes||0) / Math.max(1, s.numberOfPitches||0)))
     : 0.645;
 
-  // Recent form – last 5 regular-season starts
-  let recentERA = null, recentK9 = null, recentKPct = null, recentStarts = 0;
+  // Recent form – last 5 regular-season starts; last-3 K% for short-term trend
+  let recentERA = null, recentK9 = null, recentKPct = null, recentKPct3 = null, recentStarts = 0;
   if (logData.status === "fulfilled") {
     const splits = logData.value?.stats?.[0]?.splits || [];
     const starts = splits.filter(sp => sp.stat?.gamesStarted > 0).slice(0,5);
@@ -1729,7 +1729,13 @@ async function getPitcherData(id, season) {
       const totalBF = starts.reduce((a,sp)=>a+(sp.stat.battersFaced||0),0);
       recentERA = totalIP ? parseFloat((totalER*9/totalIP).toFixed(2)) : null;
       recentK9  = totalIP ? parseFloat((totalK*9/totalIP).toFixed(1))  : null;
-      if (totalBF >= 25) recentKPct = parseFloat(((totalK/totalBF)*100).toFixed(2));
+      if (totalBF >= 20) recentKPct = parseFloat(((totalK/totalBF)*100).toFixed(2));
+      if (starts.length >= 3) {
+        const s3 = starts.slice(0, 3);
+        const bf3 = s3.reduce((a,sp)=>a+(sp.stat.battersFaced||0),0);
+        const k3  = s3.reduce((a,sp)=>a+(sp.stat.strikeOuts||0),0);
+        if (bf3 >= 12) recentKPct3 = parseFloat(((k3/bf3)*100).toFixed(2));
+      }
     }
   }
 
@@ -1777,7 +1783,7 @@ async function getPitcherData(id, season) {
 
   const result = {
     hand, era, k9, kPct, ip, gs, whip, bb9,
-    bfPerIp, recentKPct, kMinusBbPct, strikePct,
+    bfPerIp, recentKPct, recentKPct3, kMinusBbPct, strikePct,
     fgSwStr: null, fgCSW: null, fgKPct: null, fgBBPct: null, fgSeason: null, fgSource: null,
     recentERA, recentK9, recentStarts, gameLog,
     springERA, springK9, springKPct, springIP, springStarts,
@@ -2088,7 +2094,7 @@ async function resolvePitcher(probFromSchedule, gamePk, side, gameInfo) {
 // ─── MODELS ───────────────────────────────────────────────────────────────────
 const AVG_PITCHER = {
   hand:"R", era:4.20, k9:8.8, kPct:22, ip:160, gs:28, whip:1.30, bb9:3.2,
-  bfPerIp:4.35, recentKPct:null, kMinusBbPct:14, strikePct:0.645,
+  bfPerIp:4.35, recentKPct:null, recentKPct3:null, kMinusBbPct:14, strikePct:0.645,
   fgSwStr:null, fgCSW:null, fgKPct:null, fgBBPct:null, fgSeason:null, fgSource:null,
   recentERA:null, recentK9:null, recentStarts:0,
   springERA:null, springK9:null, springKPct:null, springIP:null, springStarts:0,
@@ -2720,9 +2726,9 @@ async function buildSO(games, season) {
         if (p.springK9 !== null && p.springIP && p.springIP >= 1) {
           return parseFloat((p.springK9 * 0.5 + p.k9 * 0.5).toFixed(1));
         }
-        // Weight recent form more heavily (last 5 starts are most predictive)
+        // Weight recent form heavily (last 5 starts — most predictive for tonight)
         return p.recentK9 !== null
-          ? parseFloat((p.k9 * 0.30 + p.recentK9 * 0.70).toFixed(1))
+          ? parseFloat((p.k9 * 0.22 + p.recentK9 * 0.78).toFixed(1))
           : p.k9;
       })();
 
@@ -2759,14 +2765,23 @@ async function buildSO(games, season) {
 
       let blendKPct;
       if (hasFG) {
-        const mlbRec = p.recentKPct != null
-          ? (p.kPct * 0.26 + p.recentKPct * 0.74)
-          : p.kPct;
-        blendKPct = parseFloat((fgK100 * 0.62 + mlbRec * 0.26 + p.kPct * 0.12).toFixed(3));
+        const mlbRec = (() => {
+          if (p.recentKPct != null && p.recentKPct3 != null) {
+            return parseFloat((p.recentKPct * 0.52 + p.recentKPct3 * 0.48).toFixed(3));
+          }
+          if (p.recentKPct != null) {
+            return parseFloat((p.kPct * 0.18 + p.recentKPct * 0.82).toFixed(3));
+          }
+          return p.kPct;
+        })();
+        blendKPct = parseFloat((fgK100 * 0.56 + mlbRec * 0.32 + p.kPct * 0.12).toFixed(3));
       } else {
         blendKPct = p.kPct;
-        if (p.recentKPct != null) {
-          blendKPct = parseFloat((p.kPct * 0.42 + p.recentKPct * 0.58).toFixed(3));
+        if (p.recentKPct != null && p.recentKPct3 != null) {
+          const rec = parseFloat((p.recentKPct * 0.55 + p.recentKPct3 * 0.45).toFixed(3));
+          blendKPct = parseFloat((p.kPct * 0.32 + rec * 0.68).toFixed(3));
+        } else if (p.recentKPct != null) {
+          blendKPct = parseFloat((p.kPct * 0.34 + p.recentKPct * 0.66).toFixed(3));
         }
       }
 
@@ -2792,12 +2807,12 @@ async function buildSO(games, season) {
       } else {
         procAdj = Math.min(1.2, Math.max(-1.2, ((p.strikePct || 0.645) - 0.645) * 9));
       }
-      const procW = hasFG ? 0.48 : 1;
+      const procW = hasFG ? 0.54 : 1;
       blendKPct += Math.min(3, Math.max(-3, procAdj * procW));
 
       const envKMult = (0.88 + 0.12 * umpSO.kAdj) * (0.94 + 0.06 * (weatherSO.soKAdj || 1.0));
       let effKPct = blendKPct * envKMult;
-      const lineupKMult = 1 + ((oppKPct - LG_K) / LG_K) * 0.20;
+      const lineupKMult = 1 + ((oppKPct - LG_K) / LG_K) * 0.24;
       effKPct *= lineupKMult;
       if (statcastMatchup != null && statcastMatchup.kPctAdj != null) {
         effKPct += statcastMatchup.kPctAdj;
@@ -2808,8 +2823,14 @@ async function buildSO(games, season) {
       const expectedBF = expectedIP * bfPerIp;
       const analyticalK = parseFloat(Math.max(0.5, expectedBF * (effKPct / 100)).toFixed(2));
 
-      // PrizePicks line as sharp prior — trust FG-backed model a bit more vs raw MLB-only
-      const MARKET_SHRINK = ppEntry ? (hasFG ? 0.48 : 0.55) : 0;
+      // PrizePicks line as prior — shrink more when data is thin; less when lineup + Statcast matchup align
+      let MARKET_SHRINK = ppEntry ? (hasFG ? 0.46 : 0.53) : 0;
+      if (ppEntry) {
+        if (!lineupKData) MARKET_SHRINK += 0.08;
+        if (lineupFromPrevDay) MARKET_SHRINK += 0.04;
+        if (lineupKData && statcastMatchup != null && statcastMatchup.kPctAdj != null) MARKET_SHRINK -= 0.06;
+        MARKET_SHRINK = Math.max(0.36, Math.min(0.60, MARKET_SHRINK));
+      }
       const line    = ppEntry
         ? ppEntry.line
         : Math.max(0.5, Math.round(analyticalK * 2) / 2);
@@ -2907,7 +2928,7 @@ async function buildSO(games, season) {
         away: aw.team.teamName||aw.team.name,
         home: hm.team.teamName||hm.team.name,
         fgCSW: p.fgCSW, fgSwStr: p.fgSwStr, fgSeason: p.fgSeason, fgSource: p.fgSource ?? null,
-        k9: p.k9, recentK9: p.recentK9, usedK9: useK9,
+        k9: p.k9, recentK9: p.recentK9, recentKPct3: p.recentKPct3, usedK9: useK9,
         adjK9: parseFloat(adjK9.toFixed(1)),
         kPct: p.kPct, era: p.era, recentERA: p.recentERA,
         whip: p.whip,
