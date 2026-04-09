@@ -390,11 +390,11 @@ function getParkRunEnvPF(homeAbbr) {
 }
 /** PF>100 favors batters → nudge pitcher K% down (negative pp); PF<100 favors pitchers → positive pp */
 function parkRunEnvKPP(pf) {
-  return Math.max(-1.15, Math.min(1.15, (100 - pf) * 0.048));
+  return Math.max(-1.45, Math.min(1.45, (100 - pf) * 0.062));
 }
-/** Mild offense multiplier vs 100 PF — layered on top of PARK_HIT_FACTOR (avoid double-counting). */
+/** Offense multiplier vs 100 PF — layered on top of PARK_HIT_FACTOR (avoid double-counting). */
 function parkRunEnvOffenseMult(pf) {
-  return 0.86 + 0.14 * (pf / 100);
+  return 0.80 + 0.20 * (pf / 100);
 }
 
 // ── CATCHER FRAMING DATA ──────────────────────────────────────────────────
