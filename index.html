@@ -348,6 +348,41 @@ const PARK_HIT_FACTOR = {
   TEX:{ hit:1.02, tb:1.03 }, TOR:{ hit:1.04, tb:1.05 }, WSH:{ hit:1.03, tb:1.04 },
 };
 
+// ── RANK & VENUE · RUN-ENVIRONMENT PARK FACTOR (reference table) ─────────────
+// Higher factor → more offense (favors batters). Lower → favors pitchers. 100 ≈ neutral.
+const PARK_RANK_VENUE = [
+  { rank: 1, key: "COL", abbr: "COL", venue: "Coors Field", factor: 115 },
+  { rank: 2, key: "ATH", abbr: "ATH", venue: "Sutter Health Park", factor: 108 },
+  { rank: 3, key: "DET", abbr: "DET", venue: "Comerica Park", factor: 105 },
+  { rank: 4, key: "LAD", abbr: "LAD", venue: "UNIQLO Field at Dodger Stadium", factor: 104 },
+  { rank: 5, key: "BOS", abbr: "BOS", venue: "Fenway Park", factor: 103 },
+  { rank: 5, key: "TOR", abbr: "TOR", venue: "Rogers Centre", factor: 103 },
+  { rank: 5, key: "BAL", abbr: "BAL", venue: "Oriole Park at Camden Yards", factor: 103 },
+  { rank: 8, key: "ARI", abbr: "AZ", venue: "Chase Field", factor: 102 },
+  { rank: 8, key: "PHI", abbr: "PHI", venue: "Citizens Bank Park", factor: 102 },
+  { rank: 8, key: "TB", abbr: "TB", venue: "George M. Steinbrenner Field", factor: 102 },
+  { rank: 11, key: "MIN", abbr: "MIN", venue: "Target Field", factor: 101 },
+  { rank: 11, key: "WSH", abbr: "WSH", venue: "Nationals Park", factor: 101 },
+  { rank: 11, key: "LAA", abbr: "LAA", venue: "Angel Stadium", factor: 101 },
+  { rank: 11, key: "ATL", abbr: "ATL", venue: "Truist Park", factor: 101 },
+  { rank: 15, key: "NYY", abbr: "NYY", venue: "Yankee Stadium", factor: 99 },
+  { rank: 15, key: "SF", abbr: "SF", venue: "Oracle Park", factor: 99 },
+  { rank: 15, key: "NYM", abbr: "NYM", venue: "Citi Field", factor: 99 },
+  { rank: 15, key: "CIN", abbr: "CIN", venue: "Great American Ball Park", factor: 99 },
+  { rank: 19, key: "CWS", abbr: "CWS", venue: "Rate Field", factor: 98 },
+  { rank: 19, key: "MIL", abbr: "MIL", venue: "American Family Field", factor: 98 },
+  { rank: 19, key: "CHC", abbr: "CHC", venue: "Wrigley Field", factor: 98 },
+  { rank: 22, key: "MIA", abbr: "MIA", venue: "loanDepot park", factor: 97 },
+  { rank: 22, key: "HOU", abbr: "HOU", venue: "Daikin Park", factor: 97 },
+  { rank: 22, key: "KC", abbr: "KC", venue: "Kauffman Stadium", factor: 97 },
+  { rank: 22, key: "STL", abbr: "STL", venue: "Busch Stadium", factor: 97 },
+  { rank: 26, key: "PIT", abbr: "PIT", venue: "PNC Park", factor: 96 },
+  { rank: 27, key: "SD", abbr: "SD", venue: "Petco Park", factor: 95 },
+  { rank: 27, key: "CLE", abbr: "CLE", venue: "Progressive Field", factor: 95 },
+  { rank: 29, key: "TEX", abbr: "TEX", venue: "Globe Life Field", factor: 91 },
+  { rank: 29, key: "SEA", abbr: "SEA", venue: "T-Mobile Park", factor: 91 },
+];
+
 // ── CATCHER FRAMING DATA ──────────────────────────────────────────────────
 // Framing runs per 162 games above average (Baseball Savant 2023-2025 avg)
 const CATCHER_FRAMING = {
@@ -3239,6 +3274,37 @@ function renderUmpZoneChart(umpName) {
 }
 
 // ── PARK DIMENSIONS PANEL RENDER ──────────────────────────────────────────────
+function renderParkRankVenueTable(highlightAbbr) {
+  const hi = normTeam(highlightAbbr || "");
+  const rows = PARK_RANK_VENUE.map((r) => {
+    const on = hi === r.key ? "background:rgba(0,212,255,.1);border-left:3px solid #00d4ff" : "";
+    const fc = r.factor >= 100 ? "#ff8fa3" : "#7dd3fc";
+    return `<tr style="${on}">
+      <td style="color:#64748b">${r.rank}</td>
+      <td style="font-weight:700;color:#e2e8f0">${r.abbr}</td>
+      <td style="color:#94a3b8;max-width:200px">${r.venue}</td>
+      <td style="font-weight:800;color:${fc}">${r.factor}</td>
+    </tr>`;
+  }).join("");
+  return `
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e2d45">
+    <div style="font-size:10px;font-weight:800;color:#00d4ff;letter-spacing:.06em;margin-bottom:6px">RANK &amp; VENUE</div>
+    <div style="font-size:10px;color:#94a3b8;line-height:1.5;margin-bottom:10px">
+      Park factor = run environment vs league (100 ≈ neutral).
+      <span style="display:block;margin-top:4px;color:#cbd5e1">
+        <strong style="color:#ff8fa3">Higher</strong> scores favor <strong style="color:#ff4d6d">batters</strong>
+        · <strong style="color:#7dd3fc">Lower</strong> scores favor <strong style="color:#00d4ff">pitchers</strong>.
+      </span>
+    </div>
+    <div style="max-height:260px;overflow-y:auto;border:1px solid #1e2d45;border-radius:8px">
+      <table class="game-log-table" style="font-size:10px;margin:0;width:100%">
+        <thead><tr><th>Rk</th><th>Tm</th><th>Venue</th><th>PF</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
 function renderParkPanel(homeAbbr, parkDims) {
   const dims = parkDims || PARK_DIMS[normTeam(homeAbbr)];
   if (!dims) return "";
@@ -3274,6 +3340,7 @@ function renderParkPanel(homeAbbr, parkDims) {
         </div>
       </div>
     </div>
+    ${renderParkRankVenueTable(homeAbbr)}
   </div>`;
 }
 
