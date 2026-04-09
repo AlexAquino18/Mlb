@@ -1848,43 +1848,70 @@ async function getCatcherForTeam(gamePk, side) {
 
 // ── PITCHER VS BATTER HEAD-TO-HEAD ───────────────────────────────────────────
 const _h2hCache = {};
-/** Same order as lineup (slot 1–9). K% vs this pitcher uses PA when available. */
+
+/** Merge two vsPlayer stat rows (current + prior season) for last-2-year H2H. */
+function mergeVsPlayerStats(s0, s1) {
+  if (!s0 && !s1) return null;
+  const a = s0 || {};
+  const b = s1 || {};
+  const ab = (a.atBats || 0) + (b.atBats || 0);
+  const k = (a.strikeOuts || 0) + (b.strikeOuts || 0);
+  const hits = (a.hits || 0) + (b.hits || 0);
+  const hr = (a.homeRuns || 0) + (b.homeRuns || 0);
+  const bb = (a.baseOnBalls || 0) + (b.baseOnBalls || 0);
+  const hbp = (a.hitByPitch || 0) + (b.hitByPitch || 0);
+  const sf = (a.sacFlies || 0) + (b.sacFlies || 0);
+  const sbu = (a.sacBunts || 0) + (b.sacBunts || 0);
+  const dbl = (a.doubles || 0) + (b.doubles || 0);
+  const tpl = (a.triples || 0) + (b.triples || 0);
+  let pa = (a.plateAppearances || 0) + (b.plateAppearances || 0);
+  if (pa <= 0) pa = ab + bb + hbp + sf + sbu;
+  const singles = Math.max(0, hits - dbl - tpl - hr);
+  const tb = singles + 2 * dbl + 3 * tpl + 4 * hr;
+  const slg = ab > 0 ? tb / ab : 0;
+  const obp = pa > 0 ? (hits + bb + hbp) / pa : 0;
+  const ops = parseFloat((obp + slg).toFixed(3));
+  return { ab, k, hits, hr, pa, bb, hbp, ops };
+}
+
+/** Same order as lineup (slot 1–9). K% vs this pitcher uses PA; stats = last 2 seasons only. */
 async function getPitcherVsLineup(pitcherId, batters, season) {
   if (!pitcherId || !batters || batters.length === 0) return [];
+  const y0 = season;
+  const y1 = season - 1;
   const slice = batters.slice(0, 9);
   return Promise.all(slice.map(async (batter) => {
-    const key = `${pitcherId}-${batter.id}-${season}`;
+    const key = `${pitcherId}-${batter.id}-2yr-${y0}`;
     if (_h2hCache[key] !== undefined) return _h2hCache[key];
     try {
-      const d = await mlbGet(`/people/${pitcherId}/stats?stats=vsPlayer&group=pitching&opposingPlayerId=${batter.id}&season=${season}`);
-      const s = d.stats?.[0]?.splits?.[0]?.stat;
-      const ab = s?.atBats || 0;
-      const bb = s?.baseOnBalls || 0;
-      const hbp = s?.hitByPitch || 0;
-      const pa = s?.plateAppearances != null && s.plateAppearances > 0
-        ? s.plateAppearances
-        : ab + bb + hbp + (s?.sacFlies || 0) + (s?.sacBunts || 0);
-      const k = s?.strikeOuts || 0;
-      if (s && ab >= 3) {
-        const paUse = Math.max(pa, ab);
-        const kPctH2h = paUse > 0 ? parseFloat(((k / paUse) * 100).toFixed(2)) : null;
-        const r = {
-          playerId: batter.id,
-          name: batter.name,
-          ab,
-          pa: paUse,
-          k,
-          kPctH2h,
-          hits: s.hits || 0,
-          avg: s.avg ? parseFloat(s.avg) : null,
-          ops: s.ops ? parseFloat(s.ops) : null,
-          hr: s.homeRuns || 0,
-        };
-        _h2hCache[key] = r;
-        return r;
+      const [d0, d1] = await Promise.all([
+        mlbGet(`/people/${pitcherId}/stats?stats=vsPlayer&group=pitching&opposingPlayerId=${batter.id}&season=${y0}`),
+        mlbGet(`/people/${pitcherId}/stats?stats=vsPlayer&group=pitching&opposingPlayerId=${batter.id}&season=${y1}`),
+      ]);
+      const s0 = d0.stats?.[0]?.splits?.[0]?.stat;
+      const s1 = d1.stats?.[0]?.splits?.[0]?.stat;
+      const stat = mergeVsPlayerStats(s0, s1);
+      if (!stat || stat.ab < 3) {
+        _h2hCache[key] = null;
+        return null;
       }
-      _h2hCache[key] = null;
-      return null;
+      const paUse = Math.max(stat.pa, stat.ab);
+      const kPctH2h = paUse > 0 ? parseFloat(((stat.k / paUse) * 100).toFixed(2)) : null;
+      const r = {
+        playerId: batter.id,
+        name: batter.name,
+        ab: stat.ab,
+        pa: paUse,
+        k: stat.k,
+        kPctH2h,
+        hits: stat.hits,
+        avg: stat.ab > 0 ? parseFloat((stat.hits / stat.ab).toFixed(3)) : null,
+        ops: Number.isFinite(stat.ops) ? stat.ops : null,
+        hr: stat.hr,
+        h2hLabel: `${y1}–${y0}`,
+      };
+      _h2hCache[key] = r;
+      return r;
     } catch (_) {
       _h2hCache[key] = null;
       return null;
@@ -1892,7 +1919,7 @@ async function getPitcherVsLineup(pitcherId, batters, season) {
   }));
 }
 
-/** Blend per-batter season K% vs hand with career K% vs this SP (weighted by PA sample). */
+/** Blend per-batter season K% vs hand with 2-year K% vs this SP (weighted by PA sample). */
 function blendOppKPctWithH2h(lineupKData, h2hSlots) {
   if (!lineupKData || !lineupKData.batters || !h2hSlots || !h2hSlots.length) return null;
   const weights = [1.25, 1.20, 1.15, 1.05, 1.00, 0.95, 0.85, 0.80, 0.80];
@@ -2913,7 +2940,7 @@ async function buildSO(games, season) {
       const lineupSrc = lineupKData
         ? (lineupFromPrevDay ? "Prev-day lineup used (today's not yet posted)" : "Per-batter lineup K% used")
         : "Team split K% used";
-      const h2hKNote = h2hBlended ? " Career vs-this-pitcher K% blended into weighted lineup (PA≥5)." : "";
+      const h2hKNote = h2hBlended ? " Last 2 seasons vs-this-pitcher K% blended into weighted lineup (PA≥5)." : "";
       const lineNote  = ppEntry
         ? `PrizePicks line ${line} (${ppEntry.statType || "Pitcher Strikeouts"}) — middle line from ${ppEntry.allLines?.length || 1} available`
         : `Calculated line ${line}`;
@@ -3294,7 +3321,7 @@ function renderH2H(h2hData, pitcherName) {
   return `
   <div style="background:#0a0e1a;border-radius:8px;padding:11px 14px;margin-top:10px">
     <div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.06em;margin-bottom:8px">
-      ⚔️ HEAD-TO-HEAD — ${pitcherName} vs Opp Lineup (career)
+      ⚔️ HEAD-TO-HEAD — ${pitcherName} vs Opp Lineup (last 2 seasons)
     </div>
     <table class="game-log-table">
       <thead><tr>
