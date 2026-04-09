@@ -383,6 +383,20 @@ const PARK_RANK_VENUE = [
   { rank: 29, key: "SEA", abbr: "SEA", venue: "T-Mobile Park", factor: 91 },
 ];
 
+function getParkRunEnvPF(homeAbbr) {
+  const k = normTeam(homeAbbr || "");
+  const row = PARK_RANK_VENUE.find((r) => r.key === k);
+  return row ? row.factor : 100;
+}
+/** PF>100 favors batters → nudge pitcher K% down (negative pp); PF<100 favors pitchers → positive pp */
+function parkRunEnvKPP(pf) {
+  return Math.max(-1.15, Math.min(1.15, (100 - pf) * 0.048));
+}
+/** Mild offense multiplier vs 100 PF — layered on top of PARK_HIT_FACTOR (avoid double-counting). */
+function parkRunEnvOffenseMult(pf) {
+  return 0.86 + 0.14 * (pf / 100);
+}
+
 // ── CATCHER FRAMING DATA ──────────────────────────────────────────────────
 // Framing runs per 162 games above average (Baseball Savant 2023-2025 avg)
 const CATCHER_FRAMING = {
@@ -2752,6 +2766,8 @@ async function buildSO(games, season) {
       getWeather(homeAbbrSO, selectedDate || today(), g.gameDate),
       getUmpireForGame(g.gamePk),
     ]);
+    const venuePF = getParkRunEnvPF(teamAbbr(hm.team));
+    const parkKPPAdj = parkRunEnvKPP(venuePF);
 
     for (const e of entries) {
       let p = e.prob ? await getPitcherData(e.prob.id, season) : AVG_PITCHER;
@@ -2920,6 +2936,7 @@ async function buildSO(games, season) {
       if (statcastMatchup != null && statcastMatchup.kPctAdj != null) {
         effKPct += statcastMatchup.kPctAdj;
       }
+      effKPct += parkKPPAdj;
       effKPct = Math.max(14, Math.min(42, effKPct));
 
       const bfPerIp = Math.min(5.15, Math.max(3.85, p.bfPerIp || 4.35));
@@ -2989,6 +3006,7 @@ async function buildSO(games, season) {
         if (weatherSO.tempF < 50) parts.push(`${weatherSO.tempF}°F`);
         return parts.length ? ` Weather: ${parts.join(", ")} (K adj ×${(weatherSO.soKAdj||1).toFixed(3)}).` : "";
       })();
+      const parkSONote = ` Venue run-env PF ${venuePF} (${parkKPPAdj >= 0 ? "+" : ""}${parkKPPAdj.toFixed(2)} pp on pitcher K%).`;
       const marketNote = ppEntry
         ? ` Raw model ${analyticalK} K → blended ${projection} K (${((1 - MARKET_SHRINK) * 100).toFixed(0)}% model / ${(MARKET_SHRINK * 100).toFixed(0)}% PP line${hasFG ? "; FG/Savant advanced anchor" : ""}).`
         : "";
@@ -3002,7 +3020,7 @@ async function buildSO(games, season) {
         `K/9 display ${useK9.toFixed(1)} · implied ${adjK9.toFixed(1)} K/9 from BF path.`,
         `${e.oppTeam.teamName||e.oppTeam.name} K% vs ${p.hand}HP: ${oppKPct.toFixed(1)}%. ${lineupSrc}.${h2hKNote}`,
         recentNote + ipNote,
-        umpSONote + weatherSONote,
+        umpSONote + weatherSONote + parkSONote,
         marketNote,
         `${lineNote} · Final proj ${projection} K · Edge ${edge>0?"+":""}${edge} → ${pick} (~${((takeOver ? pOver : 1 - pOver) * 100).toFixed(0)}% win prob vs line).`,
       ].join(" ").trim();
@@ -3043,6 +3061,8 @@ async function buildSO(games, season) {
         springERA: p.springERA, springK9: p.springK9,
         pitcherSpringIP: p.springIP,
         oppKPct, oppOBP,
+        parkRunEnvPF: venuePF,
+        parkRunEnvKPP: parkKPPAdj,
         h2hKBlended: !!h2hBlended,
         lineupKUsed: !!lineupKData && !lineupFromPrevDay,
         lineupFromPrevDay,
@@ -3795,6 +3815,8 @@ async function buildHitters(games, season) {
     const parkInfo = PARK_DIMS[homeAbbr] || {};
     const parkHit  = PARK_HIT_FACTOR[homeAbbr] || { hit:1.0, tb:1.0 };
     const hrFactor = parkInfo.hrFactor || 1.0;
+    const pfRunEnv = getParkRunEnvPF(homeAbbr);
+    const runEnvOffMult = parkRunEnvOffenseMult(pfRunEnv);
     // Fetch umpire for park-adjusted walk and hit edge
     const ump = await getUmpireForGame(g.gamePk).catch(() => null);
     const umpRunsAdj = ump?.runsAdj || 0; // negative = pitcher-friendly
@@ -3853,14 +3875,17 @@ async function buildHitters(games, season) {
         pHits *= pyBlend;
         pTB *= pyBlend;
         pHR *= pyBlend * (stats.scBrlPct != null ? (1 + Math.max(-0.04, Math.min(0.1, (stats.scBrlPct - 8.5) * 0.011))) : 1);
+        pHits *= runEnvOffMult;
+        pTB *= runEnvOffMult;
+        pHR *= runEnvOffMult;
         // Umpire: tight zone (negative runsAdj) slightly reduces hits/BB
         const umpMult = 1 + umpRunsAdj * 0.04;
         const pBB   = bbR * PA * Math.max(0.80, umpMult);
         // Runs and RBIs: per-PA rates from season stats scaled to today's PAs
         const runsR = stats.pa > 0 ? stats.runs / stats.pa : 0.14;
         const rbiR  = stats.pa > 0 ? stats.rbi  / stats.pa : 0.12;
-        const pRuns = runsR * PA * Math.max(0.80, umpMult) * pyBlend;
-        const pRBI  = rbiR  * PA * hrFactor * pyBlend;
+        const pRuns = runsR * PA * Math.max(0.80, umpMult) * pyBlend * runEnvOffMult;
+        const pRBI  = rbiR  * PA * hrFactor * pyBlend * runEnvOffMult;
         // Hits+Runs+RBIs combo
         const pHRR  = pHits + pRuns + pRBI;
 
@@ -3928,6 +3953,8 @@ async function buildHitters(games, season) {
       homePitcher:hmProb?.fullName||"TBD", homePitcherHand:hmProb?.hand||"R",
       parkName:parkInfo.name||"", hrFactor,
       hitFactor:parkHit.hit, tbFactor:parkHit.tb,
+      parkRunEnvPF: pfRunEnv,
+      parkRunEnvOffMult: runEnvOffMult,
       ump: ump && ump.src === "known" ? ump : null,
       awayBatters:awayData, homeBatters:homeData,
       ppLineCount, topProps,
@@ -4181,6 +4208,7 @@ function renderHitterCard(g) {
             <span>${time}${time?" · ":""}${g.awayPitcher} vs ${g.homePitcher}</span>
             ${g.hrFactor !== 1.0 ? `<span class="stat-chip">Park HR ×${g.hrFactor.toFixed(2)}</span>` : ""}
             ${g.hitFactor && g.hitFactor !== 1.0 ? `<span class="stat-chip ${g.hitFactor>1?"warn":""}">Hit ×${g.hitFactor.toFixed(2)}</span>` : ""}
+            ${g.parkRunEnvPF != null ? `<span class="stat-chip" title="Run-environment park factor in model (×${g.parkRunEnvOffMult != null ? g.parkRunEnvOffMult.toFixed(3) : "?"} offense)">🏟 PF ${g.parkRunEnvPF}</span>` : ""}
             ${g.ump ? `<span class="stat-chip">⚖️ ${g.ump.name.split(" ").pop()}</span>` : ""}
           </div>
           <div style="margin-top:7px;display:flex;gap:5px;flex-wrap:wrap">
@@ -4266,6 +4294,7 @@ function renderSOCard(g) {
               ? `<span style="font-size:10px;font-weight:700;color:#c4b5fd;border:1px solid rgba(196,181,253,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="Savant Statcast rates (K%, whiff%)">Statcast</span>`
               : `<span style="font-size:10px;font-weight:700;color:#c4b5fd;border:1px solid rgba(196,181,253,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="FanGraphs K% + CSW%/SwStr%">FanGraphs</span>`) : ""}
             ${g.statcastMatchup && g.statcastMatchup.expectedWhiffVsMix != null ? `<span style="font-size:10px;font-weight:700;color:#a78bfa;border:1px solid rgba(167,139,250,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="Savant pitch mix × batter whiff%">Mix×whiff</span>` : ""}
+            ${g.parkRunEnvPF != null ? `<span style="font-size:10px;font-weight:700;color:#fbbf24;border:1px solid rgba(251,191,36,.35);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="Venue run-env PF (${g.parkRunEnvKPP >= 0 ? "+" : ""}${g.parkRunEnvKPP != null ? g.parkRunEnvKPP.toFixed(2) : "?"} pp on K%)">🏟 PF ${g.parkRunEnvPF}</span>` : ""}
             <span style="color:#94a3b8;font-size:12px">${g.away} @ ${g.home}</span>
           </div>
           <div class="pitcher-line">
