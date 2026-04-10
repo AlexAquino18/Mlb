@@ -1253,6 +1253,60 @@ function lookupPP(fullName) {
   return null;
 }
 
+// Fuzzy lookup for hitter props; book labels and MLB lineup names do not always format identically.
+function lookupPPHitter(fullName, teamAbbr) {
+  if (!fullName || Object.keys(ppHitterLines).length === 0) return null;
+
+  const clean = cleanName(fullName);
+  const parts = clean.split(/\s+/).filter(Boolean);
+  const first = parts[0] || "";
+  const last  = parts[parts.length - 1] || "";
+  const init  = first[0] || "";
+  const normKey = clean.split(/\s+/).sort().join(" ");
+
+  const matchesTeam = (entry) => {
+    if (!teamAbbr || !entry?.team) return true;
+    return String(entry.team).toUpperCase() === String(teamAbbr).toUpperCase();
+  };
+  const pick = (entry) => (entry && matchesTeam(entry) ? entry : null);
+
+  if (ppHitterLines[normKey]) {
+    const hit = pick(ppHitterLines[normKey]);
+    if (hit) return hit;
+  }
+
+  const origKey = normName(fullName);
+  if (ppHitterLines[origKey]) {
+    const hit = pick(ppHitterLines[origKey]);
+    if (hit) return hit;
+  }
+
+  if (parts.length > 2) {
+    const shortKey = normName(`${parts[0]} ${parts[parts.length - 1]}`);
+    if (ppHitterLines[shortKey]) {
+      const hit = pick(ppHitterLines[shortKey]);
+      if (hit) return hit;
+    }
+  }
+
+  const candidates = [];
+  for (const entry of Object.values(ppHitterLines)) {
+    if (!entry?.rawName) continue;
+    const kClean = cleanName(entry.rawName);
+    const kParts = kClean.split(/\s+/).filter(Boolean);
+    if (!kParts.length) continue;
+    const kLast = kParts[kParts.length - 1];
+    const kInit = kParts[0]?.[0] || "";
+    if (kClean === clean || (kLast === last && kInit === init)) {
+      if (matchesTeam(entry)) return entry;
+      candidates.push(entry);
+    }
+  }
+
+  if (!teamAbbr && candidates.length === 1) return candidates[0];
+  return null;
+}
+
 // Look up PP line using team abbreviation + last name (e.g. "PIT:skenes")
 function lookupPPByTeam(fullName, teamAbbr) {
   if (!fullName || !teamAbbr) return null;
@@ -2872,7 +2926,7 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) 
 
       // Check B: PP batter-line lists this player under a DIFFERENT team
       if (!mismatchReason) {
-        const hitterEntry = ppHitterLines[nk];
+        const hitterEntry = lookupPPHitter(mlb.fullName, expAbbr);
         if (hitterEntry?.team && hitterEntry.team.toUpperCase() !== expAbbr) {
           mismatchReason = `PP-batter team=${hitterEntry.team}`;
         }
@@ -2896,7 +2950,7 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) 
   if (ppEntries && ppEntries.length > 0) {
     for (const ppE of ppEntries) {
       // Check 1: PP batter-line lists this player for a team that ≠ PP's K-line team → misassigned
-      const hE = ppHitterLines[normName(ppE.rawName)];
+      const hE = lookupPPHitter(ppE.rawName, expAbbr || ppE.team || "");
       if (hE?.team && ppE.team && hE.team.toUpperCase() !== ppE.team.toUpperCase()) {
         console.warn(`[MLB] PP fallback skip: ${ppE.rawName} K-line=${ppE.team} ≠ batter-line=${hE.team}`);
         continue;
@@ -4046,7 +4100,7 @@ async function buildHitters(games, season) {
       let fromRoster = false;
       if (!effectiveBatters || !effectiveBatters.length) {
         const roster = await getTeamRoster(teamId, season);
-        const ppRoster = roster.filter(p => ppHitterLines[normName(p.name)]);
+        const ppRoster = roster.filter(p => lookupPPHitter(p.name, teamAbbr({ id: teamId })));
         if (!ppRoster.length) return [];
         effectiveBatters = ppRoster;
         fromRoster = true;
@@ -4055,7 +4109,7 @@ async function buildHitters(games, season) {
       return await Promise.all(effectiveBatters.slice(0,9).map(async (b, idx) => {
         const stats = await getHitterStats(b.id, season);
         const h2h   = oppPitcher ? await getH2H(b.id, oppPitcher.id) : null;
-        const ppE   = ppHitterLines[normName(b.name)] || null;
+        const ppE   = lookupPPHitter(b.name, teamAbbr({ id: teamId })) || null;
 
         // Platoon split: fetch batter vs pitcher hand if we know the pitcher hand
         const platoon = oppHand ? await getHitterVsSplit(b.id, season, oppHand) : null;
