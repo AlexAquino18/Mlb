@@ -857,12 +857,20 @@ function disambiguateBarePlayerProp(row, g, cl) {
 
 function classifyOddsMarket(marketName, row) {
   const sh = row && row.statHint ? String(row.statHint).toLowerCase().trim() : "";
+  const raw = (marketName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const st = raw.toLowerCase().trim();
+  const pitcherScoped =
+    st.includes("pitching") ||
+    st.includes("pitcher") ||
+    st.includes("starter");
+
   if (sh === "strikeouts") return { kind: "pitcher_k" };
+  if (pitcherScoped && ["hits", "tb", "hr", "runs", "rbi", "bb", "sb", "hrr"].includes(sh)) {
+    return { kind: "skip" };
+  }
   if (sh === "hrr") return { kind: "hitter", statKey: "hrr" };
   if (["hits", "tb", "hr", "runs", "rbi", "bb", "sb"].includes(sh)) return { kind: "hitter", statKey: sh };
 
-  const raw = (marketName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  const st = raw.toLowerCase().trim();
   if (st.includes("nrfi") || st.includes("yrfi")) return { kind: "skip" };
 
   const lineFromRow = numericLineFromRow(row);
@@ -895,8 +903,9 @@ function classifyOddsMarket(marketName, row) {
   };
   for (const [statKey, patterns] of Object.entries(STAT_MAP)) {
     if (!patterns.some(p => st === p || st.startsWith(p))) continue;
-    if (statKey === "hits" && (st.includes("allowed") || st.includes("against"))) continue;
-    if (statKey === "runs" && (st.includes("pitcher") || st.includes("allowed") || st.includes("against"))) continue;
+    if (statKey === "hits" && (st.includes("pitch") || st.includes("allowed") || st.includes("against"))) continue;
+    if (statKey === "runs" && (st.includes("pitch") || st.includes("allowed") || st.includes("against"))) continue;
+    if (pitcherScoped) continue;
     return { kind: "hitter", statKey };
   }
   // DraftKings/FanDuel-style: little stat text in the label — use line shape. Avoid bare "hit" (matches "White", etc.).
@@ -950,6 +959,11 @@ function applyOddsRowsToState(rows, games, debugLines) {
       cl.kind === "pitcher_k" ||
       (cl.kind === "so_ambiguous" && ambiguousStrikeoutCountsAsPitcher(row, g, player));
     if (!isPitcherSO) continue;
+
+    const hasProbableStarter =
+      g.teams?.home?.probablePitcher?.fullName ||
+      g.teams?.away?.probablePitcher?.fullName;
+    if (hasProbableStarter && !nameMatchesProbable(player, g)) continue;
 
     const nk = normName(player);
     const team = teamAbbrForPitcher(player, g);
@@ -1044,7 +1058,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v14:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v15:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1059,7 +1073,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260409c" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260409d" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
