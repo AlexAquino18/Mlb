@@ -64,6 +64,50 @@ function teamStr(v) {
   return String(v).trim();
 }
 
+function allStringValues(obj, skip, depth = 0) {
+  if (!obj || typeof obj !== "object" || depth > 4) return "";
+  const parts = [];
+  for (const k of Object.keys(obj)) {
+    if (skip.has(k)) continue;
+    const v = obj[k];
+    if (typeof v === "string" && v.trim()) parts.push(v.trim());
+    else if (v && typeof v === "object" && !Array.isArray(v))
+      parts.push(allStringValues(v, skip, depth + 1));
+  }
+  return parts.join(" ");
+}
+
+function compositeMarketName(m, odd) {
+  const chunks = [];
+  const name = (m.name || "").trim();
+  if (name) chunks.push(name);
+  for (const k of [
+    "title", "label", "type", "category", "group", "description", "handicapName",
+    "key", "slug", "statistic", "statType", "propType", "betType", "subType",
+  ]) {
+    if (m[k] && String(m[k]).trim()) chunks.push(String(m[k]).trim());
+  }
+  const lbl = String(odd.label || "").trim();
+  for (const k of ["stat", "market", "type", "selectionName", "description", "name"]) {
+    const v = odd[k];
+    if (v && String(v).trim() && String(v).trim() !== lbl) chunks.push(String(v).trim());
+  }
+  chunks.push(allStringValues(m, new Set(["odds", "bookmakers"]), 0));
+  chunks.push(
+    allStringValues(odd, new Set(["label", "hdp", "over", "under", "home", "away", "draw"]), 0),
+  );
+  const seen = new Set();
+  const out = [];
+  for (const c of chunks) {
+    const cl = c.toLowerCase();
+    if (c && !seen.has(cl)) {
+      seen.add(cl);
+      out.push(c);
+    }
+  }
+  return out.length ? out.join(" · ") : "Player Props";
+}
+
 function appendPropRows(ev, rows, eventTeams) {
   const eid = ev.id;
   let home = teamStr(ev.home);
@@ -80,7 +124,6 @@ function appendPropRows(ev, rows, eventTeams) {
     const markets = bookmakers[bk];
     if (!Array.isArray(markets)) continue;
     for (const m of markets) {
-      const mname = m.name || "";
       const odds = m.odds || [];
       for (const odd of odds) {
         const label = odd.label;
@@ -89,6 +132,7 @@ function appendPropRows(ev, rows, eventTeams) {
         if (hdp === null || hdp === undefined) continue;
         const hf = parseFloat(hdp);
         if (Number.isNaN(hf)) continue;
+        const mname = compositeMarketName(m, odd);
         rows.push({
           eventId: eid,
           home: String(home),

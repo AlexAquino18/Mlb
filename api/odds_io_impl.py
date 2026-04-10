@@ -100,6 +100,70 @@ def _eid_key(eid: Any) -> str:
     return str(eid) if eid is not None else ""
 
 
+def _all_string_values(d: dict, skip: frozenset) -> str:
+    """Join all string leaf values so 'Player Props' feeds still expose Strikeouts/Hits in hidden keys."""
+    parts: List[str] = []
+    for k, v in d.items():
+        if k in skip:
+            continue
+        if isinstance(v, str) and v.strip():
+            parts.append(v.strip())
+        elif isinstance(v, dict):
+            parts.append(_all_string_values(v, skip))
+    return " ".join(parts)
+
+
+def _composite_market_name(m: dict, odd: dict) -> str:
+    """Books often set market.name to only 'Player Props'; stat is in other keys."""
+    chunks: List[str] = []
+    name = (m.get("name") or "").strip()
+    if name:
+        chunks.append(name)
+    for key in (
+        "title",
+        "label",
+        "type",
+        "category",
+        "group",
+        "description",
+        "handicapName",
+        "key",
+        "slug",
+        "statistic",
+        "statType",
+        "propType",
+        "betType",
+        "subType",
+    ):
+        v = m.get(key)
+        if v and str(v).strip():
+            chunks.append(str(v).strip())
+    lbl = str(odd.get("label") or "").strip()
+    for key in ("stat", "market", "type", "selectionName", "description", "name"):
+        v = odd.get(key)
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s and s != lbl:
+            chunks.append(s)
+    chunks.append(_all_string_values(m, frozenset({"odds", "bookmakers"})))
+    chunks.append(
+        _all_string_values(
+            odd,
+            frozenset({"label", "hdp", "over", "under", "home", "away", "draw"}),
+        )
+    )
+    seen: set = set()
+    out: List[str] = []
+    for c in chunks:
+        cl = c.lower()
+        if c and cl not in seen:
+            seen.add(cl)
+            out.append(c)
+    merged = " · ".join(out)
+    return merged if merged.strip() else "Player Props"
+
+
 def _append_prop_rows(
     ev: dict,
     rows: List[dict],
@@ -125,7 +189,6 @@ def _append_prop_rows(
         for m in markets:
             if not isinstance(m, dict):
                 continue
-            mname = m.get("name") or ""
             for odd in m.get("odds") or []:
                 if not isinstance(odd, dict):
                     continue
@@ -139,6 +202,7 @@ def _append_prop_rows(
                     hf = float(hdp)
                 except (TypeError, ValueError):
                     continue
+                mname = _composite_market_name(m, odd)
                 rows.append(
                     {
                         "eventId": eid,
@@ -163,7 +227,7 @@ def fetch_mlb_odds_bundle(
     One events call + ceil(n/10) multi-odds calls. Cached 15 minutes per (date, books).
     """
     date_key = (target_date or "")[:10]
-    cache_key = f"{date_key}|{bookmakers}|v4"
+    cache_key = f"{date_key}|{bookmakers}|v5"
     now = time.time()
     if cache_key in _CACHE:
         ts, data = _CACHE[cache_key]

@@ -790,7 +790,7 @@ function teamAbbrForHitter(playerName, g) {
   return "";
 }
 
-function classifyOddsMarket(marketName) {
+function classifyOddsMarket(marketName, row) {
   const raw = (marketName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const st = raw.toLowerCase().trim();
   if (st.includes("nrfi") || st.includes("yrfi")) return { kind: "skip" };
@@ -827,6 +827,15 @@ function classifyOddsMarket(marketName) {
     if (statKey === "runs" && (st.includes("pitcher") || st.includes("allowed") || st.includes("against"))) continue;
     return { kind: "hitter", statKey };
   }
+  // DraftKings/FanDuel-style: market.name is only "Player Props" — no stat text. Use line shape.
+  const h = row && row.hdp != null ? Number(row.hdp) : NaN;
+  if (!Number.isNaN(h)) {
+    const hasStatWord = /(strike|pitch|hit|home|run|rbi|walk|stolen|base|save|inning|allowed|combo|recorded)/i.test(st);
+    if (!hasStatWord && st.length < 100) {
+      if (h >= 2.5 && h <= 15 && (Math.round(h * 2) === h * 2))
+        return { kind: "so_ambiguous" };
+    }
+  }
   return { kind: "skip" };
 }
 
@@ -838,7 +847,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
   for (const row of rows || []) {
     const g = findGameForOddsRow(row, games);
     if (!g) continue;
-    const cl = classifyOddsMarket(row.market);
+    const cl = classifyOddsMarket(row.market, row);
     const player = row.player;
     if (cl.kind === "skip") continue;
 
@@ -924,18 +933,18 @@ function applyOddsRowsToState(rows, games, debugLines) {
     let noGame = 0, skipMkt = 0, recognized = 0;
     let mktNonSkip = 0;
     for (const row of rows) {
-      if (classifyOddsMarket(row.market).kind !== "skip") mktNonSkip++;
+      if (classifyOddsMarket(row.market, row).kind !== "skip") mktNonSkip++;
     }
     for (const row of rows) {
       const g = findGameForOddsRow(row, games);
       if (!g) { noGame++; continue; }
-      const k = classifyOddsMarket(row.market).kind;
+      const k = classifyOddsMarket(row.market, row).kind;
       if (k === "skip") skipMkt++;
       else recognized++;
     }
     debugLines.push(`Markets non-skip (any team): ${mktNonSkip} · Row pipeline: noScheduleMatch=${noGame} skippedMarket=${skipMkt} recognized=${recognized} (of ${rows.length})`);
     const r0 = rows.find(x => {
-      const k = classifyOddsMarket(x.market).kind;
+      const k = classifyOddsMarket(x.market, x).kind;
       return k === "pitcher_k" || k === "so_ambiguous" || k === "hitter";
     });
     if (r0) {
@@ -953,7 +962,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v4:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v5:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
