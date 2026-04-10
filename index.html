@@ -425,9 +425,9 @@ function buildOddsDisplayHistory(hist, g) {
 }
 
 function renderOddsSparkChart(hist, opts = {}) {
-  const W = opts.width || 340;
-  const H = opts.height || 140;
-  const pad = { l: 40, r: 14, t: 10, b: 24 };
+  const W = opts.width || 380;
+  const H = opts.height || 148;
+  const pad = { l: 40, r: 14, t: 10, b: 32 };
   const rawHist = hist;
   const rows = buildOddsDisplayHistory(hist, opts.game);
   const paddedFromCurrent = !rawHist || rawHist.length < 2;
@@ -476,8 +476,34 @@ function renderOddsSparkChart(hist, opts = {}) {
   }
   const pathFd = stepPath((p) => p.fdOver);
   const pathDk = stepPath((p) => p.dkOver);
-  const t0 = new Date(rows[0].t);
-  const t1 = new Date(rows[rows.length - 1].t);
+  const tMin = rows[0].t;
+  const tMax = rows[rows.length - 1].t;
+  const spanMs = Math.max(1, tMax - tMin);
+  const d0 = new Date(tMin);
+  const d1 = new Date(tMax);
+  const sameCalendarDay =
+    d0.getFullYear() === d1.getFullYear() &&
+    d0.getMonth() === d1.getMonth() &&
+    d0.getDate() === d1.getDate();
+  const fmtTick = (d) =>
+    sameCalendarDay && spanMs <= 48 * 60 * 60 * 1000
+      ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      : d.toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const nTimeTicks = 7;
+  const timeVLines = [];
+  const timeLabels = [];
+  for (let i = 0; i < nTimeTicks; i++) {
+    const frac = i / (nTimeTicks - 1);
+    const ts = tMin + frac * spanMs;
+    const x = pad.l + frac * xw;
+    const anchor = i === 0 ? "start" : i === nTimeTicks - 1 ? "end" : "middle";
+    timeVLines.push(
+      `<line x1="${x}" y1="${pad.t}" x2="${x}" y2="${pad.t + yh}" stroke="rgba(148,163,184,.09)" stroke-dasharray="2 4"/>`
+    );
+    timeLabels.push(
+      `<text x="${x}" y="${H - 6}" fill="#94a3b8" font-size="9" text-anchor="${anchor}">${fmtTick(new Date(ts))}</text>`
+    );
+  }
   const gridId = "soGrid_" + Math.random().toString(36).slice(2, 11);
 
   return `
@@ -498,6 +524,7 @@ function renderOddsSparkChart(hist, opts = {}) {
         </pattern>
       </defs>
       <rect x="${pad.l}" y="${pad.t}" width="${xw}" height="${yh}" fill="url(#${gridId})" opacity="0.5"/>
+      ${timeVLines.join("")}
       ${[0, 0.25, 0.5, 0.75, 1]
         .map((t) => {
           const v = minV + t * (maxV - minV);
@@ -514,8 +541,7 @@ function renderOddsSparkChart(hist, opts = {}) {
         .join("")}
       ${pathFd ? `<path d="${pathFd}" fill="none" stroke="${fdC}" stroke-width="2.5" stroke-linejoin="round"/>` : ""}
       ${pathDk ? `<path d="${pathDk}" fill="none" stroke="${dkC}" stroke-width="2.5" stroke-linejoin="round"/>` : ""}
-      <text x="${pad.l}" y="${H - 4}" fill="#94a3b8" font-size="10">${t0.toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })}</text>
-      <text x="${W - pad.r}" y="${H - 4}" fill="#94a3b8" font-size="10" text-anchor="end">${t1.toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })}</text>
+      ${timeLabels.join("")}
     </svg>
     <div style="font-size:11px;color:#64748b;margin-top:6px;line-height:1.45">American odds on <strong style="color:#e2e8f0">Over ${rows[rows.length - 1].line != null ? rows[rows.length - 1].line : ""}</strong> — step chart; snapshots merge within ~3 min, then hourly when the tab is hidden.</div>
   </div>`;
