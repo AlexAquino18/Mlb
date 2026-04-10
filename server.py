@@ -206,6 +206,41 @@ def pp_proxy():
     return proxy_prizepicks(path_param)
 
 
+@app.route("/api/odds_io")
+def odds_io_route():
+    """Odds-API.io MLB props — same contract as Vercel /api/odds_io (GET ?date=YYYY-MM-DD)."""
+    if request.method == "OPTIONS":
+        return Response(status=204, headers=CORS_HEADERS)
+    try:
+        import os as _os
+        import sys as _sys
+        _apid = _os.path.join(_os.path.dirname(__file__), "api")
+        if _apid not in _sys.path:
+            _sys.path.insert(0, _apid)
+        from odds_io_impl import fetch_mlb_odds_bundle
+
+        api_key = _os.environ.get("ODDS_API_KEY") or _os.environ.get("ODDS_API_IO_KEY")
+        raw_date = request.args.get("date")
+        bookmakers = request.args.get("bookmakers") or "DraftKings,FanDuel"
+        if not api_key:
+            body = {"ok": False, "error": "missing_ODDS_API_KEY"}
+        elif not raw_date:
+            body = {"ok": False, "error": "missing_date"}
+        else:
+            body = fetch_mlb_odds_bundle(api_key, raw_date[:10], bookmakers)
+        return Response(
+            json.dumps(body, default=str),
+            status=200,
+            headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "public, max-age=900"},
+        )
+    except Exception as e:
+        return Response(
+            json.dumps({"ok": False, "error": "server_error", "detail": str(e)}),
+            status=200,
+            headers={**CORS_HEADERS, "Content-Type": "application/json"},
+        )
+
+
 @app.route("/", defaults={"filename": "index.html"})
 @app.route("/<path:filename>")
 def static_files(filename):

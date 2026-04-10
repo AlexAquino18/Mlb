@@ -6,6 +6,7 @@
   "functions": {
     "api/fangraphs_pitcher.py": { "maxDuration": 60 },
     "api/so_matchup.py": { "maxDuration": 60 },
-    "api/batter_advanced.py": { "maxDuration": 60 }
+    "api/batter_advanced.py": { "maxDuration": 60 },
+    "api/odds_io.py": { "maxDuration": 60 }
   }
 }

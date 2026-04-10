@@ -8,6 +8,10 @@
   path     = "/.netlify/functions/pp"
   function = "pp"
 
+[[edge_functions]]
+  path     = "/.netlify/functions/odds_io"
+  function = "odds_io"
+
 # ── Headers ───────────────────────────────────────────────────────────────────
 [[headers]]
   for = "/*"

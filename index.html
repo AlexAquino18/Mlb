@@ -187,7 +187,7 @@
     <div id="header-right">
       <input type="date" id="date-picker" />
       <span id="updated"></span>
-      <button class="btn btn-accent" id="pp-debug-btn" style="display:none" onclick="document.getElementById('pp-debug').style.display='block'">📊 PP Lines</button>
+      <button class="btn btn-accent" id="pp-debug-btn" style="display:none" onclick="document.getElementById('pp-debug').style.display='block'">📊 Book lines</button>
       <button class="btn btn-accent" id="refresh-btn">↻ REFRESH</button>
     </div>
   </div>
@@ -213,7 +213,7 @@
   <!-- PP Debug Panel -->
   <div id="pp-debug" style="display:none;background:#0d1525;border:1px solid #1e2d45;border-radius:10px;padding:16px;margin-bottom:16px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <span style="color:#00d4ff;font-size:12px;font-weight:700">📊 PRIZEPICKS DEBUG</span>
+      <span style="color:#00d4ff;font-size:12px;font-weight:700">📊 ODDS-API DEBUG</span>
       <button onclick="document.getElementById('pp-debug').style.display='none'" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:14px">✕</button>
     </div>
     <div id="pp-debug-body" style="font-size:11px;line-height:1.8;color:#94a3b8;font-family:monospace"></div>
@@ -633,362 +633,305 @@ async function ppGet(path) {
   return null;
 }
 
-// ─── PRIZEPICKS ───────────────────────────────────────────────────────────────
+// ─── SPORTSBOOK LINES (Odds-API.io) ─────────────────────────────────────────
 // Normalize name for storage key: "Gerrit Cole" → "cole gerrit"
 function normName(s) {
   return (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
     .toLowerCase().trim().replace(/[^a-z\s]/g,"").split(/\s+/).sort().join(" ");
 }
 
-async function loadPPLines() {
+// MLB Stats API team IDs → abbreviation (schedule often omits abbreviation)
+const MLB_ID_TO_ABBR = {
+  133:"ATH", 134:"PIT", 135:"SD",  136:"SEA", 137:"SF",  138:"STL",
+  139:"TB",  140:"TEX", 141:"TOR", 142:"MIN", 143:"PHI", 144:"ATL",
+  145:"CWS", 146:"MIA", 147:"NYY", 158:"MIL", 108:"LAA", 109:"AZ",
+  110:"BAL", 111:"BOS", 112:"CHC", 113:"CIN", 114:"CLE", 115:"COL",
+  116:"DET", 117:"HOU", 118:"KC",  119:"LAD", 120:"WSH", 121:"NYM",
+};
+function teamAbbr(teamObj) {
+  return MLB_ID_TO_ABBR[teamObj?.id] || teamObj?.abbreviation?.toUpperCase() || "";
+}
+
+function fuzzyNameEq(a, b) {
+  if (!a || !b) return false;
+  if (cleanName(a) === cleanName(b)) return true;
+  const pa = cleanName(a).split(/\s+/).filter(Boolean);
+  const pb = cleanName(b).split(/\s+/).filter(Boolean);
+  if (!pa.length || !pb.length) return false;
+  if (pa[pa.length - 1] !== pb[pb.length - 1]) return false;
+  return pa[0][0] === pb[0][0];
+}
+
+function normTeamStr(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+}
+
+function looseTeamMatch(a, b) {
+  const na = normTeamStr(a), nb = normTeamStr(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.length >= 4 && nb.includes(na)) return true;
+  if (nb.length >= 4 && na.includes(nb)) return true;
+  return false;
+}
+
+function eventMatchesGame(home, away, g) {
+  const hn = g.teams?.home?.team?.name || "";
+  const an = g.teams?.away?.team?.name || "";
+  return (looseTeamMatch(home, hn) && looseTeamMatch(away, an))
+    || (looseTeamMatch(home, an) && looseTeamMatch(away, hn));
+}
+
+function findGameForOddsRow(row, games) {
+  for (const g of games) {
+    if (eventMatchesGame(row.home, row.away, g)) return g;
+  }
+  return null;
+}
+
+function nameMatchesProbable(playerName, g) {
+  const ph = g.teams?.home?.probablePitcher?.fullName;
+  const pa = g.teams?.away?.probablePitcher?.fullName;
+  return fuzzyNameEq(playerName, ph) || fuzzyNameEq(playerName, pa);
+}
+
+function teamAbbrForPitcher(playerName, g) {
+  const ph = g.teams?.home?.probablePitcher?.fullName;
+  const pa = g.teams?.away?.probablePitcher?.fullName;
+  if (fuzzyNameEq(playerName, ph)) return teamAbbr(g.teams.home.team);
+  if (fuzzyNameEq(playerName, pa)) return teamAbbr(g.teams.away.team);
+  return "";
+}
+
+function teamAbbrForHitter(playerName, g) {
+  for (const side of ["away", "home"]) {
+    const pl = g.lineups?.[`${side}Players`];
+    const abbr = teamAbbr(g.teams?.[side]?.team);
+    if (!pl || !abbr) continue;
+    for (const p of pl) {
+      const fn = p.fullName || p.name;
+      if (fn && fuzzyNameEq(playerName, fn)) return abbr;
+    }
+  }
+  return "";
+}
+
+function classifyOddsMarket(marketName) {
+  const st = (marketName || "").toLowerCase().trim();
+  if (st.includes("nrfi") || st.includes("yrfi")) return { kind: "skip" };
+
+  if (st.includes("strikeout") || st.includes("strike out")) {
+    if (st.includes("batter") || st.includes("hitter")) return { kind: "batter_k" };
+    if (st.includes("pitcher") || st.includes("pitching") || st.includes("starter")) return { kind: "pitcher_k" };
+    return { kind: "so_ambiguous" };
+  }
+  if ((st.includes("out") && (st.includes("pitch") || st.includes("inn"))) || st.includes("pitching outs") || st.includes("outs recorded")) {
+    return { kind: "pitcher_outs" };
+  }
+
+  const STAT_MAP = {
+    hits: ["hits"],
+    tb: ["total bases"],
+    hr: ["home runs", "home run"],
+    bb: ["walks", "base on balls"],
+    runs: ["runs scored", "runs"],
+    rbi: ["rbis", "rbi", "runs batted in"],
+    hrr: ["hits+runs+rbis", "h+r+rbi", "hits + runs + rbis"],
+    sb: ["stolen bases", "stolen base"],
+  };
+  for (const [statKey, patterns] of Object.entries(STAT_MAP)) {
+    if (!patterns.some(p => st === p || st.startsWith(p))) continue;
+    if (statKey === "hits" && (st.includes("allowed") || st.includes("against"))) continue;
+    if (statKey === "runs" && (st.includes("pitcher") || st.includes("allowed") || st.includes("against"))) continue;
+    return { kind: "hitter", statKey };
+  }
+  return { kind: "skip" };
+}
+
+function applyOddsRowsToState(rows, games, debugLines) {
+  const kAccum = {};
+  const outsAccum = {};
+  const hitterAll = {};
+
+  for (const row of rows || []) {
+    const g = findGameForOddsRow(row, games);
+    if (!g) continue;
+    const cl = classifyOddsMarket(row.market);
+    const player = row.player;
+    if (cl.kind === "skip") continue;
+
+    if (cl.kind === "hitter") {
+      const nk = normName(player);
+      const team = teamAbbrForHitter(player, g);
+      if (!hitterAll[nk]) hitterAll[nk] = { rawName: player, team, stats: {} };
+      if (team) hitterAll[nk].team = team;
+      const sk = cl.statKey;
+      if (!hitterAll[nk].stats[sk]) hitterAll[nk].stats[sk] = [];
+      hitterAll[nk].stats[sk].push({ line: row.hdp, statType: row.market });
+      continue;
+    }
+
+    if (cl.kind === "batter_k") continue;
+
+    if (cl.kind === "pitcher_outs") {
+      if (!nameMatchesProbable(player, g)) continue;
+      const nk = normName(player);
+      if (!outsAccum[nk]) outsAccum[nk] = { lines: [], statTypes: [] };
+      outsAccum[nk].lines.push(row.hdp);
+      outsAccum[nk].statTypes.push(row.market);
+      continue;
+    }
+
+    const isPitcherSO =
+      cl.kind === "pitcher_k" ||
+      (cl.kind === "so_ambiguous" && nameMatchesProbable(player, g));
+    if (!isPitcherSO) continue;
+
+    const nk = normName(player);
+    const team = teamAbbrForPitcher(player, g);
+    if (!kAccum[nk]) kAccum[nk] = { rawName: player, team, lines: [], statTypes: [] };
+    kAccum[nk].lines.push(row.hdp);
+    kAccum[nk].statTypes.push(row.market);
+    if (team) kAccum[nk].team = team;
+  }
+
+  for (const [nk, rec] of Object.entries(kAccum)) {
+    const src = [...new Set(rec.lines)].sort((a, b) => a - b);
+    if (!src.length) continue;
+    const midIdx = Math.floor(src.length / 2);
+    const line = src[midIdx];
+    const oE = outsAccum[nk];
+    let outsLine = null, outsStatType = null, outsAllLines = null;
+    if (oE && oE.lines.length) {
+      const oSrc = [...new Set(oE.lines)].sort((a, b) => a - b);
+      outsLine = oSrc[0];
+      outsStatType = oE.statTypes[0];
+      outsAllLines = oSrc;
+    }
+    ppLines[nk] = {
+      line,
+      statType: rec.statTypes[0] || "Strikeouts",
+      rawName: rec.rawName,
+      team: rec.team || "",
+      allLines: src,
+      outsLine,
+      outsStatType,
+      outsAllLines,
+    };
+    if (rec.team) {
+      const lastName = rec.rawName.trim().split(" ").pop().toLowerCase();
+      ppLines[`${rec.team.toLowerCase()}:${lastName}`] = ppLines[nk];
+    }
+  }
+
+  ppHitterLines = {};
+  for (const [nk, data] of Object.entries(hitterAll)) {
+    ppHitterLines[nk] = { rawName: data.rawName, team: data.team };
+    for (const [statKey, entries] of Object.entries(data.stats)) {
+      if (statKey === "rawName" || statKey === "team") continue;
+      const sorted = entries.filter(e => e.line > 0.25).sort((a, b) => a.line - b.line);
+      if (sorted.length) ppHitterLines[nk][statKey] = sorted[0];
+    }
+  }
+
+  debugLines.push(`Odds-API: pitcher keys=${Object.keys(kAccum).length}, hitter keys=${Object.keys(hitterAll).length}`);
+}
+
+const ODDS_CACHE_TTL = 20 * 60 * 1000;
+function oddsCacheKey(dateStr) { return "mlb_odds_v2:" + dateStr; }
+function oddsCacheGet(dateStr) {
+  try {
+    const raw = localStorage.getItem(oddsCacheKey(dateStr));
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts > ODDS_CACHE_TTL) return null;
+    return data;
+  } catch (_) { return null; }
+}
+function oddsCacheSet(dateStr, data) {
+  try { localStorage.setItem(oddsCacheKey(dateStr), JSON.stringify({ ts: Date.now(), data })); } catch (_) {}
+}
+
+function oddsIoFetchUrl(dateStr) {
+  const qs = new URLSearchParams({ date: dateStr });
+  if (typeof location === "undefined" || location.protocol === "file:") return "";
+  const host = location.hostname;
+  const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
+  const isVercel  = host.includes("vercel.app");
+  const isLocal   = host === "localhost" || host === "127.0.0.1";
+  if (isNetlify) return `${location.origin}/.netlify/functions/odds_io?${qs}`;
+  if (isVercel) return `${location.origin}/api/odds_io?${qs}`;
+  if (isLocal) {
+    if (location.port === "8888") return `${location.origin}/.netlify/functions/odds_io?${qs}`;
+    return `http://127.0.0.1:8080/api/odds_io?${qs}`;
+  }
+  return `${location.origin}/api/odds_io?${qs}`;
+}
+
+async function loadPPLines(games, dateStr) {
   if (ppLoaded) return;
   ppLoaded = true;
-  ppLines  = {};
+  ppLines = {};
+  ppHitterLines = {};
+  ppNRFI = {};
 
-  setStatus("Fetching PrizePicks MLB lines…");
+  setStatus("Fetching sportsbook lines (Odds-API)…");
   const debugLines = [];
 
   try {
-    // ── Step 1: discover MLB (regular season) league ID — not MLBST ───────────
-    let leagueId = 2, leagueName = "MLB"; // MLB is always league_id=2 — skip probe
-    const leagues = await ppGet("/leagues");
-    if (leagues?.data) {
-      debugLines.push(`Leagues found: ${leagues.data.length}`);
-      leagues.data.forEach(l => {
-        const n = l.attributes?.name || l.attributes?.abbreviation || "";
-        debugLines.push(`  • ID ${l.id}: ${n}`);
-      });
-      const isSpringLeague = (l) => {
-        const abbr = (l.attributes?.abbreviation || "").toUpperCase();
-        const name = (l.attributes?.name || "").toUpperCase();
-        return abbr.includes("MLBST") || name.includes("SPRING TRAINING")
-          || name.includes("MLB SPRING") || abbr === "MLBST";
-      };
-      const mlbExact = leagues.data.find(l =>
-        (l.attributes?.abbreviation || "").toUpperCase() === "MLB" && !isSpringLeague(l)
-      );
-      const mlbLoose = leagues.data.find(l => {
-        if (isSpringLeague(l)) return false;
-        const abbr = (l.attributes?.abbreviation || "").toUpperCase();
-        const name = (l.attributes?.name || "").toUpperCase();
-        return abbr === "MLB" || (name.includes("MLB") && name.includes("MAJOR") && !name.includes("MINOR"));
-      });
-      const picked = mlbExact || mlbLoose;
-      if (picked) {
-        leagueId   = picked.id;
-        leagueName = picked.attributes?.name || picked.attributes?.abbreviation || leagueId;
-      }
-    } else {
-      debugLines.push("League fetch returned no data");
-      if (typeof location !== "undefined" && location.protocol === "file:") {
-        debugLines.push("💡 Don’t open this file directly (file://). Run: npm start → http://localhost:8080  · or: npx netlify dev → :8888  · or set window.MLB_EDGE_PP_PROXY to your Netlify /.netlify/functions/pp URL");
-      } else if (typeof location !== "undefined" && location.protocol !== "file:") {
-        debugLines.push("💡 PrizePicks needs a server proxy (CORS). Deploy with netlify/functions/pp.js or set window.MLB_EDGE_PP_PROXY to your deployed /.netlify/functions/pp URL.");
-      }
-    }
-
-    // ── Step 2: fallback — probe IDs that return projections (43 retired; MLB = 2)
-    let probeResp = null;
-    if (!leagueId) {
-      debugLines.push("MLB not matched by name — probing league_id candidates…");
-      for (const id of [2, 42, 283, 282, 181, 100]) {
-        const test = await ppGet(`/projections?league_id=${id}&per_page=25`);
-        if (test?.data?.length > 0) {
-          leagueId   = id;
-          leagueName = `ID ${id} (from projections probe)`;
-          probeResp  = test;  // reuse this — don't re-fetch page 1
-          debugLines.push(`  Found projections at league_id=${id}`);
-          break;
-        }
-      }
-    }
-    if (!leagueId) {
-      debugLines.push("❌ No MLB league found — using calculated lines");
+    if (!games || !games.length || !dateStr) {
+      debugLines.push("No schedule — using calculated lines only");
+      setStatus("No games — calculated lines");
       showPPDebug(debugLines);
-      setStatus("PrizePicks: MLB not available — using calculated lines");
       return;
     }
 
-    debugLines.push(`✓ Using league: ${leagueName} (ID ${leagueId})`);
-
-    // ── Step 3: fetch ALL projections ─────────────────────────────────────────
-    // Use 100 per page to reduce total requests and lower chance of being blocked.
-    const PER_PAGE = 100;
-
-    let sampleResp = await ppGet(`/projections?league_id=${leagueId}&per_page=${PER_PAGE}&page=1&include=new_player`);
-    if (!sampleResp?.data?.length) {
-      debugLines.push(`  Strategy A (include) returned 0 — trying without include…`);
-      sampleResp = await ppGet(`/projections?league_id=${leagueId}&per_page=${PER_PAGE}&page=1`);
-    }
-    if (!sampleResp?.data?.length) {
-      debugLines.push(`  Strategy B also returned 0 — trying single_stat=true…`);
-      sampleResp = await ppGet(`/projections?league_id=${leagueId}&per_page=${PER_PAGE}&single_stat=true&page=1`);
-    }
-    // Last resort: reuse the probe response that already succeeded
-    if (!sampleResp?.data?.length && probeResp?.data?.length) {
-      debugLines.push(`  Using saved probe response as fallback…`);
-      sampleResp = probeResp;
-    }
-
-    // Detect which URL pattern works
-    let workingUrl = null;
-    if (sampleResp?.data?.length) {
-      // Inspect first record to understand the shape
-      const s0 = sampleResp.data[0];
-      const a0 = s0.attributes || {};
-      debugLines.push(`  ✓ Sample response — attr keys: ${Object.keys(a0).join(", ")}`);
-      debugLines.push(`  Sample stat_type: "${a0.stat_type}" | line_score: ${a0.line_score}`);
-      debugLines.push(`  Sample rel keys: ${Object.keys(s0.relationships||{}).join(", ")}`);
-      const pid0 = s0.relationships?.new_player?.data?.id || s0.relationships?.player?.data?.id || "—";
-      debugLines.push(`  Sample player_id in relationships: ${pid0}`);
-      // Check if player name is directly on projection attributes
-      const nameFields = ["name","player_name","display_name","first_name","last_name"];
-      const foundNameFields = nameFields.filter(f => a0[f]);
-      debugLines.push(`  Player name fields on attr: ${foundNameFields.join(", ")||"none"}`);
-      if (sampleResp.included?.length) {
-        const inc0 = sampleResp.included[0];
-        debugLines.push(`  included[0]: type=${inc0.type} | attr keys: ${Object.keys(inc0.attributes||{}).join(", ")}`);
+    let payload = oddsCacheGet(dateStr);
+    if (!payload) {
+      const url = oddsIoFetchUrl(dateStr);
+      if (!url) {
+        debugLines.push("Use http://localhost:8080 or a deployed host — file:// cannot call /api/odds_io");
+        setStatus("Sportsbook lines need a server — using calculated lines");
+        showPPDebug(debugLines);
+        return;
+      }
+      const r = await fetchTimeout(url, 28000, { headers: { Accept: "application/json" } });
+      let j = null;
+      try { j = await r.json(); } catch (_) {}
+      if (j && j.ok) {
+        oddsCacheSet(dateStr, j);
+        payload = j;
       } else {
-        debugLines.push(`  No included array in response`);
-      }
-      // Detect working URL
-      if (sampleResp.data.length > 0 && sampleResp.included?.length) workingUrl = "include";
-      else if (sampleResp.data.length > 0) workingUrl = "plain";
-    } else {
-      debugLines.push(`  ❌ All strategies returned 0 projections`);
-    }
-
-    // Now paginate using the working strategy
-    let allProj = [], allIncluded = [];
-    if (sampleResp?.data?.length) {
-      allProj     = [...sampleResp.data];
-      allIncluded = [...(sampleResp.included || [])];
-      let page = 2;
-      while (true) {
-        const url = workingUrl === "include"
-          ? `/projections?league_id=${leagueId}&per_page=${PER_PAGE}&page=${page}&include=new_player`
-          : `/projections?league_id=${leagueId}&per_page=${PER_PAGE}&page=${page}`;
-        await new Promise(r => setTimeout(r, 400 + Math.random() * 300)); // slight delay between pages
-        const resp = await ppGet(url);
-        if (!resp?.data?.length) break;
-        allProj     = allProj.concat(resp.data);
-        allIncluded = allIncluded.concat(resp.included || []);
-        if (resp.data.length < PER_PAGE) break;  // last page
-        page++;
-        if (page > 20) break;  // safety cap
-      }
-    }
-    debugLines.push(`Total projections fetched: ${allProj.length}`);
-
-    // Show ALL unique stat_types present — critical for knowing what PP calls things
-    const allStatTypes = [...new Set(allProj.map(p => p.attributes?.stat_type).filter(Boolean))];
-    debugLines.push(`ALL stat_types found: ${allStatTypes.join(" | ") || "none"}`);
-
-    // ── Step 4: build player map { name, team } from included ─────────────────
-    const playerMap = {}; // id → { name, team }
-    const extractPlayer = (a) => ({
-      name: a.name || a.display_name
-        || ((a.first_name || a.last_name) ? `${a.first_name||""} ${a.last_name||""}`.trim() : ""),
-      team: a.team || a.team_name || a.team_abbreviation || a.sport_team || "",
-    });
-    for (const item of allIncluded) {
-      const t = item.type || "";
-      if (t === "new_player" || t === "player") {
-        const p = extractPlayer(item.attributes || {});
-        if (p.name && item.id) playerMap[item.id] = p;
-      }
-    }
-    debugLines.push(`Players in included: ${Object.keys(playerMap).length}`);
-
-    // ── Step 4b: batch-fetch missing players via /new_players ─────────────────
-    if (Object.keys(playerMap).length === 0) {
-      debugLines.push("Included empty — fetching /new_players in batch…");
-      const allIds = [...new Set(allProj.map(p =>
-        p.relationships?.new_player?.data?.id || p.relationships?.player?.data?.id
-      ).filter(Boolean))];
-      const chunks = [];
-      for (let i = 0; i < allIds.length; i += 50) chunks.push(allIds.slice(i, i+50));
-      for (const chunk of chunks) {
-        const resp = await ppGet(`/new_players?filter[id]=${chunk.join(",")}`);
-        for (const item of resp?.data || []) {
-          const p = extractPlayer(item.attributes || {});
-          if (p.name && item.id) playerMap[item.id] = p;
-        }
-      }
-      debugLines.push(`Players after batch fetch: ${Object.keys(playerMap).length}`);
-    }
-
-    // Log all stat types so we can see what PP calls pitcher Ks
-    const statTypes = [...new Set(allProj.map(p => p.attributes?.stat_type).filter(Boolean))];
-    debugLines.push(`Stat types in this league: ${statTypes.join(", ") || "none"}`);
-
-    // ── Step 5: extract strikeout + pitcher outs + NRFI/YRFI lines ────────────
-    const kByPitcher   = {};  // pid → [{ line, ... }]
-    const outsByPitcher= {};  // pid → [{ line, ... }]
-    const nrfiByGame   = {};  // gameId/teamKey → { line, statType, pick }
-
-    // Track all non-K, non-out stat types that we see on pitcher-related projections
-    const unknownPitcherStats = new Set();
-
-    for (const proj of allProj) {
-      const attr = proj.attributes || {};
-      const st   = (attr.stat_type || attr.description || "").toLowerCase();
-
-      // ── NRFI / YRFI lines ────────────────────────────────────────────────────
-      const isNRFI = st.includes("nrfi") || st.includes("no run") || st.includes("yrfi")
-                  || st.includes("first inning") || st.includes("1st inning")
-                  || st.includes("runs scored in the 1st") || st.includes("run in the first");
-      if (isNRFI) {
-        const pid  = proj.relationships?.new_player?.data?.id
-                  || proj.relationships?.player?.data?.id;
-        const key  = pid || `game_${proj.id}`;
-        const line = parseFloat(attr.line_score);
-        const player = pid ? playerMap[pid] : null;
-        nrfiByGame[key] = {
-          line:     isNaN(line) ? 0.5 : line,
-          statType: attr.stat_type,
-          rawName:  player?.name || attr.description || st,
-          team:     player?.team || "",
-          pick:     st.includes("nrfi") ? "NRFI" : st.includes("yrfi") ? "YRFI" : "NRFI/YRFI",
-        };
-        continue;
-      }
-
-      // ── Pitcher strikeout detection — pitcher only, exclude hitter/batter Ks ──
-      const isBatterK =
-        st.includes("hitter strikeout") ||
-        st.includes("batter strikeout") ||
-        st.includes("hitter k") ||
-        st.includes("batter k") ||
-        st === "hitter strikeouts" ||
-        st === "batter strikeouts";
-
-      const isK = !isBatterK && (
-        st === "pitcher strikeouts" ||
-        st.includes("pitcher k") ||
-        st.includes("pitching k") ||
-        st.includes("pitcher strikeout") ||
-        (st.includes("k") && st.includes("pitcher")) ||
-        st.includes("whiff")
-      );
-
-      const isOuts = !isK && (
-        (/\bout\b/.test(st) && !st.includes("strike"))
-        || st.includes("pitcher out")
-        || (st.includes("outs") && !st.includes("strike"))
-        || st === "pitching outs"
-      );
-
-      const pid  = proj.relationships?.new_player?.data?.id
-                || proj.relationships?.player?.data?.id;
-      if (!pid) continue;
-      const line = parseFloat(attr.line_score);
-      if (isNaN(line)) continue;
-
-      if (isK) {
-        if (!kByPitcher[pid]) kByPitcher[pid] = [];
-        kByPitcher[pid].push({
-          line,
-          oddsType:  attr.odds_type || attr.type || "standard",
-          statType:  attr.stat_type,
-          active:    attr.is_active !== false,
-        });
-      } else if (isOuts) {
-        if (!outsByPitcher[pid]) outsByPitcher[pid] = [];
-        outsByPitcher[pid].push({
-          line,
-          oddsType:  attr.odds_type || attr.type || "standard",
-          statType:  attr.stat_type,
-          active:    attr.is_active !== false,
-        });
-      } else if (playerMap[pid]) {
-        // Log unknown stat types on known players to help diagnose
-        unknownPitcherStats.add(attr.stat_type || "?");
+        debugLines.push(`Odds-API: ${(j && j.error) || ("HTTP " + r.status)}`);
       }
     }
 
-    if (unknownPitcherStats.size > 0) {
-      debugLines.push(`  Other stat types on known players: ${[...unknownPitcherStats].join(", ")}`);
-    }
-    debugLines.push(`  NRFI/YRFI lines found: ${Object.keys(nrfiByGame).length}`);
-
-    let totalFound = 0;
-    const allSoLines = [];
-    for (const [pid, entries] of Object.entries(kByPitcher)) {
-      const player = playerMap[pid];
-      if (!player || !player.name) {
-        debugLines.push(`  SKIP: pid=${pid} — no name found. Lines: ${entries.map(e=>e.line).join(", ")}`);
-        continue;
-      }
-      const { name, team } = player;
-
-      const active = entries.filter(e => e.active);
-      const src    = (active.length ? active : entries).sort((a,b) => a.line - b.line);
-
-      // Use the MIDDLE line (median) as the reference line
-      const midIdx = Math.floor(src.length / 2);
-      const line = src[midIdx].line;
-
-      const oE = outsByPitcher[pid];
-      let outsLine = null, outsStatType = null, outsAllLines = null;
-      if (oE && oE.length) {
-        const oAct = oE.filter(e => e.active);
-        const oSrc = (oAct.length ? oAct : oE).sort((a,b) => a.line - b.line);
-        outsLine     = oSrc[0].line;
-        outsStatType = oSrc[0].statType;
-        outsAllLines = [...new Set(oSrc.map(e => e.line))];
-      }
-
-      const key = normName(name);
-      ppLines[key] = {
-        line,
-        statType: src[0].statType,
-        rawName:  name,
-        team:     team,
-        allLines: [...new Set(src.map(e => e.line))],
-        outsLine,
-        outsStatType,
-        outsAllLines,
-      };
-
-      // Also index by "team + last name" for fallback matching
-      if (team) {
-        const lastName = name.trim().split(" ").pop().toLowerCase();
-        const teamKey  = `${team.toLowerCase()}:${lastName}`;
-        ppLines[teamKey] = ppLines[key];
-      }
-
-      const outsBit = outsLine != null ? ` · ${outsLine} outs (~${(outsLine/3).toFixed(1)} IP)` : "";
-      allSoLines.push(`  • ${name}${team ? ` (${team})` : ""}: ${line} K${outsBit} (K all: ${src.map(e=>e.line).join(", ")})`);
-      totalFound++;
+    if (!payload || !payload.ok) {
+      setStatus("Sportsbook lines unavailable — using calculated lines");
+      showPPDebug(debugLines);
+      return;
     }
 
+    debugLines.push(`Server meta: apiCalls=${payload.meta?.apiCalls ?? "?"} events=${payload.meta?.eventCount ?? "?"} props=${payload.rows?.length ?? 0}`);
+
+    applyOddsRowsToState(payload.rows, games, debugLines);
+
+    const totalFound = Object.keys(ppLines).filter(k => !k.includes(":")).length;
     if (totalFound > 0) {
-      debugLines.push(`\n✓ Strikeout lines (${totalFound}):`);
-      debugLines.push(...allSoLines);
+      setStatus(`Sportsbook: ${totalFound} pitcher K lines (Odds-API)`);
     } else {
-      debugLines.push("⚠ No strikeout lines found — check stat type names above");
+      debugLines.push("No pitcher strikeout props matched to probable starters for this slate.");
+      setStatus("No book K lines matched — calculated lines");
     }
 
-    setStatus(`PrizePicks: ${totalFound} MLB strikeout lines loaded`);
     captureLineSnapshot();
     detectLineMovements();
     buildPPTeamMap();
-    extractPPHitterLines(allProj, playerMap);
-    debugLines.push(`\nPP team map keys: ${Object.keys(ppTeamMap).join(", ")}`);
-    debugLines.push(`Hitter PP lines: ${Object.keys(ppHitterLines).length} players`);
-
-    // Store NRFI lines globally, indexed by rawName/team for lookup in NRFI tab
-    ppNRFI = nrfiByGame;
-    if (Object.keys(nrfiByGame).length > 0) {
-      debugLines.push(`\n✓ NRFI/YRFI lines (${Object.keys(nrfiByGame).length}):`);
-      for (const [k, v] of Object.entries(nrfiByGame)) {
-        debugLines.push(`  • ${v.rawName}${v.team ? ` (${v.team})` : ""}: ${v.statType} line=${v.line} pick=${v.pick}`);
-      }
-    }
-  } catch(e) {
+    debugLines.push(`Team map keys: ${Object.keys(ppTeamMap).join(", ")}`);
+    debugLines.push(`Hitter props (book): ${Object.keys(ppHitterLines).length} players`);
+  } catch (e) {
     debugLines.push(`Error: ${e.message}`);
-    setStatus("PrizePicks load failed — using calculated lines");
+    setStatus("Sportsbook load failed — using calculated lines");
   }
 
   showPPDebug(debugLines);
@@ -1068,20 +1011,6 @@ function lookupPPByTeam(fullName, teamAbbr) {
 }
 
 // ─── PP TEAM MAP ──────────────────────────────────────────────────────────────
-// PP abbreviation → keyword(s) that appear in the MLB team name
-// MLB Stats API team IDs are always present in schedule responses (abbreviation is NOT).
-// Use this map to reliably derive an abbreviation from a team id.
-const MLB_ID_TO_ABBR = {
-  133:"ATH", 134:"PIT", 135:"SD",  136:"SEA", 137:"SF",  138:"STL",
-  139:"TB",  140:"TEX", 141:"TOR", 142:"MIN", 143:"PHI", 144:"ATL",
-  145:"CWS", 146:"MIA", 147:"NYY", 158:"MIL", 108:"LAA", 109:"AZ",
-  110:"BAL", 111:"BOS", 112:"CHC", 113:"CIN", 114:"CLE", 115:"COL",
-  116:"DET", 117:"HOU", 118:"KC",  119:"LAD", 120:"WSH", 121:"NYM",
-};
-function teamAbbr(teamObj) {
-  return MLB_ID_TO_ABBR[teamObj?.id] || teamObj?.abbreviation?.toUpperCase() || "";
-}
-
 const PP_TEAM_KW = {
   AZ:  ["Diamondbacks","Arizona"],  SF:  ["Giants","San Francisco"],
   TB:  ["Rays","Tampa"],            KC:  ["Royals","Kansas City"],
@@ -2954,7 +2883,7 @@ async function buildSO(games, season) {
       const line    = ppEntry
         ? ppEntry.line
         : Math.max(0.5, Math.round(analyticalK * 2) / 2);
-      const lineSrc = ppEntry ? "prizepicks" : "calculated";
+      const lineSrc = ppEntry ? "sportsbook" : "calculated";
       const projection = ppEntry
         ? parseFloat((line + (1 - MARKET_SHRINK) * (analyticalK - line)).toFixed(2))
         : analyticalK;
@@ -2986,7 +2915,7 @@ async function buildSO(games, season) {
       const recentNote = p.stRecentK9 ? ` ST K/9 ${p.stRecentK9.toFixed(1)} (${p.springIP?.toFixed(1)} IP).` :
         p.recentStarts ? ` Recent ${p.recentStarts} starts: ERA ${p.recentERA}, K/9 ${p.recentK9}.` : "";
       const ipNote = ppEntry?.outsLine != null
-        ? ` PrizePicks ${ppEntry.outsLine} outs (~${(ppEntry.outsLine/3).toFixed(1)} IP implied) → proj workload ~${expectedIP} IP (70% PP outs / 30% season avg).`
+        ? ` Sportsbook ${ppEntry.outsLine} outs (~${(ppEntry.outsLine/3).toFixed(1)} IP implied) → proj workload ~${expectedIP} IP (70% book outs / 30% season avg).`
         : "";
       const h2hBlended = lineupKData && h2hSlots && h2hSlots.some((x) => x && x.pa >= 5 && x.kPctH2h != null);
       const lineupSrc = lineupKData
@@ -2994,7 +2923,7 @@ async function buildSO(games, season) {
         : "Team split K% used";
       const h2hKNote = h2hBlended ? " Last 2 seasons vs-this-pitcher K% blended into weighted lineup (PA≥5)." : "";
       const lineNote  = ppEntry
-        ? `PrizePicks line ${line} (${ppEntry.statType || "Pitcher Strikeouts"}) — middle line from ${ppEntry.allLines?.length || 1} available`
+        ? `Sportsbook line ${line} (${ppEntry.statType || "Pitcher Strikeouts"}) — middle line from ${ppEntry.allLines?.length || 1} available`
         : `Calculated line ${line}`;
       const umpSONote = umpSO.src === "known"
         ? ` HP Ump ${umpSO.name} K-adj ×${umpSO.kAdj.toFixed(2)} (${umpSO.note}).`
@@ -3008,7 +2937,7 @@ async function buildSO(games, season) {
       })();
       const parkSONote = ` Venue run-env PF ${venuePF} (${parkKPPAdj >= 0 ? "+" : ""}${parkKPPAdj.toFixed(2)} pp on pitcher K%).`;
       const marketNote = ppEntry
-        ? ` Raw model ${analyticalK} K → blended ${projection} K (${((1 - MARKET_SHRINK) * 100).toFixed(0)}% model / ${(MARKET_SHRINK * 100).toFixed(0)}% PP line${hasFG ? "; FG/Savant advanced anchor" : ""}).`
+        ? ` Raw model ${analyticalK} K → blended ${projection} K (${((1 - MARKET_SHRINK) * 100).toFixed(0)}% model / ${(MARKET_SHRINK * 100).toFixed(0)}% book line${hasFG ? "; FG/Savant advanced anchor" : ""}).`
         : "";
       const fgAnchorTxt = !hasFG
         ? ""
@@ -3084,8 +3013,8 @@ async function buildSO(games, season) {
   });
   // PP line pitchers always sort to top
   return results.sort((a,b) => {
-    const aPP = a.lineSrc === "prizepicks" ? 1 : 0;
-    const bPP = b.lineSrc === "prizepicks" ? 1 : 0;
+    const aPP = a.lineSrc === "sportsbook" ? 1 : 0;
+    const bPP = b.lineSrc === "sportsbook" ? 1 : 0;
     if (bPP !== aPP) return bPP - aPP;
     return Math.abs(b.confidence-50) - Math.abs(a.confidence-50);
   });
@@ -4286,8 +4215,8 @@ function renderSOCard(g) {
       <div class="card-hd" onclick="toggle('${id}')">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px">
-            ${g.lineSrc==="prizepicks"
-              ? `<span style="background:#00d4ff22;border:1px solid #00d4ffaa;color:#00d4ff;border-radius:5px;padding:3px 10px;font-size:12px;font-weight:700;letter-spacing:.04em">📊 PP: ${g.line} K</span>`
+            ${g.lineSrc==="sportsbook"
+              ? `<span style="background:#00d4ff22;border:1px solid #00d4ffaa;color:#00d4ff;border-radius:5px;padding:3px 10px;font-size:12px;font-weight:700;letter-spacing:.04em">📊 Book: ${g.line} K</span>`
               : `<span style="background:rgba(100,116,139,.18);border:1px solid rgba(100,116,139,.35);color:#64748b;border-radius:5px;padding:3px 10px;font-size:11px;font-weight:700">CALC: ${g.line} K</span>`}
             ${g.lineMov ? renderLineMovement(g.lineMov) : ""}
             ${g.fanGraphsInModel ? (g.fgSource === "statcast"
@@ -4351,12 +4280,12 @@ function renderSOCard(g) {
             Projection: ${g.projection}K · Edge: ${g.edge>0?"+":""}${g.edge} · ${g.confidence}% confidence${g.fanGraphsInModel ? (g.fgSource === "statcast" ? " · Statcast K%/whiff" : " · FG-backed K%/CSW") : ""}
           </div>
           <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            ${g.lineSrc==="prizepicks"
-              ? `<span style="background:#00d4ff22;border:1px solid #00d4ff55;color:#00d4ff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">📊 PRIZEPICKS LINE</span>
+            ${g.lineSrc==="sportsbook"
+              ? `<span style="background:#00d4ff22;border:1px solid #00d4ff55;color:#00d4ff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">📊 SPORTSBOOK LINE</span>
                  ${g.ppAllLines && g.ppAllLines.length > 1 ? `<span style="color:#64748b;font-size:10px">all lines: ${g.ppAllLines.join(" / ")}</span>` : ""}`
               : `<span style="background:rgba(100,116,139,.2);border:1px solid rgba(100,116,139,.3);color:#64748b;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">CALCULATED LINE</span>`}
             ${g.ppOutsLine != null
-              ? `<span style="background:rgba(255,214,10,.1);border:1px solid rgba(255,214,10,.3);color:#ffd60a;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">📊 PP ${g.ppOutsLine} outs (~${(g.ppOutsLine/3).toFixed(1)} IP)</span>
+              ? `<span style="background:rgba(255,214,10,.1);border:1px solid rgba(255,214,10,.3);color:#ffd60a;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">📊 Book ${g.ppOutsLine} outs (~${(g.ppOutsLine/3).toFixed(1)} IP)</span>
                  ${g.ppOutsAllLines && g.ppOutsAllLines.length > 1 ? `<span style="color:#64748b;font-size:10px">outs: ${g.ppOutsAllLines.join(" / ")}</span>` : ""}`
               : ""}
             ${g.ump && g.ump.src === "known" ? `<span style="background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.3);color:#00d4ff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700">⚖️ Ump ×${g.ump.kAdj.toFixed(2)}</span>` : ""}
@@ -4378,7 +4307,7 @@ function renderSOCard(g) {
             ${g.stRecentERA!==null?bar("🌱 ST ERA", g.stRecentERA, 7, "#00d4ff"):""}
             ${bar("WHIP", g.whip, 2, "#ffd60a")}
             ${g.expectedBF!=null?bar("Exp. batters faced", g.expectedBF, 32, "#a78bfa", "~IP×BF/IP"):""}
-            ${bar("Proj. Innings", g.projInnings, 9, "#64748b", g.ppOutsLine!=null?"PrizePicks outs + season blend":"season avg")}
+            ${bar("Proj. Innings", g.projInnings, 9, "#64748b", g.ppOutsLine!=null?"Book outs + season blend":"season avg")}
             ${g.ppOutsLine!=null?`<div style="font-size:10px;color:#64748b;margin-top:2px">📊 ${g.ppOutsLine} outs line → ~${(g.ppOutsLine/3).toFixed(1)} IP implied, ~${g.projInnings} IP used in model</div>`:""}
             ${g.pitcherSpringIP?`<div style="font-size:10px;color:#64748b;margin-top:2px">🌱 ${g.pitcherSpringIP.toFixed(1)} IP logged in spring</div>`:""}
             ${g.statcastMatchup && g.statcastMatchup.expectedWhiffVsMix != null ? (() => {
@@ -4408,10 +4337,10 @@ function renderSOCard(g) {
             ${bar(`K% vs ${g.hand}HP`, g.oppKPct, 35, "#ff4d6d", g.lineupKUsed ? (g.h2hKBlended ? "per-batter + vs-SP" : "per-batter") : "team avg")}
             ${bar("Opp OBP", g.oppOBP, 0.42, "#ff4d6d")}
             <div class="info-row" style="margin-top:12px">
-              <div class="info-lbl">${g.lineSrc==="prizepicks" ? "📊 PrizePicks Line" : "Calculated Line"}</div>
+              <div class="info-lbl">${g.lineSrc==="sportsbook" ? "📊 Sportsbook line" : "Calculated Line"}</div>
               <p style="font-size:22px;font-family:'Bebas Neue',sans-serif;color:#00d4ff;margin-bottom:2px">${g.line} K's</p>
               <p style="font-size:11px;color:#64748b">Proj ${g.projection}${g.analyticalK!=null?` (raw ${g.analyticalK})`:""} · eff K/9 ${g.adjK9} · Edge ${g.edge>0?"+":""}${g.edge}${g.pWinVsLine!=null?` · ~${(g.pWinVsLine*100).toFixed(0)}% vs line`:""}</p>
-              ${g.ppOutsLine!=null?`<p style="font-size:11px;color:#ffd60a;margin-top:3px">📊 PrizePicks ${g.ppOutsLine} outs (~${(g.ppOutsLine/3).toFixed(1)} IP) blended to ~${g.expectedIP ?? g.projInnings} IP for projection</p>`:""}
+              ${g.ppOutsLine!=null?`<p style="font-size:11px;color:#ffd60a;margin-top:3px">📊 Book ${g.ppOutsLine} outs (~${(g.ppOutsLine/3).toFixed(1)} IP) blended to ~${g.expectedIP ?? g.projInnings} IP for projection</p>`:""}
             </div>
           </div>
         </div>
@@ -4478,7 +4407,7 @@ function renderFilters(tab) {
     : ["all","strong","over","under"];
   const f = document.getElementById("filters");
   f.innerHTML = opts.map(o => `
-    <button class="filter-btn${o===activeFilter?" active":""}" onclick="setFilter('${o}')">${o==="strong"?"70%+":o==="pp"?"Has PP Line":o.toUpperCase()}</button>
+    <button class="filter-btn${o===activeFilter?" active":""}" onclick="setFilter('${o}')">${o==="strong"?"70%+":o==="pp"?"Has book line":o.toUpperCase()}</button>
   `).join("") + `<span id="game-count"></span>`;
   f.style.display = "flex";
 }
@@ -4497,21 +4426,21 @@ function filterData(data) {
 }
 
 function renderSummary(data, tab) {
-  const ppCount = tab === "strikeouts" ? data.filter(g=>g.lineSrc==="prizepicks").length : 0;
+  const ppCount = tab === "strikeouts" ? data.filter(g=>g.lineSrc==="sportsbook").length : 0;
   const stats = tab === "nrfi"
     ? [
         { l:"NRFI Plays",    v:data.filter(g=>g.confidence>=50).length, c:"#00ff88" },
         { l:"Strong (70%+)", v:data.filter(g=>g.confidence>=70).length, c:"#00d4ff" },
-        { l:"📊 PP Lines",   v:data.filter(g=>g.ppNRFILine!=null).length, c:"#a78bfa" },
+        { l:"📊 Book lines",   v:data.filter(g=>g.ppNRFILine!=null).length, c:"#a78bfa" },
       ]
     : tab === "hitters"
     ? [
-        { l:"📊 PP Props",   v:data.reduce((s,g)=>s+g.ppLineCount,0),  c:"#00d4ff" },
+        { l:"📊 Book props",   v:data.reduce((s,g)=>s+g.ppLineCount,0),  c:"#00d4ff" },
         { l:"Overs",         v:data.reduce((s,g)=>s+[...g.awayBatters,...g.homeBatters].filter(b=>b.bestProp&&b.bestProp.edge>0).length,0), c:"#00ff88" },
         { l:"Unders",        v:data.reduce((s,g)=>s+[...g.awayBatters,...g.homeBatters].filter(b=>b.bestProp&&b.bestProp.edge<0).length,0), c:"#ff4d6d" },
       ]
     : [
-        { l:"📊 PP Lines",  v:ppCount,                         c:"#00d4ff" },
+        { l:"📊 Book lines",  v:ppCount,                         c:"#00d4ff" },
         { l:"Over Plays",   v:data.filter(g=>g.edge>0).length, c:"#00ff88" },
         { l:"Under Plays",  v:data.filter(g=>g.edge<=0).length,c:"#ff4d6d" },
       ];
@@ -4581,8 +4510,8 @@ async function loadTab(tab) {
       return;
     }
 
-    // Load PrizePicks lines — used for pitcher resolution on BOTH tabs
-    await loadPPLines();
+    // Load sportsbook lines (Odds-API) — used for pitcher resolution on BOTH tabs
+    await loadPPLines(games, date);
     if (tab === "strikeouts") {
       document.getElementById("pp-debug-btn").style.display = "inline-block";
     }
