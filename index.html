@@ -986,9 +986,17 @@ function applyOddsRowsToState(rows, games, debugLines) {
       outsStatType,
       outsAllLines,
     };
-    if (rec.team) {
-      const lastName = rec.rawName.trim().split(" ").pop().toLowerCase();
+    const lastName = (cleanName(rec.rawName).split(/\s+/).filter(Boolean).pop() || "").toLowerCase();
+    if (rec.team && lastName) {
       ppLines[`${rec.team.toLowerCase()}:${lastName}`] = ppLines[nk];
+    } else if (lastName && rec.gamesHint && games && games.length) {
+      const gg = games.find(g => eventMatchesGame(rec.gamesHint.home, rec.gamesHint.away, g));
+      if (gg) {
+        const ha = teamAbbr(gg.teams.home.team);
+        const aa = teamAbbr(gg.teams.away.team);
+        if (ha) ppLines[`${ha.toLowerCase()}:${lastName}`] = ppLines[nk];
+        if (aa) ppLines[`${aa.toLowerCase()}:${lastName}`] = ppLines[nk];
+      }
     }
   }
 
@@ -1036,7 +1044,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v12:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v13:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1205,6 +1213,12 @@ function lookupPP(fullName) {
   // 2. Try with original normName (same logic as storage)
   const origKey = normName(fullName);
   if (ppLines[origKey]) return ppLines[origKey];
+
+  // 2b. MLB "First Middle Last" vs book "First Last" — try first+last only
+  if (parts.length > 2) {
+    const nkShort = normName(`${parts[0]} ${parts[parts.length - 1]}`);
+    if (ppLines[nkShort]) return ppLines[nkShort];
+  }
 
   // 3. "Last, First" stored as "first last" on PP side → sorted key matches
   for (const [k, v] of Object.entries(ppLines)) {
