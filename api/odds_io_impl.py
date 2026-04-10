@@ -245,6 +245,41 @@ def _stat_hint_from_market(m: dict) -> str:
     return ""
 
 
+def _stat_hint_from_text(text: str) -> str:
+    raw = (text or "").strip().lower()
+    if not raw:
+        return ""
+    if "strikeout" in raw or "strike out" in raw:
+        return "strikeouts"
+    if "total base" in raw:
+        return "tb"
+    if "home run" in raw:
+        return "hr"
+    if "rbi" in raw or "runs batted" in raw:
+        return "rbi"
+    if "stolen" in raw and "base" in raw:
+        return "sb"
+    if "base on balls" in raw or "walk" in raw:
+        return "bb"
+    if "hits+runs" in raw or "hits + runs + rbis" in raw or "h+r+rbi" in raw:
+        return "hrr"
+    if "runs scored" in raw or raw == "runs":
+        return "runs"
+    if "hits" in raw or raw == "hit":
+        return "hits"
+    return ""
+
+
+def _parse_player_label(label: Any) -> Tuple[str, str]:
+    raw = str(label or "").strip()
+    if not raw:
+        return "", ""
+    m = re.match(r"^(.*?)\s*\(([^()]+)\)\s*$", raw)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    return raw, ""
+
+
 def _first_player_prop_market(ev: dict) -> Tuple[Optional[str], Optional[str], Optional[dict]]:
     """First (bookmaker, index_str, market) where an odd has a player label."""
     bks = ev.get("bookmakers") or {}
@@ -293,6 +328,9 @@ def _append_prop_rows(
                 label = odd.get("label")
                 if not label:
                     continue
+                player_name, label_stat = _parse_player_label(label)
+                if not player_name:
+                    continue
                 hdp = odd.get("hdp")
                 if hdp is None:
                     continue
@@ -301,7 +339,9 @@ def _append_prop_rows(
                 except (TypeError, ValueError):
                     continue
                 mname = _composite_market_name(m, odd)
-                hint = _stat_hint_from_market(m)
+                hint = _stat_hint_from_market(m) or _stat_hint_from_text(label_stat)
+                if label_stat and mname.strip().lower() == "player props":
+                    mname = f"Player Props · {label_stat}"
                 rows.append(
                     {
                         "eventId": eid,
@@ -309,7 +349,7 @@ def _append_prop_rows(
                         "away": str(away),
                         "bookmaker": str(bk),
                         "market": str(mname),
-                        "player": str(label).strip(),
+                        "player": player_name,
                         "hdp": hf,
                         "over": odd.get("over"),
                         "under": odd.get("under"),

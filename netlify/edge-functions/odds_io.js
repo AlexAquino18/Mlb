@@ -161,6 +161,29 @@ function statHintFromMarket(m) {
   return "";
 }
 
+function statHintFromText(text) {
+  const raw = String(text || "").trim().toLowerCase();
+  if (!raw) return "";
+  if (raw.includes("strikeout") || raw.includes("strike out")) return "strikeouts";
+  if (raw.includes("total base")) return "tb";
+  if (raw.includes("home run")) return "hr";
+  if (raw.includes("rbi") || raw.includes("runs batted")) return "rbi";
+  if (raw.includes("stolen") && raw.includes("base")) return "sb";
+  if (raw.includes("base on balls") || raw.includes("walk")) return "bb";
+  if (raw.includes("hits+runs") || raw.includes("hits + runs + rbis") || raw.includes("h+r+rbi")) return "hrr";
+  if (raw.includes("runs scored") || raw === "runs") return "runs";
+  if (raw.includes("hits") || raw === "hit") return "hits";
+  return "";
+}
+
+function parsePlayerLabel(label) {
+  const raw = String(label || "").trim();
+  if (!raw) return { playerName: "", labelStat: "" };
+  const m = raw.match(/^(.*?)\s*\(([^()]+)\)\s*$/);
+  if (m) return { playerName: m[1].trim(), labelStat: m[2].trim() };
+  return { playerName: raw, labelStat: "" };
+}
+
 function firstPlayerPropMarket(ev) {
   const bks = ev.bookmakers || {};
   for (const bkName of Object.keys(bks)) {
@@ -259,22 +282,28 @@ function appendPropRows(ev, rows, eventTeams) {
       for (const odd of odds) {
         const label = odd.label;
         if (!label) continue;
+        const { playerName, labelStat } = parsePlayerLabel(label);
+        if (!playerName) continue;
         const hdp = odd.hdp;
         if (hdp === null || hdp === undefined) continue;
         const hf = parseFloat(hdp);
         if (Number.isNaN(hf)) continue;
-        const mname = compositeMarketName(m, odd);
+        let mname = compositeMarketName(m, odd);
+        const hint = statHintFromMarket(m) || statHintFromText(labelStat);
+        if (labelStat && String(mname).trim().toLowerCase() === "player props") {
+          mname = `Player Props · ${labelStat}`;
+        }
         rows.push({
           eventId: eid,
           home: String(home),
           away: String(away),
           bookmaker: String(bk),
           market: String(mname),
-          player: String(label).trim(),
+          player: playerName,
           hdp: hf,
           over: odd.over,
           under: odd.under,
-          statHint: statHintFromMarket(m),
+          statHint: hint,
         });
       }
     }
