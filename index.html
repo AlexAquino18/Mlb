@@ -454,6 +454,10 @@ function renderOddsSparkChart(hist, opts = {}) {
   const padY = Math.max(12, rawSpan * 0.22);
   minV -= padY;
   maxV += padY;
+  const STEP = 10;
+  minV = Math.floor(minV / STEP) * STEP;
+  maxV = Math.ceil(maxV / STEP) * STEP;
+  if (maxV <= minV) maxV = minV + STEP;
   const axisSpan = maxV - minV || 1;
   const padL = 46;
   const xw = W - padL - pad.r;
@@ -462,10 +466,18 @@ function renderOddsSparkChart(hist, opts = {}) {
   const xAt = (i) => padL + (n <= 1 ? 0 : (i / (n - 1)) * xw);
   const yAt = (v) =>
     pad.t + yh - ((Number(v) - minV) / axisSpan) * yh;
+  /** Labels only on multiples of 10 (no +88 / -87). */
   const fmtAxisOdds = (n) => {
-    const x = Math.round(n);
+    const x = Math.round(Number(n) / STEP) * STEP;
     return x > 0 ? `+${x}` : `${x}`;
   };
+  const roundOddsTick = (v) => Math.round(Number(v) / STEP) * STEP;
+  const yLabelTicks = [0, 0.25, 0.5, 0.75, 1].map((t) =>
+    roundOddsTick(minV + t * axisSpan)
+  );
+  const yGridTicks = [0, 1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6, 1].map((t) =>
+    roundOddsTick(minV + t * axisSpan)
+  );
 
   function stepPath(getter) {
     let d = "";
@@ -536,16 +548,16 @@ function renderOddsSparkChart(hist, opts = {}) {
       </defs>
       <rect x="${padL}" y="${pad.t}" width="${xw}" height="${yh}" fill="url(#${gridId})" opacity="0.5"/>
       ${timeVLines.join("")}
-      ${[0, 1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6, 1]
-        .map((t) => {
-          const v = minV + t * axisSpan;
+      ${[...new Set(yGridTicks)]
+        .sort((a, b) => a - b)
+        .map((v) => {
           const y = yAt(v);
           return `<line x1="${padL}" y1="${y}" x2="${W - pad.r}" y2="${y}" stroke="rgba(148,163,184,.15)" stroke-dasharray="3 3"/>`;
         })
         .join("")}
-      ${[0, 0.25, 0.5, 0.75, 1]
-        .map((t) => {
-          const v = minV + t * axisSpan;
+      ${[...new Set(yLabelTicks)]
+        .sort((a, b) => a - b)
+        .map((v) => {
           const y = yAt(v);
           return `<text x="${padL - 4}" y="${y + 4}" fill="#94a3b8" font-size="10" text-anchor="end">${fmtAxisOdds(v)}</text>`;
         })
