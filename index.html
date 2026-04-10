@@ -675,11 +675,34 @@ function looseTeamMatch(a, b) {
   return false;
 }
 
+/** Odds-API uses short/city names; MLB schedule has full name + teamName — compare all. */
+function oddsStringMatchesMlbTeam(oddsStr, mlbTeamObj) {
+  if (!oddsStr || !mlbTeamObj) return false;
+  const full = mlbTeamObj.name || "";
+  const nick = mlbTeamObj.teamName || "";
+  const lastWord = (full.split(/\s+/).pop() || "").toLowerCase();
+  const candidates = [full, nick, lastWord].filter(Boolean);
+  for (const c of candidates) {
+    if (looseTeamMatch(oddsStr, c)) return true;
+  }
+  const o = normTeamStr(oddsStr);
+  const nf = normTeamStr(full);
+  const nn = normTeamStr(nick);
+  const ot = o.split(/\s+/).filter(t => t.length > 2);
+  for (const t of ot) {
+    if (nf.includes(t) || nn.includes(t) || (lastWord.length > 2 && t === lastWord)) return true;
+  }
+  if (nick && o.includes(normTeamStr(nick))) return true;
+  return false;
+}
+
 function eventMatchesGame(home, away, g) {
-  const hn = g.teams?.home?.team?.name || "";
-  const an = g.teams?.away?.team?.name || "";
-  return (looseTeamMatch(home, hn) && looseTeamMatch(away, an))
-    || (looseTeamMatch(home, an) && looseTeamMatch(away, hn));
+  const ht = g.teams?.home?.team;
+  const at = g.teams?.away?.team;
+  if (!ht || !at) return false;
+  const forward = oddsStringMatchesMlbTeam(home, ht) && oddsStringMatchesMlbTeam(away, at);
+  const swapped = oddsStringMatchesMlbTeam(home, at) && oddsStringMatchesMlbTeam(away, ht);
+  return forward || swapped;
 }
 
 function findGameForOddsRow(row, games) {
@@ -693,6 +716,20 @@ function nameMatchesProbable(playerName, g) {
   const ph = g.teams?.home?.probablePitcher?.fullName;
   const pa = g.teams?.away?.probablePitcher?.fullName;
   return fuzzyNameEq(playerName, ph) || fuzzyNameEq(playerName, pa);
+}
+
+/** Books often label markets "Player Props - Strikeouts" (ambiguous). MLB may not list probables for next-day games yet. */
+function ambiguousStrikeoutCountsAsPitcher(row, g, player) {
+  if (nameMatchesProbable(player, g)) return true;
+  const hasProb =
+    g.teams?.home?.probablePitcher?.fullName ||
+    g.teams?.away?.probablePitcher?.fullName;
+  if (!hasProb) {
+    const h = Number(row.hdp);
+    if (Number.isNaN(h)) return true;
+    return h >= 2.5;
+  }
+  return false;
 }
 
 function teamAbbrForPitcher(playerName, g) {
@@ -774,7 +811,10 @@ function applyOddsRowsToState(rows, games, debugLines) {
     if (cl.kind === "batter_k") continue;
 
     if (cl.kind === "pitcher_outs") {
-      if (!nameMatchesProbable(player, g)) continue;
+      const hasProbPo =
+        g.teams?.home?.probablePitcher?.fullName ||
+        g.teams?.away?.probablePitcher?.fullName;
+      if (hasProbPo && !nameMatchesProbable(player, g)) continue;
       const nk = normName(player);
       if (!outsAccum[nk]) outsAccum[nk] = { lines: [], statTypes: [] };
       outsAccum[nk].lines.push(row.hdp);
@@ -784,7 +824,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 
     const isPitcherSO =
       cl.kind === "pitcher_k" ||
-      (cl.kind === "so_ambiguous" && nameMatchesProbable(player, g));
+      (cl.kind === "so_ambiguous" && ambiguousStrikeoutCountsAsPitcher(row, g, player));
     if (!isPitcherSO) continue;
 
     const nk = normName(player);
@@ -834,6 +874,21 @@ function applyOddsRowsToState(rows, games, debugLines) {
     }
   }
 
+  if ((rows || []).length && (games || []).length &&
+      !Object.keys(kAccum).length && !Object.keys(hitterAll).length) {
+    const r0 = rows.find(x => {
+      const k = classifyOddsMarket(x.market).kind;
+      return k === "pitcher_k" || k === "so_ambiguous" || k === "hitter";
+    });
+    if (r0) {
+      const gTry = findGameForOddsRow(r0, games);
+      debugLines.push(`Match: row→schedule=${gTry ? "ok" : "FAIL"} · odds "${r0.home}" @ "${r0.away}"`);
+      if (!gTry && games[0]) {
+        const gg = games[0];
+        debugLines.push(`MLB schedule sample: "${gg.teams?.home?.team?.name}" (${gg.teams?.home?.team?.teamName || "?"}) vs "${gg.teams?.away?.team?.name}" (${gg.teams?.away?.team?.teamName || "?"})`);
+      }
+    }
+  }
   debugLines.push(`Odds-API: pitcher keys=${Object.keys(kAccum).length}, hitter keys=${Object.keys(hitterAll).length}`);
 }
 
