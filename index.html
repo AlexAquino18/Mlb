@@ -1058,7 +1058,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v16:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v17:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1073,7 +1073,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260409e" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260409f" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -2477,11 +2477,21 @@ async function getPreviousLineup(teamId, dateStr) {
 // Resolve the starting pitcher for a game/side using a 2-tier fallback:
 //   1. probablePitcher from schedule hydration
 //   2. Actual starter pulled from boxscore (for started/finished games)
-async function resolvePitcher(probFromSchedule, gamePk, side, gameInfo) {
+async function resolvePitcher(probFromSchedule, gamePk, side, gameInfo, gameStatus) {
   // Tier 1 – schedule probable pitcher (most common for pre-game)
   if (probFromSchedule && probFromSchedule.id) return probFromSchedule;
 
   // Tier 2 – boxscore confirmed starter (game already underway or finished)
+  const absState = String(gameStatus?.abstractGameState || "").toLowerCase();
+  const detState = String(gameStatus?.detailedState || "").toLowerCase();
+  const allowBoxscoreStarter =
+    absState === "live" ||
+    absState === "final" ||
+    detState.includes("in progress") ||
+    detState.includes("final") ||
+    detState.includes("completed");
+  if (!allowBoxscoreStarter) return null;
+
   const starter = side === "away" ? gameInfo.awayStarter : gameInfo.homeStarter;
   if (starter && starter.id) return starter;
 
@@ -2511,8 +2521,8 @@ async function buildNRFI(games, season) {
 
     // Step 2: resolve probable pitcher — MLB schedule, then boxscore, then PP team map
     const [awRes, hmRes] = await Promise.all([
-      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team),
-      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team),
+      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team, g.status),
+      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team, g.status),
     ]);
     let apProb = awRes.prob, hpProb = hmRes.prob;
     const apSrc  = awRes.src,  hpSrc  = hmRes.src;
@@ -2927,14 +2937,14 @@ async function isPlayerOnTeam(playerId, teamId) {
   return roster.includes(playerId);
 }
 
-async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) {
+async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, gameStatus) {
   // Derive the expected team abbreviation from the team ID (abbreviation is absent in schedule data)
   const expAbbr    = teamAbbr(mlbTeam);   // e.g. "PHI" — always works via MLB_ID_TO_ABBR
   const expTeamId  = mlbTeam?.id;
   const ppLoaded   = Object.keys(ppLines).length > 0;
 
   // 1. Standard MLB schedule / boxscore pitcher
-  const mlb = await resolvePitcher(schedProb, gamePk, side, gameInfo);
+  const mlb = await resolvePitcher(schedProb, gamePk, side, gameInfo, gameStatus);
   if (mlb && mlb.id) {
     if (expAbbr && mlb.fullName) {
       const nk = normName(mlb.fullName);
@@ -3051,8 +3061,8 @@ async function buildSO(games, season) {
     // Resolve pitchers — MLB schedule first, then PP team map fallback
     const gameInfo = await getGameInfo(g.gamePk);
     const [awRes, hmRes] = await Promise.all([
-      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team),
-      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team),
+      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team, g.status),
+      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team, g.status),
     ]);
 
     const entries = [
@@ -4092,8 +4102,8 @@ async function buildHitters(games, season) {
     const aw = g.teams.away, hm = g.teams.home;
     const gameInfo = await getGameInfo(g.gamePk);
     const [awRes, hmRes] = await Promise.all([
-      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team),
-      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team),
+      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team, g.status),
+      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team, g.status),
     ]);
     let awProb = awRes.prob, hmProb = hmRes.prob;
     const homeAbbr = teamAbbr(hm.team);
