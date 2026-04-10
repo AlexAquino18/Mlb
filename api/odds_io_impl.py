@@ -222,6 +222,10 @@ def _stat_hint_from_market(m: dict) -> str:
         blob = ""
     if not blob:
         return ""
+    if ("nrfi" in blob or "yrfi" in blob) and (
+        "1st" in blob or "first" in blob or "inning" in blob or "inn" in blob
+    ):
+        return "nrfi_yrfi"
     if "strikeout" in blob or "strike out" in blob:
         return "strikeouts"
     if "pitcher" in blob and (" k " in blob or "k's" in blob or " ks " in blob):
@@ -431,7 +435,7 @@ def fetch_mlb_odds_bundle(
     Pass debug_structure=True to attach meta.oddsStructureSample (not cached).
     """
     date_key = (target_date or "")[:10]
-    cache_key = f"{date_key}|{bookmakers}|v13"
+    cache_key = f"{date_key}|{bookmakers}|v14"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]

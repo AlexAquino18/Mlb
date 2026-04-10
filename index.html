@@ -857,6 +857,7 @@ function disambiguateBarePlayerProp(row, g, cl) {
 
 function classifyOddsMarket(marketName, row) {
   const sh = row && row.statHint ? String(row.statHint).toLowerCase().trim() : "";
+  if (sh === "nrfi_yrfi") return { kind: "nrfi_game" };
   const raw = (marketName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const st = raw.toLowerCase().trim();
   const pitcherScoped =
@@ -871,7 +872,8 @@ function classifyOddsMarket(marketName, row) {
   if (sh === "hrr") return { kind: "hitter", statKey: "hrr" };
   if (["hits", "tb", "hr", "runs", "rbi", "bb", "sb"].includes(sh)) return { kind: "hitter", statKey: sh };
 
-  if (st.includes("nrfi") || st.includes("yrfi")) return { kind: "skip" };
+  // Game NRFI/YRFI (1st-inning) — ingested into ppNRFI for 📊 Book lines (Odds-API)
+  if (st.includes("nrfi") || st.includes("yrfi")) return { kind: "nrfi_game" };
 
   const lineFromRow = numericLineFromRow(row);
 
@@ -929,6 +931,24 @@ function applyOddsRowsToState(rows, games, debugLines) {
     cl = disambiguateBarePlayerProp(row, g, cl);
     const player = row.player;
     if (cl.kind === "skip") continue;
+
+    if (cl.kind === "nrfi_game") {
+      const blob = `${(row.market || "")} ${(player || "")}`.toLowerCase();
+      let pick = "NRFI/YRFI";
+      if (blob.includes("yrfi") && !blob.includes("nrfi")) pick = "YRFI";
+      else if (blob.includes("nrfi") && !blob.includes("yrfi")) pick = "NRFI";
+      const key = `pk_${g.gamePk}`;
+      const entry = {
+        rawName: `${row.away} @ ${row.home}`,
+        team: "",
+        line: row.hdp,
+        pick,
+        statType: (row.market || "1st inning").slice(0, 120),
+      };
+      const prev = ppNRFI[key];
+      if (!prev || (pick !== "NRFI/YRFI" && prev.pick === "NRFI/YRFI")) ppNRFI[key] = entry;
+      continue;
+    }
 
     if (cl.kind === "hitter") {
       const nk = normName(player);
@@ -1058,7 +1078,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v19:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v20:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1073,7 +1093,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260409h" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410props" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -2942,14 +2962,6 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, 
   const expAbbr    = teamAbbr(mlbTeam);   // e.g. "PHI" — always works via MLB_ID_TO_ABBR
   const expTeamId  = mlbTeam?.id;
   const ppLoaded   = Object.keys(ppLines).length > 0;
-  const absState = String(gameStatus?.abstractGameState || "").toLowerCase();
-  const detState = String(gameStatus?.detailedState || "").toLowerCase();
-  const isLiveOrFinal =
-    absState === "live" ||
-    absState === "final" ||
-    detState.includes("in progress") ||
-    detState.includes("final") ||
-    detState.includes("completed");
 
   // 1. Standard MLB schedule / boxscore pitcher
   const mlb = await resolvePitcher(schedProb, gamePk, side, gameInfo, gameStatus);
@@ -2985,13 +2997,16 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, 
     return { prob: mlb, src: "confirmed" };
   }
 
-  // Pregame slates without MLB probables are safer as TBD than forcing a sportsbook-derived pitcher.
-  if (!isLiveOrFinal) {
-    return { prob: null, src: "est" };
+  // 2. Odds-API K lines when MLB probables are missing (common early in the day) — attaches book strikeout props
+  let ppEntries = getPPCandidatesForTeam(mlbTeam);
+  if (ppEntries && ppEntries.length > 1 && expAbbr) {
+    const narrowed = ppEntries.filter((ppE) => {
+      if (ppE.team && ppE.team.toUpperCase() === expAbbr.toUpperCase()) return true;
+      const by = lookupPPByTeam(ppE.rawName, expAbbr);
+      return by === ppE;
+    });
+    if (narrowed.length) ppEntries = narrowed;
   }
-
-  // 2. PP team map fallback (or odds event hint when probables were TBD — no team on ppLines)
-  const ppEntries = getPPCandidatesForTeam(mlbTeam);
   if (ppEntries && ppEntries.length > 0) {
     for (const ppE of ppEntries) {
       // Check 1: PP batter-line lists this player for a team that ≠ PP's K-line team → misassigned
