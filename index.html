@@ -919,7 +919,28 @@ function classifyOddsMarket(marketName, row) {
   return { kind: "skip" };
 }
 
-function applyOddsRowsToState(rows, games, debugLines) {
+/** When probables are TBD, Odds rows lack team — resolve via MLB people search so team:lastname keys are unique per side. */
+async function resolveKAccumTeams(kAccum, games) {
+  const kEntries = Object.entries(kAccum);
+  await mapConcurrent(kEntries, async ([, rec]) => {
+    if (rec.team || !rec.gamesHint || !games?.length) return;
+    try {
+      const id = await findMLBId(rec.rawName);
+      if (!id) return;
+      const abbr = await getPitcherCurrentTeamAbbr(id);
+      if (!abbr) return;
+      const gg = games.find((g) => eventMatchesGame(rec.gamesHint.home, rec.gamesHint.away, g));
+      if (!gg) return;
+      const ha = teamAbbr(gg.teams.home.team);
+      const aa = teamAbbr(gg.teams.away.team);
+      const u = abbr.toUpperCase();
+      if (ha && u === ha.toUpperCase()) rec.team = ha;
+      else if (aa && u === aa.toUpperCase()) rec.team = aa;
+    } catch (_) {}
+  });
+}
+
+async function applyOddsRowsToState(rows, games, debugLines) {
   const kAccum = {};
   const outsAccum = {};
   const hitterAll = {};
@@ -996,6 +1017,8 @@ function applyOddsRowsToState(rows, games, debugLines) {
     }
   }
 
+  await resolveKAccumTeams(kAccum, games);
+
   for (const [nk, rec] of Object.entries(kAccum)) {
     const src = [...new Set(rec.lines)].sort((a, b) => a - b);
     if (!src.length) continue;
@@ -1021,16 +1044,9 @@ function applyOddsRowsToState(rows, games, debugLines) {
       outsAllLines,
     };
     const lastName = (cleanName(rec.rawName).split(/\s+/).filter(Boolean).pop() || "").toLowerCase();
+    // Never alias both home and away to the same pitcher — that made lookupPPByTeam return the same SP for both teams.
     if (rec.team && lastName) {
       ppLines[`${rec.team.toLowerCase()}:${lastName}`] = ppLines[nk];
-    } else if (lastName && rec.gamesHint && games && games.length) {
-      const gg = games.find(g => eventMatchesGame(rec.gamesHint.home, rec.gamesHint.away, g));
-      if (gg) {
-        const ha = teamAbbr(gg.teams.home.team);
-        const aa = teamAbbr(gg.teams.away.team);
-        if (ha) ppLines[`${ha.toLowerCase()}:${lastName}`] = ppLines[nk];
-        if (aa) ppLines[`${aa.toLowerCase()}:${lastName}`] = ppLines[nk];
-      }
     }
   }
 
@@ -1078,7 +1094,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v20:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v21:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1093,7 +1109,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410props" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410dedupe" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -1168,7 +1184,7 @@ async function loadPPLines(games, dateStr) {
       debugLines.push("✓ API structure sample (first /odds/multi event) — see preformatted block below");
     }
 
-    applyOddsRowsToState(payload.rows, games, debugLines);
+    await applyOddsRowsToState(payload.rows, games, debugLines);
 
     const totalFound = Object.keys(ppLines).filter(k => !k.includes(":")).length;
     if (totalFound > 0) {
@@ -1387,14 +1403,6 @@ function getPPForTeam(mlbTeam) {
   return null;
 }
 
-/** True if this odds event (home/away strings) includes the given MLB team. */
-function gameHintIncludesTeam(hint, mlbTeamObj) {
-  if (!hint || (!hint.home && !hint.away) || !mlbTeamObj) return true;
-  const h = hint.home || "";
-  const a = hint.away || "";
-  return oddsStringMatchesMlbTeam(h, mlbTeamObj) || oddsStringMatchesMlbTeam(a, mlbTeamObj);
-}
-
 /**
  * PP lines keyed by probable→team fill ppTeamMap. When probables are TBD, entries have no team —
  * fall back to scanning ppLines and filter by odds event teams so resolvePitcherWithPP can still match.
@@ -1419,9 +1427,7 @@ function getPPCandidatesForTeam(mlbTeam) {
       }
       continue;
     }
-    if (entry.gamesHint && !gameHintIncludesTeam(entry.gamesHint, mlbTeam)) continue;
-    seen.add(nk);
-    out.push(entry);
+    // Without resolved team, do not add every pitcher in the event to both sides (duplicate cards).
   }
   return out;
 }
