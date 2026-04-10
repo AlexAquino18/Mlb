@@ -136,6 +136,47 @@ function compositeMarketName(m, odd) {
   return out.length ? out.join(" · ") : "Player Props";
 }
 
+function statHintFromMarket(m) {
+  let blob = "";
+  try {
+    const o = { ...m };
+    delete o.odds;
+    blob = JSON.stringify(o).toLowerCase();
+  } catch (_) {
+    return "";
+  }
+  if (!blob) return "";
+  if (blob.includes("strikeout") || blob.includes("strike out")) return "strikeouts";
+  if (blob.includes("pitcher") && (blob.includes(" k ") || blob.includes("k's") || blob.includes(" ks ")))
+    return "strikeouts";
+  if (blob.includes("total base")) return "tb";
+  if (blob.includes("home run")) return "hr";
+  if (blob.includes("rbi") || blob.includes("runs batted")) return "rbi";
+  if (blob.includes("stolen") && blob.includes("base")) return "sb";
+  if (blob.includes("base on balls") || (blob.includes("walk") && !blob.includes("pitcher"))) return "bb";
+  if (blob.includes("hits") && !blob.includes("pitcher") && !blob.includes("allowed") && !blob.includes("against"))
+    return "hits";
+  if (blob.includes("runs") && (blob.includes("scored") || blob.includes("batter"))) return "runs";
+  if (blob.includes("hits+runs") || blob.includes("h+r+rbi")) return "hrr";
+  return "";
+}
+
+function firstPlayerPropMarket(ev) {
+  const bks = ev.bookmakers || {};
+  for (const bkName of Object.keys(bks)) {
+    const markets = bks[bkName];
+    if (!Array.isArray(markets)) continue;
+    for (let mi = 0; mi < markets.length; mi++) {
+      const m = markets[mi];
+      if (!m || typeof m !== "object") continue;
+      for (const odd of m.odds || []) {
+        if (odd && odd.label) return { bk: bkName, mi: String(mi), m };
+      }
+    }
+  }
+  return null;
+}
+
 function debugTrimEvent(ev) {
   const out = {
     id: ev.id,
@@ -145,6 +186,22 @@ function debugTrimEvent(ev) {
     top_level_keys: Object.keys(ev).sort().slice(0, 80),
     bookmakers: {},
   };
+  const fpp = firstPlayerPropMarket(ev);
+  if (fpp) {
+    const o0 = (fpp.m.odds || [])[0] || {};
+    const keys = typeof o0 === "object" && o0 ? Object.keys(o0).sort() : [];
+    const sample = {};
+    for (const k of keys.slice(0, 20)) sample[k] = o0[k];
+    out.player_prop_market_example = {
+      bookmaker: fpp.bk,
+      market_index: fpp.mi,
+      name: fpp.m.name,
+      market_keys: Object.keys(fpp.m).sort(),
+      stat_hint_guess: statHintFromMarket(fpp.m),
+      first_odd_keys: keys,
+      first_odd_sample: sample,
+    };
+  }
   const bks = ev.bookmakers || {};
   let bi = 0;
   for (const bkName of Object.keys(bks)) {
@@ -217,6 +274,7 @@ function appendPropRows(ev, rows, eventTeams) {
           hdp: hf,
           over: odd.over,
           under: odd.under,
+          statHint: statHintFromMarket(m),
         });
       }
     }

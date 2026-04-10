@@ -807,16 +807,54 @@ function lineLooksLikePitcherKAlt(h) {
   return h >= 2.5 && h <= 15 && Math.abs(h * 2 - Math.round(h * 2)) < 1e-6;
 }
 
+function isBarePlayerPropsMarket(marketName) {
+  const raw = (marketName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return raw.toLowerCase().trim() === "player props";
+}
+
+/**
+ * Odds-API often uses market.name === "Player Props" only. Use statHint from server when present;
+ * else use schedule (probable vs lineup) and line bands so hitter props are not treated as pitcher K.
+ */
+function disambiguateBarePlayerProp(row, g, cl) {
+  if (!isBarePlayerPropsMarket(row.market)) return cl;
+  if (cl.kind === "pitcher_k" || cl.kind === "hitter") return cl;
+  const h = numericLineFromRow(row);
+  const mp = nameMatchesProbable(row.player, g);
+  const mh = !!teamAbbrForHitter(row.player, g);
+  const hasProb =
+    g.teams?.home?.probablePitcher?.fullName ||
+    g.teams?.away?.probablePitcher?.fullName;
+  if (mp) return { kind: "pitcher_k" };
+  if (mh) {
+    if (!Number.isNaN(h) && h <= 4.5) return { kind: "hitter", statKey: "hits" };
+    if (!Number.isNaN(h) && h <= 12) return { kind: "hitter", statKey: "tb" };
+    return { kind: "hitter", statKey: "hits" };
+  }
+  if (cl.kind === "so_ambiguous" || cl.kind === "skip") {
+    if (!Number.isNaN(h) && h > 0 && h <= 2.5) return { kind: "hitter", statKey: "hits" };
+    if (!Number.isNaN(h) && lineLooksLikePitcherKAlt(h)) {
+      if (h >= 5) return { kind: "so_ambiguous" };
+      if (h >= 2.5 && h < 5) {
+        if (!hasProb) return { kind: "so_ambiguous" };
+        return { kind: "skip" };
+      }
+    }
+  }
+  return cl;
+}
+
 function classifyOddsMarket(marketName, row) {
+  const sh = row && row.statHint ? String(row.statHint).toLowerCase().trim() : "";
+  if (sh === "strikeouts") return { kind: "pitcher_k" };
+  if (sh === "hrr") return { kind: "hitter", statKey: "hrr" };
+  if (["hits", "tb", "hr", "runs", "rbi", "bb", "sb"].includes(sh)) return { kind: "hitter", statKey: sh };
+
   const raw = (marketName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const st = raw.toLowerCase().trim();
   if (st.includes("nrfi") || st.includes("yrfi")) return { kind: "skip" };
 
   const lineFromRow = numericLineFromRow(row);
-  // Books often send only "Player Props" with no stat text — classify by line shape first.
-  if (st === "player props" && !Number.isNaN(lineFromRow) && lineLooksLikePitcherKAlt(lineFromRow)) {
-    return { kind: "so_ambiguous" };
-  }
 
   const looksLikePitcherK =
     st.includes("strikeout") ||
@@ -867,7 +905,8 @@ function applyOddsRowsToState(rows, games, debugLines) {
   for (const row of rows || []) {
     const g = findGameForOddsRow(row, games);
     if (!g) continue;
-    const cl = classifyOddsMarket(row.market, row);
+    let cl = classifyOddsMarket(row.market, row);
+    cl = disambiguateBarePlayerProp(row, g, cl);
     const player = row.player;
     if (cl.kind === "skip") continue;
 
@@ -986,7 +1025,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v9:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v10:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1064,7 +1103,7 @@ async function loadPPLines(games, dateStr) {
     debugLines.push(`Server meta: apiCalls=${payload.meta?.apiCalls ?? "?"} events=${payload.meta?.eventCount ?? "?"} props=${payload.rows?.length ?? 0}`);
     const rFirst = payload.rows && payload.rows[0];
     if (rFirst) {
-      debugLines.push(`First prop row: home="${rFirst.home || ""}" away="${rFirst.away || ""}" market="${(rFirst.market || "").slice(0, 80)}" hdp=${rFirst.hdp != null ? rFirst.hdp : "?"}`);
+      debugLines.push(`First prop row: home="${rFirst.home || ""}" away="${rFirst.away || ""}" market="${(rFirst.market || "").slice(0, 80)}" hdp=${rFirst.hdp != null ? rFirst.hdp : "?"} statHint=${rFirst.statHint || "—"}`);
     }
     if (payload.meta?.sampleEventTeams?.length) {
       debugLines.push(`Odds teams sample: ${payload.meta.sampleEventTeams.map(t => `"${t.home}" @ "${t.away}"`).join(" · ")}`);

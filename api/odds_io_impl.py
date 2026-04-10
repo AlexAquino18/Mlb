@@ -12,7 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # API metadata often includes ISO timestamps; harvesting all string leaves pollutes composite market names.
 _ISO_LIKE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}|^\d{4}-\d{2}-\d{2}$")
@@ -211,6 +211,57 @@ def _composite_market_name(m: dict, odd: dict) -> str:
     return merged if merged.strip() else "Player Props"
 
 
+def _stat_hint_from_market(m: dict) -> str:
+    """
+    Odds-API often sets market.name to only 'Player Props'. Scan other keys/values for stat text.
+    """
+    try:
+        probe = {k: v for k, v in m.items() if k not in ("odds", "bookmakers")}
+        blob = json.dumps(probe, default=str).lower()
+    except Exception:
+        blob = ""
+    if not blob:
+        return ""
+    if "strikeout" in blob or "strike out" in blob:
+        return "strikeouts"
+    if "pitcher" in blob and (" k " in blob or "k's" in blob or " ks " in blob):
+        return "strikeouts"
+    if "total base" in blob:
+        return "tb"
+    if "home run" in blob:
+        return "hr"
+    if "rbi" in blob or "runs batted" in blob:
+        return "rbi"
+    if "stolen" in blob and "base" in blob:
+        return "sb"
+    if "base on balls" in blob or ("walk" in blob and "pitcher" not in blob):
+        return "bb"
+    if "hits" in blob and "pitcher" not in blob and "allowed" not in blob and "against" not in blob:
+        return "hits"
+    if "runs" in blob and ("scored" in blob or "batter" in blob):
+        return "runs"
+    if "hits+runs" in blob or "h+r+rbi" in blob:
+        return "hrr"
+    return ""
+
+
+def _first_player_prop_market(ev: dict) -> Tuple[Optional[str], Optional[str], Optional[dict]]:
+    """First (bookmaker, index_str, market) where an odd has a player label."""
+    bks = ev.get("bookmakers") or {}
+    if not isinstance(bks, dict):
+        return None, None, None
+    for bk_name, markets in bks.items():
+        if not isinstance(markets, list):
+            continue
+        for mi, m in enumerate(markets):
+            if not isinstance(m, dict):
+                continue
+            for odd in m.get("odds") or []:
+                if isinstance(odd, dict) and odd.get("label"):
+                    return bk_name, str(mi), m
+    return None, None, None
+
+
 def _append_prop_rows(
     ev: dict,
     rows: List[dict],
@@ -250,6 +301,7 @@ def _append_prop_rows(
                 except (TypeError, ValueError):
                     continue
                 mname = _composite_market_name(m, odd)
+                hint = _stat_hint_from_market(m)
                 rows.append(
                     {
                         "eventId": eid,
@@ -261,6 +313,7 @@ def _append_prop_rows(
                         "hdp": hf,
                         "over": odd.get("over"),
                         "under": odd.get("under"),
+                        "statHint": hint,
                     }
                 )
 
@@ -274,6 +327,19 @@ def _debug_trim_event(ev: dict) -> Dict[str, Any]:
         "date": ev.get("date"),
         "top_level_keys": sorted(ev.keys())[:80],
     }
+    bk_pp, mi_pp, m_pp = _first_player_prop_market(ev)
+    if m_pp is not None:
+        odds = m_pp.get("odds") or []
+        o0 = odds[0] if odds and isinstance(odds[0], dict) else {}
+        out["player_prop_market_example"] = {
+            "bookmaker": bk_pp,
+            "market_index": mi_pp,
+            "name": m_pp.get("name"),
+            "market_keys": sorted(m_pp.keys()),
+            "stat_hint_guess": _stat_hint_from_market(m_pp),
+            "first_odd_keys": sorted(o0.keys()) if isinstance(o0, dict) else [],
+            "first_odd_sample": {k: o0.get(k) for k in sorted(o0.keys())[:20]} if isinstance(o0, dict) else o0,
+        }
     bks = ev.get("bookmakers")
     if not isinstance(bks, dict):
         out["bookmakers"] = f"(not a dict: {type(bks).__name__})"
@@ -325,7 +391,7 @@ def fetch_mlb_odds_bundle(
     Pass debug_structure=True to attach meta.oddsStructureSample (not cached).
     """
     date_key = (target_date or "")[:10]
-    cache_key = f"{date_key}|{bookmakers}|v8"
+    cache_key = f"{date_key}|{bookmakers}|v10"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]
