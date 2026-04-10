@@ -1058,7 +1058,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v17:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v18:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1073,7 +1073,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260409f" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260409g" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -2942,6 +2942,14 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, 
   const expAbbr    = teamAbbr(mlbTeam);   // e.g. "PHI" — always works via MLB_ID_TO_ABBR
   const expTeamId  = mlbTeam?.id;
   const ppLoaded   = Object.keys(ppLines).length > 0;
+  const absState = String(gameStatus?.abstractGameState || "").toLowerCase();
+  const detState = String(gameStatus?.detailedState || "").toLowerCase();
+  const isLiveOrFinal =
+    absState === "live" ||
+    absState === "final" ||
+    detState.includes("in progress") ||
+    detState.includes("final") ||
+    detState.includes("completed");
 
   // 1. Standard MLB schedule / boxscore pitcher
   const mlb = await resolvePitcher(schedProb, gamePk, side, gameInfo, gameStatus);
@@ -2975,6 +2983,11 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, 
     }
   } else if (mlb) {
     return { prob: mlb, src: "confirmed" };
+  }
+
+  // Pregame slates without MLB probables are safer as TBD than forcing a sportsbook-derived pitcher.
+  if (!isLiveOrFinal) {
+    return { prob: null, src: "est" };
   }
 
   // 2. PP team map fallback (or odds event hint when probables were TBD — no team on ppLines)
