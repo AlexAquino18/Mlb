@@ -348,18 +348,16 @@ function normBookmakerLabel(name) {
   if (n.includes("draftking")) return "DraftKings";
   return name || "";
 }
+/** Per-book Over/Under only for rows whose line matches the card line (same hdp). No “closest alt line” — avoids FD @5.5 vs DK @6.5 on one card. */
 function buildBooksFromRows(bookRows, targetLine) {
   const out = {};
   const want = ["FanDuel", "DraftKings"];
+  const tol = 0.01;
   for (const bn of want) {
     const rows = (bookRows || []).filter((r) => normBookmakerLabel(r.book) === bn);
     if (!rows.length) continue;
-    let pick = rows.find((r) => Math.abs(r.hdp - targetLine) < 0.01);
-    if (!pick) {
-      pick = [...rows].sort(
-        (a, b) => Math.abs(a.hdp - targetLine) - Math.abs(b.hdp - targetLine)
-      )[0];
-    }
+    const pick = rows.find((r) => Math.abs(Number(r.hdp) - Number(targetLine)) < tol);
+    if (!pick) continue;
     out[bn] = {
       hdp: pick.hdp,
       over: pick.over,
