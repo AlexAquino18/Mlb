@@ -652,6 +652,24 @@ function teamAbbr(teamObj) {
   return MLB_ID_TO_ABBR[teamObj?.id] || teamObj?.abbreviation?.toUpperCase() || "";
 }
 
+/** Map common book abbreviations to our schedule abbr bucket (ARI→AZ, WAS→WSH, …). */
+const MLB_ODDS_ABBR_CANON = {
+  ari: "az", arz: "az", az: "az",
+  ath: "ath", oak: "ath",
+  was: "wsh", wsn: "wsh", wsh: "wsh",
+  sfg: "sf", sf: "sf",
+  kcr: "kc", kc: "kc",
+  tbr: "tb", tb: "tb", tam: "tb",
+  sdp: "sd", sd: "sd",
+  chw: "cws", cws: "cws",
+  chc: "chc",
+  nym: "nym", nyy: "nyy",
+  lad: "lad", laa: "laa", ana: "laa",
+  bal: "bal", tor: "tor", tex: "tex", sea: "sea", mia: "mia", det: "det",
+  cin: "cin", cle: "cle", col: "col", pit: "pit", stl: "stl", mil: "mil",
+  min: "min", phi: "phi", atl: "atl", hou: "hou",
+};
+
 function fuzzyNameEq(a, b) {
   if (!a || !b) return false;
   if (cleanName(a) === cleanName(b)) return true;
@@ -675,9 +693,28 @@ function looseTeamMatch(a, b) {
   return false;
 }
 
-/** Odds-API uses short/city names; MLB schedule has full name + teamName — compare all. */
+/** Odds-API uses short/city names or 2–3 letter codes; MLB uses full name + teamName + our abbr. */
 function oddsStringMatchesMlbTeam(oddsStr, mlbTeamObj) {
   if (!oddsStr || !mlbTeamObj) return false;
+  const abbr = teamAbbr(mlbTeamObj);
+  if (abbr) {
+    const aLetters = normTeamStr(abbr).replace(/[^a-z]/g, "");
+    const aCanon = MLB_ODDS_ABBR_CANON[aLetters] || aLetters;
+    const oNorm = normTeamStr(oddsStr);
+    const oLetters = oNorm.replace(/[^a-z]/g, "");
+    if (oLetters === aLetters || oLetters === aCanon) return true;
+    if (oLetters.length <= 4) {
+      const oCanon = MLB_ODDS_ABBR_CANON[oLetters] || oLetters;
+      if (oCanon === aCanon) return true;
+    }
+    for (const w of oNorm.split(/\s+/)) {
+      const wl = w.replace(/[^a-z]/g, "");
+      if (wl.length >= 2 && wl.length <= 4) {
+        const oC = MLB_ODDS_ABBR_CANON[wl] || wl;
+        if (oC === aCanon) return true;
+      }
+    }
+  }
   const full = mlbTeamObj.name || "";
   const nick = mlbTeamObj.teamName || "";
   const lastWord = (full.split(/\s+/).pop() || "").toLowerCase();
@@ -754,10 +791,18 @@ function teamAbbrForHitter(playerName, g) {
 }
 
 function classifyOddsMarket(marketName) {
-  const st = (marketName || "").toLowerCase().trim();
+  const raw = (marketName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const st = raw.toLowerCase().trim();
   if (st.includes("nrfi") || st.includes("yrfi")) return { kind: "skip" };
 
-  if (st.includes("strikeout") || st.includes("strike out")) {
+  const looksLikePitcherK =
+    st.includes("strikeout") ||
+    st.includes("strike out") ||
+    st.includes("strikeouts") ||
+    /\bpitcher\b[^a-z]*\bk(s|'s|’s)?\b/.test(st) ||
+    /\bstarter\b[^a-z]*\bk(s|'s|’s)?\b/.test(st) ||
+    (/\bover\b|\bunder\b/.test(st) && /\bk(s|'s|’s)\b/.test(st) && !st.includes("walk"));
+  if (looksLikePitcherK) {
     if (st.includes("batter") || st.includes("hitter")) return { kind: "batter_k" };
     if (st.includes("pitcher") || st.includes("pitching") || st.includes("starter")) return { kind: "pitcher_k" };
     return { kind: "so_ambiguous" };
@@ -876,6 +921,19 @@ function applyOddsRowsToState(rows, games, debugLines) {
 
   if ((rows || []).length && (games || []).length &&
       !Object.keys(kAccum).length && !Object.keys(hitterAll).length) {
+    let noGame = 0, skipMkt = 0, recognized = 0;
+    let mktNonSkip = 0;
+    for (const row of rows) {
+      if (classifyOddsMarket(row.market).kind !== "skip") mktNonSkip++;
+    }
+    for (const row of rows) {
+      const g = findGameForOddsRow(row, games);
+      if (!g) { noGame++; continue; }
+      const k = classifyOddsMarket(row.market).kind;
+      if (k === "skip") skipMkt++;
+      else recognized++;
+    }
+    debugLines.push(`Markets non-skip (any team): ${mktNonSkip} · Row pipeline: noScheduleMatch=${noGame} skippedMarket=${skipMkt} recognized=${recognized} (of ${rows.length})`);
     const r0 = rows.find(x => {
       const k = classifyOddsMarket(x.market).kind;
       return k === "pitcher_k" || k === "so_ambiguous" || k === "hitter";
@@ -887,13 +945,15 @@ function applyOddsRowsToState(rows, games, debugLines) {
         const gg = games[0];
         debugLines.push(`MLB schedule sample: "${gg.teams?.home?.team?.name}" (${gg.teams?.home?.team?.teamName || "?"}) vs "${gg.teams?.away?.team?.name}" (${gg.teams?.away?.team?.teamName || "?"})`);
       }
+    } else if (rows[0]) {
+      debugLines.push(`First row market (classification sample): "${(rows[0].market || "").slice(0, 100)}"`);
     }
   }
   debugLines.push(`Odds-API: pitcher keys=${Object.keys(kAccum).length}, hitter keys=${Object.keys(hitterAll).length}`);
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v2:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v3:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -968,6 +1028,12 @@ async function loadPPLines(games, dateStr) {
     }
 
     debugLines.push(`Server meta: apiCalls=${payload.meta?.apiCalls ?? "?"} events=${payload.meta?.eventCount ?? "?"} props=${payload.rows?.length ?? 0}`);
+    if (payload.meta?.sampleEventTeams?.length) {
+      debugLines.push(`Odds teams sample: ${payload.meta.sampleEventTeams.map(t => `"${t.home}" @ "${t.away}"`).join(" · ")}`);
+    }
+    if (payload.meta?.sampleMarkets?.length) {
+      debugLines.push(`Market name sample: ${payload.meta.sampleMarkets.slice(0, 5).join(" | ")}`);
+    }
 
     applyOddsRowsToState(payload.rows, games, debugLines);
 

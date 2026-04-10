@@ -56,10 +56,18 @@ function eventDateKey(ev) {
   return typeof ds === "string" && ds.length >= 10 ? ds.slice(0, 10) : "";
 }
 
+function teamStr(v) {
+  if (v == null) return "";
+  if (typeof v === "object") {
+    return String(v.name || v.title || v.shortName || v.label || "").trim();
+  }
+  return String(v).trim();
+}
+
 function appendPropRows(ev, rows) {
   const eid = ev.id;
-  const home = ev.home || "";
-  const away = ev.away || "";
+  const home = teamStr(ev.home);
+  const away = teamStr(ev.away);
   const bookmakers = ev.bookmakers || {};
   for (const bk of Object.keys(bookmakers)) {
     const markets = bookmakers[bk];
@@ -150,6 +158,28 @@ export default async (request) => {
 
     out.rows = rows;
     out.meta.propRows = rows.length;
+    const seenM = new Set();
+    const sampleMarkets = [];
+    for (const row of rows) {
+      const m = row.market || "";
+      if (m && !seenM.has(m)) {
+        seenM.add(m);
+        sampleMarkets.push(m.slice(0, 160));
+        if (sampleMarkets.length >= 24) break;
+      }
+    }
+    out.meta.sampleMarkets = sampleMarkets;
+    const seenT = new Set();
+    const sampleEventTeams = [];
+    for (const row of rows) {
+      const key = `${row.home}|${row.away}`;
+      if (row.home && !seenT.has(key)) {
+        seenT.add(key);
+        sampleEventTeams.push({ home: row.home, away: row.away });
+        if (sampleEventTeams.length >= 6) break;
+      }
+    }
+    out.meta.sampleEventTeams = sampleEventTeams;
     out.ok = true;
     return json(out, 200);
   } catch (e) {

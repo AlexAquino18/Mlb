@@ -81,10 +81,25 @@ def _event_date_key(ev: dict) -> str:
     return ""
 
 
+def _team_str(v: Any) -> str:
+    """Odds API usually returns strings; some feeds use {name, shortName}."""
+    if v is None:
+        return ""
+    if isinstance(v, dict):
+        return str(
+            v.get("name")
+            or v.get("title")
+            or v.get("shortName")
+            or v.get("label")
+            or ""
+        ).strip()
+    return str(v).strip()
+
+
 def _append_prop_rows(ev: dict, rows: List[dict]) -> None:
     eid = ev.get("id")
-    home = ev.get("home") or ""
-    away = ev.get("away") or ""
+    home = _team_str(ev.get("home"))
+    away = _team_str(ev.get("away"))
     bookmakers = ev.get("bookmakers") or {}
     if not isinstance(bookmakers, dict):
         return
@@ -189,6 +204,26 @@ def fetch_mlb_odds_bundle(
 
         out["rows"] = rows
         out["meta"]["propRows"] = len(rows)
+        sample_markets: List[str] = []
+        seen_m: set = set()
+        for row in rows:
+            m = row.get("market") or ""
+            if m and m not in seen_m:
+                seen_m.add(m)
+                sample_markets.append(m[:160])
+                if len(sample_markets) >= 24:
+                    break
+        out["meta"]["sampleMarkets"] = sample_markets
+        sample_teams: List[Dict[str, str]] = []
+        seen_t: set = set()
+        for row in rows:
+            key = (row.get("home"), row.get("away"))
+            if key[0] and key not in seen_t:
+                seen_t.add(key)
+                sample_teams.append({"home": str(key[0]), "away": str(key[1])})
+                if len(sample_teams) >= 6:
+                    break
+        out["meta"]["sampleEventTeams"] = sample_teams
         out["ok"] = True
         _CACHE[cache_key] = (now, out)
     except urllib.error.HTTPError as e:
