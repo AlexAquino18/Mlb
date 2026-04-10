@@ -11,7 +11,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 ODDS_BASE = "https://api.odds-api.io/v3"
 
@@ -96,10 +96,26 @@ def _team_str(v: Any) -> str:
     return str(v).strip()
 
 
-def _append_prop_rows(ev: dict, rows: List[dict]) -> None:
+def _eid_key(eid: Any) -> str:
+    return str(eid) if eid is not None else ""
+
+
+def _append_prop_rows(
+    ev: dict,
+    rows: List[dict],
+    event_teams: Dict[str, Tuple[str, str]],
+) -> None:
     eid = ev.get("id")
     home = _team_str(ev.get("home"))
     away = _team_str(ev.get("away"))
+    # /odds/multi often omits home/away — use /events lookup by id
+    ek = _eid_key(eid)
+    if ek and event_teams:
+        h0, a0 = event_teams.get(ek, ("", ""))
+        if not home:
+            home = h0
+        if not away:
+            away = a0
     bookmakers = ev.get("bookmakers") or {}
     if not isinstance(bookmakers, dict):
         return
@@ -147,7 +163,7 @@ def fetch_mlb_odds_bundle(
     One events call + ceil(n/10) multi-odds calls. Cached 15 minutes per (date, books).
     """
     date_key = (target_date or "")[:10]
-    cache_key = f"{date_key}|{bookmakers}"
+    cache_key = f"{date_key}|{bookmakers}|v4"
     now = time.time()
     if cache_key in _CACHE:
         ts, data = _CACHE[cache_key]
@@ -185,6 +201,13 @@ def fetch_mlb_odds_bundle(
             _CACHE[cache_key] = (now, out)
             return out
 
+        event_teams: Dict[str, Tuple[str, str]] = {}
+        for e in events:
+            eid = e.get("id")
+            if eid is None:
+                continue
+            event_teams[_eid_key(eid)] = (_team_str(e.get("home")), _team_str(e.get("away")))
+
         event_ids = [e["id"] for e in events if e.get("id") is not None]
         for i in range(0, len(event_ids), 10):
             chunk = event_ids[i : i + 10]
@@ -200,7 +223,7 @@ def fetch_mlb_odds_bundle(
             multi_raw = _get_json(multi_url)
             out["meta"]["apiCalls"] = out["meta"]["apiCalls"] + 1
             for ev in _multi_list(multi_raw):
-                _append_prop_rows(ev, rows)
+                _append_prop_rows(ev, rows, event_teams)
 
         out["rows"] = rows
         out["meta"]["propRows"] = len(rows)

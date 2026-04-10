@@ -953,7 +953,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v3:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v4:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1028,6 +1028,10 @@ async function loadPPLines(games, dateStr) {
     }
 
     debugLines.push(`Server meta: apiCalls=${payload.meta?.apiCalls ?? "?"} events=${payload.meta?.eventCount ?? "?"} props=${payload.rows?.length ?? 0}`);
+    const rFirst = payload.rows && payload.rows[0];
+    if (rFirst) {
+      debugLines.push(`First prop row: home="${rFirst.home || ""}" away="${rFirst.away || ""}" market="${(rFirst.market || "").slice(0, 80)}"`);
+    }
     if (payload.meta?.sampleEventTeams?.length) {
       debugLines.push(`Odds teams sample: ${payload.meta.sampleEventTeams.map(t => `"${t.home}" @ "${t.away}"`).join(" · ")}`);
     }

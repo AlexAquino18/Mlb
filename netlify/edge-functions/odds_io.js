@@ -64,10 +64,17 @@ function teamStr(v) {
   return String(v).trim();
 }
 
-function appendPropRows(ev, rows) {
+function appendPropRows(ev, rows, eventTeams) {
   const eid = ev.id;
-  const home = teamStr(ev.home);
-  const away = teamStr(ev.away);
+  let home = teamStr(ev.home);
+  let away = teamStr(ev.away);
+  if (eventTeams && eid != null) {
+    const pair = eventTeams.get(String(eid));
+    if (pair) {
+      if (!home) home = pair[0];
+      if (!away) away = pair[1];
+    }
+  }
   const bookmakers = ev.bookmakers || {};
   for (const bk of Object.keys(bookmakers)) {
     const markets = bookmakers[bk];
@@ -137,6 +144,12 @@ export default async (request) => {
       return json(out, 200);
     }
 
+    const eventTeams = new Map();
+    for (const e of events) {
+      if (e.id == null) continue;
+      eventTeams.set(String(e.id), [teamStr(e.home), teamStr(e.away)]);
+    }
+
     const rows = [];
     const ids = events.map((e) => e.id).filter((id) => id != null);
     for (let i = 0; i < ids.length; i += 10) {
@@ -152,7 +165,7 @@ export default async (request) => {
       const multiRaw = await mRes.json();
       out.meta.apiCalls += 1;
       for (const ev of multiList(multiRaw)) {
-        appendPropRows(ev, rows);
+        appendPropRows(ev, rows, eventTeams);
       }
     }
 
