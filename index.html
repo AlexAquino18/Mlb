@@ -426,8 +426,8 @@ function buildOddsDisplayHistory(hist, g) {
 
 function renderOddsSparkChart(hist, opts = {}) {
   const W = opts.width || 380;
-  const H = opts.height || 148;
-  const pad = { l: 40, r: 14, t: 10, b: 32 };
+  const H = opts.height || 168;
+  const pad = { l: 40, r: 14, t: 14, b: 34 };
   const rawHist = hist;
   const rows = buildOddsDisplayHistory(hist, opts.game);
   const paddedFromCurrent = !rawHist || rawHist.length < 2;
@@ -444,19 +444,24 @@ function renderOddsSparkChart(hist, opts = {}) {
   if (!vals.length) {
     return `<div style="color:#64748b;font-size:12px;padding:12px">No FanDuel / DraftKings Over prices for this prop yet.</div>`;
   }
-  const AXIS_TOP = 175;
-  const AXIS_BOTTOM = -175;
-  const axisSpan = AXIS_TOP - AXIS_BOTTOM;
-  const padL = 48;
+  let minV = Math.min(...vals);
+  let maxV = Math.max(...vals);
+  if (minV === maxV) {
+    minV -= 10;
+    maxV += 10;
+  }
+  const rawSpan = maxV - minV || 1;
+  const padY = Math.max(12, rawSpan * 0.22);
+  minV -= padY;
+  maxV += padY;
+  const axisSpan = maxV - minV || 1;
+  const padL = 46;
   const xw = W - padL - pad.r;
   const yh = H - pad.t - pad.b;
   const n = rows.length;
   const xAt = (i) => padL + (n <= 1 ? 0 : (i / (n - 1)) * xw);
-  /** Top of plot = +175, bottom = -175 (American odds). */
-  const yAt = (v) => {
-    const c = Math.max(AXIS_BOTTOM, Math.min(AXIS_TOP, Number(v)));
-    return pad.t + yh - ((c - AXIS_BOTTOM) / axisSpan) * yh;
-  };
+  const yAt = (v) =>
+    pad.t + yh - ((Number(v) - minV) / axisSpan) * yh;
   const fmtAxisOdds = (n) => {
     const x = Math.round(n);
     return x > 0 ? `+${x}` : `${x}`;
@@ -531,16 +536,16 @@ function renderOddsSparkChart(hist, opts = {}) {
       </defs>
       <rect x="${padL}" y="${pad.t}" width="${xw}" height="${yh}" fill="url(#${gridId})" opacity="0.5"/>
       ${timeVLines.join("")}
-      ${[0, 0.2, 0.4, 0.6, 0.8, 1]
+      ${[0, 1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6, 1]
         .map((t) => {
-          const v = AXIS_BOTTOM + t * axisSpan;
+          const v = minV + t * axisSpan;
           const y = yAt(v);
           return `<line x1="${padL}" y1="${y}" x2="${W - pad.r}" y2="${y}" stroke="rgba(148,163,184,.15)" stroke-dasharray="3 3"/>`;
         })
         .join("")}
       ${[0, 0.25, 0.5, 0.75, 1]
         .map((t) => {
-          const v = AXIS_BOTTOM + t * axisSpan;
+          const v = minV + t * axisSpan;
           const y = yAt(v);
           return `<text x="${padL - 4}" y="${y + 4}" fill="#94a3b8" font-size="10" text-anchor="end">${fmtAxisOdds(v)}</text>`;
         })
