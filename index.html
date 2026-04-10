@@ -652,6 +652,31 @@ function teamAbbr(teamObj) {
   return MLB_ID_TO_ABBR[teamObj?.id] || teamObj?.abbreviation?.toUpperCase() || "";
 }
 
+/** Map people-search / API abbrs onto the same bucket as MLB_ID_TO_ABBR (OAK≠ATH, WSN≠WSH, etc.). */
+function canonAbbrForCompare(ab) {
+  const u = String(ab || "")
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "");
+  const map = {
+    OAK: "ATH",
+    OAKLAND: "ATH",
+    WAS: "WSH",
+    WSN: "WSH",
+    MON: "WSH",
+    ARI: "AZ",
+    ARZ: "AZ",
+    SFG: "SF",
+    TBR: "TB",
+    TAM: "TB",
+    SDP: "SD",
+    SDN: "SD",
+    CHW: "CWS",
+    KCR: "KC",
+    ANA: "LAA",
+  };
+  return map[u] || u;
+}
+
 /** Map common book abbreviations to our schedule abbr bucket (ARI→AZ, WAS→WSH, …). */
 const MLB_ODDS_ABBR_CANON = {
   ari: "az", arz: "az", az: "az",
@@ -927,15 +952,33 @@ async function resolveKAccumTeams(kAccum, games) {
     try {
       const id = await findMLBId(rec.rawName);
       if (!id) return;
-      const abbr = await getPitcherCurrentTeamAbbr(id);
-      if (!abbr) return;
+      const ident = await getPlayerIdentity(id);
+      if (!ident) return;
       const gg = games.find((g) => eventMatchesGame(rec.gamesHint.home, rec.gamesHint.away, g));
       if (!gg) return;
-      const ha = teamAbbr(gg.teams.home.team);
-      const aa = teamAbbr(gg.teams.away.team);
-      const u = abbr.toUpperCase();
-      if (ha && u === ha.toUpperCase()) rec.team = ha;
-      else if (aa && u === aa.toUpperCase()) rec.team = aa;
+      const ht = gg.teams.home.team;
+      const at = gg.teams.away.team;
+      const ha = teamAbbr(ht);
+      const aa = teamAbbr(at);
+      const hid = ht?.id;
+      const aid = at?.id;
+      if (ident.currentTeamId && hid && ident.currentTeamId === hid) rec.team = ha;
+      else if (ident.currentTeamId && aid && ident.currentTeamId === aid) rec.team = aa;
+      else if (ident.currentTeamAbbr) {
+        const ca = canonAbbrForCompare(ident.currentTeamAbbr);
+        if (ha && ca === canonAbbrForCompare(ha)) rec.team = ha;
+        else if (aa && ca === canonAbbrForCompare(aa)) rec.team = aa;
+      }
+      if (!rec.team) {
+        let onH = false;
+        let onA = false;
+        try {
+          if (hid) onH = await isPlayerOnTeam(id, hid);
+          if (aid) onA = await isPlayerOnTeam(id, aid);
+        } catch (_) {}
+        if (onH && !onA) rec.team = ha;
+        else if (onA && !onH) rec.team = aa;
+      }
     } catch (_) {}
   });
 }
@@ -1094,7 +1137,7 @@ async function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v21:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v22:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1109,7 +1152,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410dedupe" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410teamid" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
