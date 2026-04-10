@@ -4851,7 +4851,17 @@ function renderCards(data, tab) {
     tab === "nrfi" ? renderNRFICard(g) : tab === "hitters" ? renderHitterCard(g) : renderSOCard(g)
   ).join("");
   const cnt = document.getElementById("game-count");
-  if (cnt) cnt.textContent = filtered.length + " games";
+  if (cnt) {
+    if (tab === "strikeouts") {
+      const nGames = new Set(filtered.map(g => g.gamePk)).size;
+      cnt.textContent =
+        nGames === filtered.length
+          ? `${filtered.length} games`
+          : `${nGames} games · ${filtered.length} pitchers`;
+    } else {
+      cnt.textContent = filtered.length + " games";
+    }
+  }
   document.getElementById("disclaimer").style.display = "block";
 }
 
@@ -4932,6 +4942,9 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
     document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
     activeTab = btn.dataset.tab;
+    // Filters are tab-specific (over/under vs nrfi/yrfi). Stale activeFilter hides all rows
+    // or applies the wrong slice after switching tabs.
+    activeFilter = "all";
     if (cache[activeTab]) {
       renderFilters(activeTab);
       renderSummary(cache[activeTab], activeTab);
