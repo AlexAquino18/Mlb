@@ -831,12 +831,23 @@ function disambiguateBarePlayerProp(row, g, cl) {
     if (!Number.isNaN(h) && h <= 12) return { kind: "hitter", statKey: "tb" };
     return { kind: "hitter", statKey: "hits" };
   }
-  // Do not map line size → hitter without a lineup/statHint match (that labeled ~all low lines as hitters).
+  // No statHint + no lineup yet: DK/FD batter O/U almost always 0.5–3.5; pitcher K ladders usually 4+. (Avoid h<=2.5-only which tagged ~all rows.)
+  if (
+    !mp &&
+    (cl.kind === "skip" || cl.kind === "so_ambiguous") &&
+    !Number.isNaN(h) &&
+    Math.abs(h * 2 - Math.round(h * 2)) < 1e-6 &&
+    h >= 0.5 &&
+    h <= 3.5
+  ) {
+    return { kind: "hitter", statKey: "hits" };
+  }
   if (cl.kind === "so_ambiguous" || cl.kind === "skip") {
     if (!Number.isNaN(h) && lineLooksLikePitcherKAlt(h)) {
       if (h >= 5) return { kind: "so_ambiguous" };
       if (h >= 2.5 && h < 5) {
         if (!hasProb) return { kind: "so_ambiguous" };
+        if (h > 3.5) return { kind: "so_ambiguous" };
         return { kind: "skip" };
       }
     }
@@ -1025,7 +1036,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v11:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v12:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
