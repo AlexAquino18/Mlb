@@ -444,17 +444,23 @@ function renderOddsSparkChart(hist, opts = {}) {
   if (!vals.length) {
     return `<div style="color:#64748b;font-size:12px;padding:12px">No FanDuel / DraftKings Over prices for this prop yet.</div>`;
   }
-  let minV = Math.min(...vals);
-  let maxV = Math.max(...vals);
-  if (minV === maxV) {
-    minV -= 5;
-    maxV += 5;
-  }
-  const xw = W - pad.l - pad.r;
+  const AXIS_TOP = 175;
+  const AXIS_BOTTOM = -175;
+  const axisSpan = AXIS_TOP - AXIS_BOTTOM;
+  const padL = 48;
+  const xw = W - padL - pad.r;
   const yh = H - pad.t - pad.b;
   const n = rows.length;
-  const xAt = (i) => pad.l + (n <= 1 ? 0 : (i / (n - 1)) * xw);
-  const yAt = (v) => pad.t + yh - ((v - minV) / (maxV - minV || 1)) * yh;
+  const xAt = (i) => padL + (n <= 1 ? 0 : (i / (n - 1)) * xw);
+  /** Top of plot = +175, bottom = -175 (American odds). */
+  const yAt = (v) => {
+    const c = Math.max(AXIS_BOTTOM, Math.min(AXIS_TOP, Number(v)));
+    return pad.t + yh - ((c - AXIS_BOTTOM) / axisSpan) * yh;
+  };
+  const fmtAxisOdds = (n) => {
+    const x = Math.round(n);
+    return x > 0 ? `+${x}` : `${x}`;
+  };
 
   function stepPath(getter) {
     let d = "";
@@ -495,7 +501,7 @@ function renderOddsSparkChart(hist, opts = {}) {
   for (let i = 0; i < nTimeTicks; i++) {
     const frac = i / (nTimeTicks - 1);
     const ts = tMin + frac * spanMs;
-    const x = pad.l + frac * xw;
+    const x = padL + frac * xw;
     const anchor = i === 0 ? "start" : i === nTimeTicks - 1 ? "end" : "middle";
     timeVLines.push(
       `<line x1="${x}" y1="${pad.t}" x2="${x}" y2="${pad.t + yh}" stroke="rgba(148,163,184,.09)" stroke-dasharray="2 4"/>`
@@ -523,20 +529,20 @@ function renderOddsSparkChart(hist, opts = {}) {
           <path d="M 8 0 L 0 0 0 8" fill="none" stroke="rgba(148,163,184,.12)" stroke-width="0.5"/>
         </pattern>
       </defs>
-      <rect x="${pad.l}" y="${pad.t}" width="${xw}" height="${yh}" fill="url(#${gridId})" opacity="0.5"/>
+      <rect x="${padL}" y="${pad.t}" width="${xw}" height="${yh}" fill="url(#${gridId})" opacity="0.5"/>
       ${timeVLines.join("")}
-      ${[0, 0.25, 0.5, 0.75, 1]
+      ${[0, 0.2, 0.4, 0.6, 0.8, 1]
         .map((t) => {
-          const v = minV + t * (maxV - minV);
+          const v = AXIS_BOTTOM + t * axisSpan;
           const y = yAt(v);
-          return `<line x1="${pad.l}" y1="${y}" x2="${W - pad.r}" y2="${y}" stroke="rgba(148,163,184,.15)" stroke-dasharray="3 3"/>`;
+          return `<line x1="${padL}" y1="${y}" x2="${W - pad.r}" y2="${y}" stroke="rgba(148,163,184,.15)" stroke-dasharray="3 3"/>`;
         })
         .join("")}
-      ${[0, 0.5, 1]
+      ${[0, 0.25, 0.5, 0.75, 1]
         .map((t) => {
-          const v = minV + t * (maxV - minV);
+          const v = AXIS_BOTTOM + t * axisSpan;
           const y = yAt(v);
-          return `<text x="${pad.l - 4}" y="${y + 4}" fill="#94a3b8" font-size="10" text-anchor="end">${Math.round(v)}</text>`;
+          return `<text x="${padL - 4}" y="${y + 4}" fill="#94a3b8" font-size="10" text-anchor="end">${fmtAxisOdds(v)}</text>`;
         })
         .join("")}
       ${pathFd ? `<path d="${pathFd}" fill="none" stroke="${fdC}" stroke-width="2.5" stroke-linejoin="round"/>` : ""}
