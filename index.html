@@ -762,7 +762,7 @@ function ambiguousStrikeoutCountsAsPitcher(row, g, player) {
     g.teams?.home?.probablePitcher?.fullName ||
     g.teams?.away?.probablePitcher?.fullName;
   if (!hasProb) {
-    const h = Number(row.hdp);
+    const h = numericLineFromRow(row);
     if (Number.isNaN(h)) return true;
     return h >= 2.5;
   }
@@ -790,10 +790,33 @@ function teamAbbrForHitter(playerName, g) {
   return "";
 }
 
+function numericLineFromRow(row) {
+  if (!row) return NaN;
+  for (const k of ["hdp", "handicap", "line", "spread"]) {
+    const v = row[k];
+    if (v != null && v !== "") {
+      const n = Number(v);
+      if (!Number.isNaN(n)) return n;
+    }
+  }
+  return NaN;
+}
+
+/** Typical pitcher-K alt lines are 2.5–15 in half-point steps; float-safe. */
+function lineLooksLikePitcherKAlt(h) {
+  return h >= 2.5 && h <= 15 && Math.abs(h * 2 - Math.round(h * 2)) < 1e-6;
+}
+
 function classifyOddsMarket(marketName, row) {
   const raw = (marketName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const st = raw.toLowerCase().trim();
   if (st.includes("nrfi") || st.includes("yrfi")) return { kind: "skip" };
+
+  const lineFromRow = numericLineFromRow(row);
+  // Books often send only "Player Props" with no stat text — classify by line shape first.
+  if (st === "player props" && !Number.isNaN(lineFromRow) && lineLooksLikePitcherKAlt(lineFromRow)) {
+    return { kind: "so_ambiguous" };
+  }
 
   const looksLikePitcherK =
     st.includes("strikeout") ||
@@ -827,14 +850,11 @@ function classifyOddsMarket(marketName, row) {
     if (statKey === "runs" && (st.includes("pitcher") || st.includes("allowed") || st.includes("against"))) continue;
     return { kind: "hitter", statKey };
   }
-  // DraftKings/FanDuel-style: market.name is only "Player Props" — no stat text. Use line shape.
-  const h = row && row.hdp != null ? Number(row.hdp) : NaN;
-  if (!Number.isNaN(h)) {
-    const hasStatWord = /(strike|pitch|hit|home|run|rbi|walk|stolen|base|save|inning|allowed|combo|recorded)/i.test(st);
-    if (!hasStatWord && st.length < 100) {
-      if (h >= 2.5 && h <= 15 && (Math.round(h * 2) === h * 2))
-        return { kind: "so_ambiguous" };
-    }
+  // DraftKings/FanDuel-style: little stat text in the label — use line shape. Avoid bare "hit" (matches "White", etc.).
+  if (!Number.isNaN(lineFromRow)) {
+    const h = lineFromRow;
+    const hasStatWord = /\b(strike|strikeouts?|pitchers?|pitching|hits?\b|home runs?|rbis?|runs scored|runs batted|\bruns\b|walks?|stolen bases?|total bases|singles|doubles|triples|saves?\b|innings?|allowed|combo|outs recorded|pitching outs)\b/i.test(st);
+    if (!hasStatWord && st.length < 400 && lineLooksLikePitcherKAlt(h)) return { kind: "so_ambiguous" };
   }
   return { kind: "skip" };
 }
@@ -962,7 +982,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v5:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v6:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1039,7 +1059,7 @@ async function loadPPLines(games, dateStr) {
     debugLines.push(`Server meta: apiCalls=${payload.meta?.apiCalls ?? "?"} events=${payload.meta?.eventCount ?? "?"} props=${payload.rows?.length ?? 0}`);
     const rFirst = payload.rows && payload.rows[0];
     if (rFirst) {
-      debugLines.push(`First prop row: home="${rFirst.home || ""}" away="${rFirst.away || ""}" market="${(rFirst.market || "").slice(0, 80)}"`);
+      debugLines.push(`First prop row: home="${rFirst.home || ""}" away="${rFirst.away || ""}" market="${(rFirst.market || "").slice(0, 80)}" hdp=${rFirst.hdp != null ? rFirst.hdp : "?"}`);
     }
     if (payload.meta?.sampleEventTeams?.length) {
       debugLines.push(`Odds teams sample: ${payload.meta.sampleEventTeams.map(t => `"${t.home}" @ "${t.away}"`).join(" · ")}`);
