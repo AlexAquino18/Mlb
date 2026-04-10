@@ -1058,7 +1058,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v18:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v19:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1073,7 +1073,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260409g" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260409h" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -3350,9 +3350,6 @@ async function buildSO(games, season) {
 
       const oppTeamName = e.oppTeam.teamName || e.oppTeam.name;
       const oppDisplayLineup = enrichedBatters.length ? enrichedBatters : effectiveBatters;
-
-      // Skip if no PP line AND no real pitcher (pure avg-stat noise)
-      if (!ppEntry && !e.prob) return;
 
       const catcherSide = e.isHome ? "away" : "home";
       const catcherInfo = await getCatcherForTeam(g.gamePk, catcherSide);
