@@ -1058,7 +1058,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v15:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v16:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1073,7 +1073,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260409d" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260409e" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -2878,29 +2878,37 @@ async function buildNRFI(games, season) {
 
 // Resolve a pitcher for one side of a game, falling back to PP team data
 const _pitcherTeamCache = {};
-async function getPitcherCurrentTeamAbbr(playerId) {
+async function getPlayerIdentity(playerId) {
   if (!playerId) return null;
-  if (_pitcherTeamCache[playerId] !== undefined) return _pitcherTeamCache[playerId];
+  const cacheKey = `person_${playerId}`;
+  if (_pitcherTeamCache[cacheKey] !== undefined) return _pitcherTeamCache[cacheKey];
   try {
-    // Request specific fields to guarantee currentTeam is returned
-    const d = await mlbGet(`/people/${playerId}?fields=people,id,fullName,currentTeam,id,abbreviation`);
-    const person = d?.people?.[0];
-    const abbr = person?.currentTeam?.abbreviation?.toUpperCase() || null;
-    _pitcherTeamCache[playerId] = abbr;
-    return abbr;
-  } catch { _pitcherTeamCache[playerId] = null; return null; }
+    const d = await mlbGet(`/people/${playerId}`);
+    const person = d?.people?.[0] || null;
+    const pos = String(person?.primaryPosition?.abbreviation || "").toUpperCase();
+    const type = String(person?.primaryPosition?.type || "").toLowerCase();
+    const identity = {
+      currentTeamAbbr: person?.currentTeam?.abbreviation?.toUpperCase() || null,
+      currentTeamId: person?.currentTeam?.id || null,
+      primaryPos: pos || null,
+      isPitcher: pos === "P" || pos === "SP" || pos === "RP" || pos === "TWP" || type === "pitcher",
+    };
+    _pitcherTeamCache[cacheKey] = identity;
+    return identity;
+  } catch {
+    _pitcherTeamCache[cacheKey] = null;
+    return null;
+  }
+}
+
+async function getPitcherCurrentTeamAbbr(playerId) {
+  const ident = await getPlayerIdentity(playerId);
+  return ident?.currentTeamAbbr || null;
 }
 
 async function getPitcherCurrentTeamId(playerId) {
-  if (!playerId) return null;
-  const cacheKey = `id_${playerId}`;
-  if (_pitcherTeamCache[cacheKey] !== undefined) return _pitcherTeamCache[cacheKey];
-  try {
-    const d = await mlbGet(`/people/${playerId}?fields=people,id,currentTeam,id`);
-    const teamId = d?.people?.[0]?.currentTeam?.id || null;
-    _pitcherTeamCache[cacheKey] = teamId;
-    return teamId;
-  } catch { _pitcherTeamCache[cacheKey] = null; return null; }
+  const ident = await getPlayerIdentity(playerId);
+  return ident?.currentTeamId || null;
 }
 
 const _fullRosterCache = {};
@@ -2984,10 +2992,15 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam) 
 
       const mlbId = await findMLBId(ppE.rawName);
       if (!mlbId) continue;
+      const ident = await getPlayerIdentity(mlbId);
+      if (!ident?.isPitcher) {
+        console.warn(`[MLB] PP fallback skip: ${ppE.rawName} is not a pitcher`);
+        continue;
+      }
 
       // Check 4: MLB people API team ID confirmation (fail-open: only reject on confirmed mismatch)
       if (expTeamId) {
-        const currentTeamId = await getPitcherCurrentTeamId(mlbId);
+        const currentTeamId = ident.currentTeamId || null;
         if (currentTeamId && currentTeamId !== expTeamId) {
           console.warn(`[MLB] PP fallback skip: ${ppE.rawName} teamId=${currentTeamId} ≠ ${expTeamId}`);
           continue;
