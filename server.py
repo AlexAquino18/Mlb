@@ -222,12 +222,16 @@ def odds_io_route():
         api_key = _os.environ.get("ODDS_API_KEY") or _os.environ.get("ODDS_API_IO_KEY")
         raw_date = request.args.get("date")
         bookmakers = request.args.get("bookmakers") or "DraftKings,FanDuel"
+        dbg = request.args.get("structure") or request.args.get("debug") or ""
+        debug_structure = str(dbg).lower() in ("1", "true", "yes")
         if not api_key:
             body = {"ok": False, "error": "missing_ODDS_API_KEY"}
         elif not raw_date:
             body = {"ok": False, "error": "missing_date"}
         else:
-            body = fetch_mlb_odds_bundle(api_key, raw_date[:10], bookmakers)
+            body = fetch_mlb_odds_bundle(
+                api_key, raw_date[:10], bookmakers, debug_structure=debug_structure
+            )
         return Response(
             json.dumps(body, default=str),
             status=200,

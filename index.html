@@ -986,7 +986,7 @@ function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v7:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v9:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1001,7 +1001,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -1025,6 +1025,7 @@ async function loadPPLines(games, dateStr) {
 
   setStatus("Fetching sportsbook lines (Odds-API)…");
   const debugLines = [];
+  let payload = null;
 
   try {
     if (!games || !games.length || !dateStr) {
@@ -1034,7 +1035,7 @@ async function loadPPLines(games, dateStr) {
       return;
     }
 
-    let payload = oddsCacheGet(dateStr);
+    payload = oddsCacheGet(dateStr);
     if (!payload) {
       const url = oddsIoFetchUrl(dateStr);
       if (!url) {
@@ -1071,6 +1072,9 @@ async function loadPPLines(games, dateStr) {
     if (payload.meta?.sampleMarkets?.length) {
       debugLines.push(`Market name sample: ${payload.meta.sampleMarkets.slice(0, 5).join(" | ")}`);
     }
+    if (payload.meta?.oddsStructureSample) {
+      debugLines.push("✓ API structure sample (first /odds/multi event) — see preformatted block below");
+    }
 
     applyOddsRowsToState(payload.rows, games, debugLines);
 
@@ -1099,16 +1103,28 @@ async function loadPPLines(games, dateStr) {
     setStatus("Sportsbook load failed — using calculated lines");
   }
 
-  showPPDebug(debugLines);
+  showPPDebug(debugLines, payload?.meta?.oddsStructureSample || "");
 }
 
-function showPPDebug(lines) {
+function showPPDebug(lines, structurePre) {
   const el = document.getElementById("pp-debug");
   const body = document.getElementById("pp-debug-body");
   if (!el || !body) return;
-  body.innerHTML = lines.map(l =>
-    `<div style="color:${l.startsWith("✓")?"#00ff88":l.startsWith("❌")||l.startsWith("⚠")?"#ff4d6d":"#94a3b8"}">${l}</div>`
-  ).join("");
+  const esc = (s) =>
+    String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  let html = lines
+    .map(
+      (l) =>
+        `<div style="color:${l.startsWith("✓") ? "#00ff88" : l.startsWith("❌") || l.startsWith("⚠") ? "#ff4d6d" : "#94a3b8"}">${esc(l)}</div>`
+    )
+    .join("");
+  if (structurePre) {
+    html += `<pre style="margin-top:12px;padding:12px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;white-space:pre-wrap;font-size:11px;line-height:1.4;max-height:min(52vh,440px);overflow:auto;text-align:left;font-family:ui-monospace,Consolas,monospace">${esc(structurePre)}</pre>`;
+  }
+  body.innerHTML = html;
   el.style.display = "block";
 }
 

@@ -64,14 +64,36 @@ function teamStr(v) {
   return String(v).trim();
 }
 
+const _ISO_NOISE = /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}|^\d{4}-\d{2}-\d{2}$/;
+const _UUID_NOISE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isNoiseString(s) {
+  const t = String(s || "").trim();
+  if (!t || t.length > 400) return true;
+  if (_UUID_NOISE.test(t)) return true;
+  if (_ISO_NOISE.test(t)) return true;
+  return false;
+}
+
+function shouldSkipHarvestKey(k) {
+  if (!k) return false;
+  const kl = k.toLowerCase();
+  if (["odds", "bookmakers", "id", "eventid", "event_id"].includes(kl)) return true;
+  if (k.endsWith("At") || k.endsWith("_at")) return true;
+  if (["timestamp", "lastupdated", "lastmodified", "syncedat", "starttime", "datetime", "date", "time", "ts"].includes(kl))
+    return true;
+  return false;
+}
+
 function allStringValues(obj, skip, depth = 0) {
   if (!obj || typeof obj !== "object" || depth > 4) return "";
   const parts = [];
   for (const k of Object.keys(obj)) {
-    if (skip.has(k)) continue;
+    if (skip.has(k) || shouldSkipHarvestKey(k)) continue;
     const v = obj[k];
-    if (typeof v === "string" && v.trim()) parts.push(v.trim());
-    else if (v && typeof v === "object" && !Array.isArray(v))
+    if (typeof v === "string" && v.trim()) {
+      if (!isNoiseString(v)) parts.push(v.trim());
+    } else if (v && typeof v === "object" && !Array.isArray(v))
       parts.push(allStringValues(v, skip, depth + 1));
   }
   return parts.join(" ");
@@ -80,17 +102,23 @@ function allStringValues(obj, skip, depth = 0) {
 function compositeMarketName(m, odd) {
   const chunks = [];
   const name = (m.name || "").trim();
-  if (name) chunks.push(name);
+  if (name && !isNoiseString(name)) chunks.push(name);
   for (const k of [
     "title", "label", "type", "category", "group", "description", "handicapName",
     "key", "slug", "statistic", "statType", "propType", "betType", "subType",
   ]) {
-    if (m[k] && String(m[k]).trim()) chunks.push(String(m[k]).trim());
+    if (m[k] && String(m[k]).trim()) {
+      const sv = String(m[k]).trim();
+      if (!isNoiseString(sv)) chunks.push(sv);
+    }
   }
   const lbl = String(odd.label || "").trim();
   for (const k of ["stat", "market", "type", "selectionName", "description", "name"]) {
     const v = odd[k];
-    if (v && String(v).trim() && String(v).trim() !== lbl) chunks.push(String(v).trim());
+    if (v && String(v).trim() && String(v).trim() !== lbl) {
+      const sv = String(v).trim();
+      if (!isNoiseString(sv)) chunks.push(sv);
+    }
   }
   chunks.push(allStringValues(m, new Set(["odds", "bookmakers"]), 0));
   chunks.push(
@@ -99,13 +127,59 @@ function compositeMarketName(m, odd) {
   const seen = new Set();
   const out = [];
   for (const c of chunks) {
-    const cl = c.toLowerCase();
-    if (c && !seen.has(cl)) {
-      seen.add(cl);
-      out.push(c);
-    }
+    if (!c || isNoiseString(c)) continue;
+    const cl = c.toLowerCase().trim();
+    if (!cl || seen.has(cl)) continue;
+    seen.add(cl);
+    out.push(c.trim());
   }
   return out.length ? out.join(" · ") : "Player Props";
+}
+
+function debugTrimEvent(ev) {
+  const out = {
+    id: ev.id,
+    home: ev.home,
+    away: ev.away,
+    date: ev.date,
+    top_level_keys: Object.keys(ev).sort().slice(0, 80),
+    bookmakers: {},
+  };
+  const bks = ev.bookmakers || {};
+  let bi = 0;
+  for (const bkName of Object.keys(bks)) {
+    if (bi++ >= 2) break;
+    const markets = bks[bkName];
+    if (!Array.isArray(markets)) {
+      out.bookmakers[bkName] = markets;
+      continue;
+    }
+    const tlist = [];
+    for (let mi = 0; mi < Math.min(3, markets.length); mi++) {
+      const m = markets[mi];
+      if (!m || typeof m !== "object") {
+        tlist.push(m);
+        continue;
+      }
+      const mo = { name: m.name, market_keys: Object.keys(m).sort() };
+      const odds = m.odds || [];
+      mo.odds_count = Array.isArray(odds) ? odds.length : null;
+      mo.odds_sample = [];
+      if (Array.isArray(odds)) {
+        for (let oi = 0; oi < Math.min(4, odds.length); oi++) {
+          const odd = odds[oi];
+          if (odd && typeof odd === "object") {
+            const o = {};
+            for (const k of Object.keys(odd).sort()) o[k] = odd[k];
+            mo.odds_sample.push(o);
+          } else mo.odds_sample.push(odd);
+        }
+      }
+      tlist.push(mo);
+    }
+    out.bookmakers[bkName] = tlist;
+  }
+  return out;
 }
 
 function appendPropRows(ev, rows, eventTeams) {
@@ -157,6 +231,8 @@ export default async (request) => {
   const url = new URL(request.url);
   const date = url.searchParams.get("date");
   const bookmakers = url.searchParams.get("bookmakers") || "DraftKings,FanDuel";
+  const dbg = url.searchParams.get("structure") || url.searchParams.get("debug");
+  const wantStructure = ["1", "true", "yes"].includes(String(dbg || "").toLowerCase());
   const apiKey = Deno.env.get("ODDS_API_KEY") || Deno.env.get("ODDS_API_IO_KEY");
 
   if (!apiKey) return json({ ok: false, error: "missing_ODDS_API_KEY" });
@@ -196,6 +272,7 @@ export default async (request) => {
 
     const rows = [];
     const ids = events.map((e) => e.id).filter((id) => id != null);
+    let firstMultiRaw = null;
     for (let i = 0; i < ids.length; i += 10) {
       const chunk = ids.slice(i, i + 10);
       const multiUrl =
@@ -207,6 +284,7 @@ export default async (request) => {
         }).toString();
       const mRes = await fetch(multiUrl, { headers: { Accept: "application/json" } });
       const multiRaw = await mRes.json();
+      if (wantStructure && firstMultiRaw == null) firstMultiRaw = multiRaw;
       out.meta.apiCalls += 1;
       for (const ev of multiList(multiRaw)) {
         appendPropRows(ev, rows, eventTeams);
@@ -237,6 +315,14 @@ export default async (request) => {
       }
     }
     out.meta.sampleEventTeams = sampleEventTeams;
+    if (wantStructure && firstMultiRaw != null) {
+      const lst = multiList(firstMultiRaw);
+      if (lst.length && lst[0]) {
+        let sj = JSON.stringify(debugTrimEvent(lst[0]), null, 2);
+        if (sj.length > 36000) sj = sj.slice(0, 36000) + "\n… (truncated)";
+        out.meta.oddsStructureSample = sj;
+      }
+    }
     out.ok = true;
     return json(out, 200);
   } catch (e) {

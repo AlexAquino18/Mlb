@@ -38,13 +38,17 @@ class handler(BaseHTTPRequestHandler):
             qs = parse_qs(parsed.query)
             raw_date = (qs.get("date") or [None])[0]
             bookmakers = (qs.get("bookmakers") or ["DraftKings,FanDuel"])[0]
+            dbg = (qs.get("structure") or qs.get("debug") or [""])[0]
+            debug_structure = str(dbg).lower() in ("1", "true", "yes")
             api_key = os.environ.get("ODDS_API_KEY") or os.environ.get("ODDS_API_IO_KEY")
             if not api_key:
                 out = {"ok": False, "error": "missing_ODDS_API_KEY"}
             elif not raw_date:
                 out = {"ok": False, "error": "missing_date"}
             else:
-                out = fetch_mlb_odds_bundle(api_key, raw_date[:10], bookmakers)
+                out = fetch_mlb_odds_bundle(
+                    api_key, raw_date[:10], bookmakers, debug_structure=debug_structure
+                )
         except Exception as e:
             sys.stderr.write(traceback.format_exc() + "\n")
             out = {"ok": False, "error": "server_error", "detail": str(e)}
