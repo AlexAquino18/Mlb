@@ -2418,14 +2418,15 @@ async function getPersonBatSide(id) {
 // ─── DATA FETCH ───────────────────────────────────────────────────────────────
 async function getSchedule(date) {
   const mon = parseInt(date.split("-")[1], 10);
-  // Try regular season first (covers Mar onward), then spring training
   const gameTypes = mon <= 2 ? ["S", "R"] : ["R", "S"];
+  const flattenGames = (d) =>
+    (d.dates || []).flatMap((dt) => (dt && dt.games) || []).filter((g) => g && g.gamePk);
   for (const gt of gameTypes) {
     try {
       const d = await mlbGet(`/schedule?sportId=1&date=${date}&hydrate=probablePitchers,lineups&gameType=${gt}`);
-      const games = (d.dates && d.dates[0] && d.dates[0].games) || [];
+      const games = flattenGames(d);
       if (games.length > 0) return games;
-    } catch(_) {}
+    } catch (_) {}
   }
   return [];
 }
@@ -2941,6 +2942,7 @@ async function buildNRFI(games, season) {
   await loadCrowdsLineData();
   const results = [];
   await mapConcurrent(games, async g => {
+    try {
     const aw = g.teams.away, hm = g.teams.home;
 
     // Step 1: get boxscore/lineup data (also surfaces confirmed starters for live games)
@@ -3309,6 +3311,9 @@ async function buildNRFI(games, season) {
       modelScore: nrfiScoreRaw,
       confidence, analysis,
     });
+    } catch (e) {
+      console.warn("[MLB] NRFI skip gamePk=" + (g && g.gamePk) + ":", e && e.message ? e.message : e);
+    }
   });
   return results.sort((a,b) => Math.abs(b.confidence-50) - Math.abs(a.confidence-50));
 }
