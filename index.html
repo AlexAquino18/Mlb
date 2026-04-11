@@ -3726,6 +3726,20 @@ async function buildSO(games, season) {
       confidence = Math.max(48, Math.min(88, confidence));
       const pick = `${takeOver ? "Over" : "Under"} ${line.toFixed(1)}`;
 
+      /* Composite "model rating" (~3.1–6.5): public sheets often blend (1) strikeout edge vs book line,
+         (2) conviction = distance of win P from 50%, (3) process quality (Statcast/FG, lineup certainty).
+         This is our transparent version — not any third party's closed formula. */
+      const probStrength = Math.abs(winProb - 0.5) * 2;
+      let soModelRating =
+        3.08 +
+        Math.min(1.35, Math.abs(edge) * 0.5) +
+        Math.min(1.45, probStrength * 1.28) +
+        (hasFG ? 0.24 : 0) +
+        (lineupKData && !lineupFromPrevDay ? 0.12 : 0) +
+        (statcastMatchup?.kPctAdj != null ? 0.09 : 0) +
+        Math.min(0.3, Math.max(0, (effKPct - 20) * 0.017));
+      soModelRating = Math.min(6.5, Math.max(3.05, parseFloat(soModelRating.toFixed(2))));
+
       // Source label for this pitcher
       const starter = e.isHome ? gameInfo.homeStarter : gameInfo.awayStarter;
       const schedProb = e.isHome ? hm.probablePitcher : aw.probablePitcher;
@@ -3829,7 +3843,7 @@ async function buildSO(games, season) {
         statcastMatchup: statcastMatchup || null,
         pickOver: takeOver, pWinVsLine: takeOver ? pOver : 1 - pOver,
         weather: weatherSO, ump: umpSO,
-        strikeoutPick: pick, confidence, analysis,
+        strikeoutPick: pick, confidence, soModelRating, analysis,
         gameLog: p.gameLog || [],
         catcherInfo, h2hData,
         lineMov,
@@ -3846,6 +3860,8 @@ async function buildSO(games, season) {
     const aPP = a.lineSrc === "sportsbook" ? 1 : 0;
     const bPP = b.lineSrc === "sportsbook" ? 1 : 0;
     if (bPP !== aPP) return bPP - aPP;
+    const ar = a.soModelRating ?? 0, br = b.soModelRating ?? 0;
+    if (br !== ar) return br - ar;
     return Math.abs(b.confidence-50) - Math.abs(a.confidence-50);
   });
 }
@@ -5109,6 +5125,7 @@ function renderSOCard(g) {
         </div>
         <div class="card-right">
           <div class="conf-num" style="color:${color}">${g.confidence}%</div>
+          ${g.soModelRating != null ? `<div style="font-size:13px;font-weight:800;color:#5eead4;margin-top:4px;font-variant-numeric:tabular-nums" title="Blend of edge vs line, win probability vs line, Statcast/lineup (scale ~3.1–6.5; our formula, not any external site)">${g.soModelRating.toFixed(2)} <span style="font-size:9px;color:#64748b;font-weight:700">rating</span></div>` : ""}
           <span class="badge" style="background:${color}22;color:${color};border:1px solid ${color}44">${g.strikeoutPick}</span>
         </div>
       </div>
@@ -5117,7 +5134,7 @@ function renderSOCard(g) {
           <div class="take-label" style="color:${color}">TAKE THIS BET</div>
           <div class="take-value" style="color:${color}">${g.pitcher} ${dir} ${g.line} Strikeouts</div>
           <div class="take-sub" style="color:${color}">
-            Projection: ${g.projection}K · Edge: ${g.edge>0?"+":""}${g.edge} · ${g.confidence}% confidence${g.fanGraphsInModel ? (g.fgSource === "statcast" ? " · Statcast K%/whiff" : " · FG-backed K%/CSW") : ""}
+            Projection: ${g.projection}K · Edge: ${g.edge>0?"+":""}${g.edge} · ${g.confidence}% confidence${g.soModelRating != null ? ` · Model rating ${g.soModelRating.toFixed(2)}` : ""}${g.fanGraphsInModel ? (g.fgSource === "statcast" ? " · Statcast K%/whiff" : " · FG-backed K%/CSW") : ""}
           </div>
           <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             ${g.lineSrc==="sportsbook"
