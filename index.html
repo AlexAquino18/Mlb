@@ -3915,14 +3915,14 @@ async function buildSO(games, season) {
 
       const envKMult = (0.88 + 0.12 * umpSO.kAdj) * (0.94 + 0.06 * (weatherSO.soKAdj || 1.0));
       let effKPct = blendKPct * envKMult;
-      // Opponent lineup K% vs this pitcher hand — primary matchup lever (stronger than before)
-      const lineupKMult = 1 + ((oppKPct - LG_K) / LG_K) * 0.32;
+      // Opponent lineup K% vs this pitcher hand — primary matchup lever
+      const lineupKMult = 1 + ((oppKPct - LG_K) / LG_K) * 0.34;
       effKPct *= lineupKMult;
-      // Team contact vs this hand: above-average OBP → fewer Ks; below-average → more Ks (MLB split)
+      // Team contact vs this hand (softer than K% so we don’t double-count offense twice)
       const LG_OBP = 0.315;
       const obpVsHand = typeof oppOBP === "number" && !Number.isNaN(oppOBP) ? oppOBP : LG_OBP;
-      const obpKAdj = (obpVsHand - LG_OBP) * 26;
-      effKPct -= Math.min(2.5, Math.max(-2.5, obpKAdj));
+      const obpKAdj = (obpVsHand - LG_OBP) * 22;
+      effKPct -= Math.min(2.2, Math.max(-2.2, obpKAdj));
       if (statcastMatchup != null && statcastMatchup.kPctAdj != null) {
         effKPct += statcastMatchup.kPctAdj;
       }
@@ -3945,7 +3945,9 @@ async function buildSO(games, season) {
         if (lineupKData && statcastMatchup != null && statcastMatchup.kPctAdj != null) MARKET_SHRINK -= 0.06;
         if (lineupKData && !lineupFromPrevDay) MARKET_SHRINK -= 0.03;
         if (h2hBlended) MARKET_SHRINK -= 0.05;
-        MARKET_SHRINK = Math.max(0.32, Math.min(0.60, MARKET_SHRINK));
+        const shrinkFloor =
+          h2hBlended && lineupKData && hasFG && !lineupFromPrevDay ? 0.28 : 0.32;
+        MARKET_SHRINK = Math.max(shrinkFloor, Math.min(0.60, MARKET_SHRINK));
       }
       const line    = ppEntry
         ? ppEntry.line
@@ -3967,6 +3969,8 @@ async function buildSO(games, season) {
       if (!ppEntry) confidence -= 4;
       if (hasFG) confidence += 2;
       if (h2hBlended) confidence += 2;
+      // Near-coin-flip vs book: don’t read 65%+ confidence when edge is tiny
+      if (ppEntry && Math.abs(edge) < 0.38) confidence -= 3;
       confidence = Math.max(48, Math.min(88, confidence));
       const pick = `${takeOver ? "Over" : "Under"} ${line.toFixed(1)}`;
 
