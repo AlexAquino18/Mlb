@@ -3283,23 +3283,22 @@ async function buildNRFI(games, season) {
     // ── NRFI score ────────────────────────────────────────────────────────────
     // Use spring stats when available, weighted with prior season
     const getEffectiveERA = (p) => {
-      if (p.stRecentERA !== null && p.springIP >= 2) return p.era * 0.35 + p.stRecentERA * 0.65;
-      if (p.springERA   !== null && p.springIP >= 1) return p.era * 0.5  + p.springERA  * 0.5;
-      if (p.recentERA   !== null)                    return p.era * 0.42 + p.recentERA * 0.58;
+      if (p.stRecentERA !== null && p.springIP >= 2) return p.era * 0.48 + p.stRecentERA * 0.52;
+      if (p.springERA   !== null && p.springIP >= 1) return p.era * 0.55 + p.springERA * 0.45;
+      if (p.recentERA   !== null)                    return p.era * 0.55 + p.recentERA * 0.45;
       return p.era;
     };
     const getEffectiveK9 = (p) => {
-      if (p.stRecentK9 !== null && p.springIP >= 2) return p.k9 * 0.42 + p.stRecentK9 * 0.58;
-      if (p.springK9   !== null && p.springIP >= 1) return p.k9 * 0.5  + p.springK9  * 0.5;
-      if (p.recentK9   !== null) return p.k9 * 0.44 + p.recentK9 * 0.56;
+      if (p.stRecentK9 !== null && p.springIP >= 2) return p.k9 * 0.52 + p.stRecentK9 * 0.48;
+      if (p.springK9   !== null && p.springIP >= 1) return p.k9 * 0.58 + p.springK9 * 0.42;
+      if (p.recentK9   !== null) return p.k9 * 0.58 + p.recentK9 * 0.42;
       return p.k9;
     };
     // WHIP-based first-inning scoring probability
     // Lower WHIP → fewer baserunners → fewer runs → NRFI lean
     const getEffectiveWHIP = (p) => {
       if (p.recentERA !== null && p.recentK9 !== null) {
-        // Approximate recent WHIP from K9 and ERA trends
-        return p.whip * 0.4 + (p.whip * (p.recentERA / Math.max(p.era, 1.5))) * 0.6;
+        return p.whip * 0.62 + (p.whip * (p.recentERA / Math.max(p.era, 1.5))) * 0.38;
       }
       return p.whip;
     };
@@ -3824,14 +3823,14 @@ async function buildSO(games, season) {
 
       const useK9 = (() => {
         if (p.stRecentK9 !== null && p.springIP && p.springIP >= 2) {
-          return parseFloat((p.stRecentK9 * 0.55 + p.k9 * 0.45).toFixed(1));
+          return parseFloat((p.k9 * 0.58 + p.stRecentK9 * 0.42).toFixed(1));
         }
         if (p.springK9 !== null && p.springIP && p.springIP >= 1) {
-          return parseFloat((p.springK9 * 0.5 + p.k9 * 0.5).toFixed(1));
+          return parseFloat((p.k9 * 0.58 + p.springK9 * 0.42).toFixed(1));
         }
-        // Blend season K/9 with last ~5 starts (season weighted higher — recent is noisy game-to-game)
+        // Display K/9: season-primary; last ~5 starts are secondary (small-sample noise)
         return p.recentK9 !== null
-          ? parseFloat((p.k9 * 0.44 + p.recentK9 * 0.56).toFixed(1))
+          ? parseFloat((p.k9 * 0.62 + p.recentK9 * 0.38).toFixed(1))
           : p.k9;
       })();
 
@@ -3870,21 +3869,22 @@ async function buildSO(games, season) {
       if (hasFG) {
         const mlbRec = (() => {
           if (p.recentKPct != null && p.recentKPct3 != null) {
-            return parseFloat((p.recentKPct * 0.36 + p.recentKPct3 * 0.32 + p.kPct * 0.32).toFixed(3));
+            return parseFloat((p.recentKPct * 0.22 + p.recentKPct3 * 0.18 + p.kPct * 0.60).toFixed(3));
           }
           if (p.recentKPct != null) {
-            return parseFloat((p.kPct * 0.48 + p.recentKPct * 0.52).toFixed(3));
+            return parseFloat((p.kPct * 0.65 + p.recentKPct * 0.35).toFixed(3));
           }
           return p.kPct;
         })();
-        blendKPct = parseFloat((fgK100 * 0.58 + mlbRec * 0.26 + p.kPct * 0.16).toFixed(3));
+        blendKPct = parseFloat((fgK100 * 0.64 + mlbRec * 0.18 + p.kPct * 0.18).toFixed(3));
       } else {
         blendKPct = p.kPct;
         if (p.recentKPct != null && p.recentKPct3 != null) {
-          const rec = parseFloat((p.recentKPct * 0.42 + p.recentKPct3 * 0.38).toFixed(3));
-          blendKPct = parseFloat((p.kPct * 0.44 + rec * 0.56).toFixed(3));
+          blendKPct = parseFloat(
+            (p.kPct * 0.58 + p.recentKPct * 0.24 + p.recentKPct3 * 0.18).toFixed(3)
+          );
         } else if (p.recentKPct != null) {
-          blendKPct = parseFloat((p.kPct * 0.48 + p.recentKPct * 0.52).toFixed(3));
+          blendKPct = parseFloat((p.kPct * 0.65 + p.recentKPct * 0.35).toFixed(3));
         }
       }
 
@@ -3937,17 +3937,17 @@ async function buildSO(games, season) {
       const h2hBlended =
         lineupKData && h2hSlots && h2hSlots.some((x) => x && x.pa >= 4 && x.kPctH2h != null);
 
-      // PrizePicks line as prior — shrink more when data is thin; less when lineup / H2H / Statcast align
-      let MARKET_SHRINK = ppEntry ? (hasFG ? 0.46 : 0.53) : 0;
+      // Book line as prior — lower shrink ⇒ projection stays closer to analytical (BF×K% path)
+      let MARKET_SHRINK = ppEntry ? (hasFG ? 0.36 : 0.44) : 0;
       if (ppEntry) {
         if (!lineupKData) MARKET_SHRINK += 0.08;
         if (lineupFromPrevDay) MARKET_SHRINK += 0.04;
         if (lineupKData && statcastMatchup != null && statcastMatchup.kPctAdj != null) MARKET_SHRINK -= 0.06;
-        if (lineupKData && !lineupFromPrevDay) MARKET_SHRINK -= 0.03;
-        if (h2hBlended) MARKET_SHRINK -= 0.05;
+        if (lineupKData && !lineupFromPrevDay) MARKET_SHRINK -= 0.04;
+        if (h2hBlended) MARKET_SHRINK -= 0.06;
         const shrinkFloor =
-          h2hBlended && lineupKData && hasFG && !lineupFromPrevDay ? 0.28 : 0.32;
-        MARKET_SHRINK = Math.max(shrinkFloor, Math.min(0.60, MARKET_SHRINK));
+          h2hBlended && lineupKData && hasFG && !lineupFromPrevDay ? 0.20 : 0.26;
+        MARKET_SHRINK = Math.max(shrinkFloor, Math.min(0.52, MARKET_SHRINK));
       }
       const line    = ppEntry
         ? ppEntry.line
