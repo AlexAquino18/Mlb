@@ -2914,6 +2914,7 @@ async function getPitcherVsLineup(pitcherId, batters, season) {
 function blendOppKPctWithH2h(lineupKData, h2hSlots) {
   if (!lineupKData || !lineupKData.batters || !h2hSlots || !h2hSlots.length) return null;
   const weights = [1.25, 1.20, 1.15, 1.05, 1.00, 0.95, 0.85, 0.80, 0.80];
+  const H2H_MAX = 0.58;
   let tw = 0;
   let tkw = 0;
   for (let i = 0; i < lineupKData.batters.length; i++) {
@@ -2922,9 +2923,9 @@ function blendOppKPctWithH2h(lineupKData, h2hSlots) {
     const seasonK = b.kPctVsPitcher;
     const h2h = h2hSlots[i];
     let kUse = seasonK;
-    if (h2h && h2h.kPctH2h != null && h2h.pa >= 5) {
-      const h2hW = Math.min(1, Math.max(0, (h2h.pa - 5) / 40));
-      kUse = seasonK * (1 - 0.45 * h2hW) + h2h.kPctH2h * (0.45 * h2hW);
+    if (h2h && h2h.kPctH2h != null && h2h.pa >= 4) {
+      const h2hW = Math.min(1, Math.max(0, (h2h.pa - 4) / 36));
+      kUse = seasonK * (1 - H2H_MAX * h2hW) + h2h.kPctH2h * (H2H_MAX * h2hW);
     }
     tw += w;
     tkw += kUse * w;
@@ -3284,13 +3285,13 @@ async function buildNRFI(games, season) {
     const getEffectiveERA = (p) => {
       if (p.stRecentERA !== null && p.springIP >= 2) return p.era * 0.35 + p.stRecentERA * 0.65;
       if (p.springERA   !== null && p.springIP >= 1) return p.era * 0.5  + p.springERA  * 0.5;
-      if (p.recentERA   !== null)                    return p.era * 0.3  + p.recentERA  * 0.7;
+      if (p.recentERA   !== null)                    return p.era * 0.42 + p.recentERA * 0.58;
       return p.era;
     };
     const getEffectiveK9 = (p) => {
-      if (p.stRecentK9 !== null && p.springIP >= 2) return p.k9 * 0.35 + p.stRecentK9 * 0.65;
+      if (p.stRecentK9 !== null && p.springIP >= 2) return p.k9 * 0.42 + p.stRecentK9 * 0.58;
       if (p.springK9   !== null && p.springIP >= 1) return p.k9 * 0.5  + p.springK9  * 0.5;
-      if (p.recentK9   !== null) return p.k9 * 0.3 + p.recentK9 * 0.7;
+      if (p.recentK9   !== null) return p.k9 * 0.44 + p.recentK9 * 0.56;
       return p.k9;
     };
     // WHIP-based first-inning scoring probability
@@ -3828,9 +3829,9 @@ async function buildSO(games, season) {
         if (p.springK9 !== null && p.springIP && p.springIP >= 1) {
           return parseFloat((p.springK9 * 0.5 + p.k9 * 0.5).toFixed(1));
         }
-        // Weight recent form heavily (last 5 starts — most predictive for tonight)
+        // Blend season K/9 with last ~5 starts (season weighted higher — recent is noisy game-to-game)
         return p.recentK9 !== null
-          ? parseFloat((p.k9 * 0.22 + p.recentK9 * 0.78).toFixed(1))
+          ? parseFloat((p.k9 * 0.44 + p.recentK9 * 0.56).toFixed(1))
           : p.k9;
       })();
 
@@ -3869,21 +3870,21 @@ async function buildSO(games, season) {
       if (hasFG) {
         const mlbRec = (() => {
           if (p.recentKPct != null && p.recentKPct3 != null) {
-            return parseFloat((p.recentKPct * 0.52 + p.recentKPct3 * 0.48).toFixed(3));
+            return parseFloat((p.recentKPct * 0.36 + p.recentKPct3 * 0.32 + p.kPct * 0.32).toFixed(3));
           }
           if (p.recentKPct != null) {
-            return parseFloat((p.kPct * 0.18 + p.recentKPct * 0.82).toFixed(3));
+            return parseFloat((p.kPct * 0.48 + p.recentKPct * 0.52).toFixed(3));
           }
           return p.kPct;
         })();
-        blendKPct = parseFloat((fgK100 * 0.56 + mlbRec * 0.32 + p.kPct * 0.12).toFixed(3));
+        blendKPct = parseFloat((fgK100 * 0.58 + mlbRec * 0.26 + p.kPct * 0.16).toFixed(3));
       } else {
         blendKPct = p.kPct;
         if (p.recentKPct != null && p.recentKPct3 != null) {
-          const rec = parseFloat((p.recentKPct * 0.55 + p.recentKPct3 * 0.45).toFixed(3));
-          blendKPct = parseFloat((p.kPct * 0.32 + rec * 0.68).toFixed(3));
+          const rec = parseFloat((p.recentKPct * 0.42 + p.recentKPct3 * 0.38).toFixed(3));
+          blendKPct = parseFloat((p.kPct * 0.44 + rec * 0.56).toFixed(3));
         } else if (p.recentKPct != null) {
-          blendKPct = parseFloat((p.kPct * 0.34 + p.recentKPct * 0.66).toFixed(3));
+          blendKPct = parseFloat((p.kPct * 0.48 + p.recentKPct * 0.52).toFixed(3));
         }
       }
 
@@ -3914,8 +3915,14 @@ async function buildSO(games, season) {
 
       const envKMult = (0.88 + 0.12 * umpSO.kAdj) * (0.94 + 0.06 * (weatherSO.soKAdj || 1.0));
       let effKPct = blendKPct * envKMult;
-      const lineupKMult = 1 + ((oppKPct - LG_K) / LG_K) * 0.24;
+      // Opponent lineup K% vs this pitcher hand — primary matchup lever (stronger than before)
+      const lineupKMult = 1 + ((oppKPct - LG_K) / LG_K) * 0.32;
       effKPct *= lineupKMult;
+      // Team contact vs this hand: above-average OBP → fewer Ks; below-average → more Ks (MLB split)
+      const LG_OBP = 0.315;
+      const obpVsHand = typeof oppOBP === "number" && !Number.isNaN(oppOBP) ? oppOBP : LG_OBP;
+      const obpKAdj = (obpVsHand - LG_OBP) * 26;
+      effKPct -= Math.min(2.5, Math.max(-2.5, obpKAdj));
       if (statcastMatchup != null && statcastMatchup.kPctAdj != null) {
         effKPct += statcastMatchup.kPctAdj;
       }
@@ -3927,14 +3934,18 @@ async function buildSO(games, season) {
       const analyticalKRaw = Math.max(0.5, expectedBF * (effKPct / 100));
       const analyticalK = parseFloat(analyticalKRaw.toFixed(2));
 
-      // PrizePicks line as prior — shrink more when data is thin; less when lineup + Statcast matchup align
+      const h2hBlended =
+        lineupKData && h2hSlots && h2hSlots.some((x) => x && x.pa >= 4 && x.kPctH2h != null);
+
+      // PrizePicks line as prior — shrink more when data is thin; less when lineup / H2H / Statcast align
       let MARKET_SHRINK = ppEntry ? (hasFG ? 0.46 : 0.53) : 0;
       if (ppEntry) {
         if (!lineupKData) MARKET_SHRINK += 0.08;
         if (lineupFromPrevDay) MARKET_SHRINK += 0.04;
         if (lineupKData && statcastMatchup != null && statcastMatchup.kPctAdj != null) MARKET_SHRINK -= 0.06;
         if (lineupKData && !lineupFromPrevDay) MARKET_SHRINK -= 0.03;
-        MARKET_SHRINK = Math.max(0.34, Math.min(0.60, MARKET_SHRINK));
+        if (h2hBlended) MARKET_SHRINK -= 0.05;
+        MARKET_SHRINK = Math.max(0.32, Math.min(0.60, MARKET_SHRINK));
       }
       const line    = ppEntry
         ? ppEntry.line
@@ -3955,6 +3966,7 @@ async function buildSO(games, season) {
       if (lineupFromPrevDay) confidence -= 3;
       if (!ppEntry) confidence -= 4;
       if (hasFG) confidence += 2;
+      if (h2hBlended) confidence += 2;
       confidence = Math.max(48, Math.min(88, confidence));
       const pick = `${takeOver ? "Over" : "Under"} ${line.toFixed(1)}`;
 
@@ -3968,6 +3980,7 @@ async function buildSO(games, season) {
         Math.min(1.45, probStrength * 1.28) +
         (hasFG ? 0.24 : 0) +
         (lineupKData && !lineupFromPrevDay ? 0.12 : 0) +
+        (h2hBlended ? 0.07 : 0) +
         (statcastMatchup?.kPctAdj != null ? 0.09 : 0) +
         Math.min(0.3, Math.max(0, (effKPct - 20) * 0.017));
       soModelRating = Math.min(6.5, Math.max(3.05, parseFloat(soModelRating.toFixed(2))));
@@ -3987,11 +4000,10 @@ async function buildSO(games, season) {
       const ipNote = ppEntry?.outsLine != null
         ? ` Sportsbook ${ppEntry.outsLine} outs (~${(ppEntry.outsLine/3).toFixed(1)} IP implied) → proj workload ~${expectedIP} IP (70% book outs / 30% season avg).`
         : "";
-      const h2hBlended = lineupKData && h2hSlots && h2hSlots.some((x) => x && x.pa >= 5 && x.kPctH2h != null);
       const lineupSrc = lineupKData
         ? (lineupFromPrevDay ? "Prev-day lineup used (today's not yet posted)" : "Per-batter lineup K% used")
         : "Team split K% used";
-      const h2hKNote = h2hBlended ? " Last 2 seasons vs-this-pitcher K% blended into weighted lineup (PA≥5)." : "";
+      const h2hKNote = h2hBlended ? " H2H vs this SP blended into lineup K% (PA≥4, up to 58% weight)." : "";
       const lineNote  = ppEntry
         ? `Sportsbook line ${line} (${ppEntry.statType || "Pitcher Strikeouts"}) — middle line from ${ppEntry.allLines?.length || 1} available`
         : `Calculated line ${line}`;
@@ -4017,7 +4029,7 @@ async function buildSO(games, season) {
       const analysis = [
         `${e.prob?.fullName||"TBD"} (${p.hand}HP): BF×K% — ${fgAnchorTxt}${statcastMatchup?.kPctAdj != null ? `Statcast mix (whiff${statcastMatchup.kPctAdjWhiff != null ? ` ${statcastMatchup.kPctAdjWhiff >= 0 ? "+" : ""}${statcastMatchup.kPctAdjWhiff}` : ""}${statcastMatchup.kPctAdjMixK != null ? ` · pitch-K% ${statcastMatchup.kPctAdjMixK >= 0 ? "+" : ""}${statcastMatchup.kPctAdjMixK}` : ""} → ${statcastMatchup.kPctAdj >= 0 ? "+" : ""}${statcastMatchup.kPctAdj} pp) · ` : ""}~${expectedBF.toFixed(0)} BF × ${effKPct.toFixed(1)}% eff K% ⇒ ${analyticalK} K.`,
         `K/9 display ${useK9.toFixed(1)} · implied ${adjK9.toFixed(1)} K/9 from BF path.`,
-        `${e.oppTeam.teamName||e.oppTeam.name} K% vs ${p.hand}HP: ${oppKPct.toFixed(1)}%. ${lineupSrc}.${h2hKNote}`,
+        `${e.oppTeam.teamName||e.oppTeam.name} K% vs ${p.hand}HP: ${oppKPct.toFixed(1)}% · OBP vs ${p.hand}HP ${(obpVsHand * 100).toFixed(1)}% (contact vs hand in model). ${lineupSrc}.${h2hKNote}`,
         recentNote + ipNote,
         umpSONote + weatherSONote + parkSONote,
         marketNote,
