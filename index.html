@@ -2675,8 +2675,13 @@ async function getPitcherData(id, season) {
     fetches.push(mlbGet(`/people/${id}/stats?stats=gameLog&group=pitching&gameType=S&season=${season + 1}&limit=5`));
   }
 
-  const settled = await Promise.allSettled(fetches);
-  const [personData, statsData, logData, springStatsData, springLogData] = settled;
+  let settled = await Promise.allSettled(fetches);
+  let [personData, statsData, logData, springStatsData, springLogData] = settled;
+  if (personData.status !== "fulfilled" || statsData.status !== "fulfilled") {
+    await new Promise((r) => setTimeout(r, 320));
+    settled = await Promise.allSettled(fetches);
+    [personData, statsData, logData, springStatsData, springLogData] = settled;
+  }
 
   // Hand + current team
   let hand = "R";
@@ -3130,12 +3135,34 @@ async function getPreviousLineup(teamId, dateStr) {
   return [];
 }
 
+/** When MLB omits probablePitcher but hydrate=lineups has the SP in the lineup array. */
+function pitcherFromScheduleLineup(scheduleGame, side) {
+  if (!scheduleGame?.lineups) return null;
+  const key = side === "away" ? "awayPlayers" : "homePlayers";
+  const arr = scheduleGame.lineups[key];
+  if (!arr || !arr.length) return null;
+  for (const row of arr) {
+    if (!row?.id) continue;
+    const pos = (row.position?.abbreviation || row.gamePosition?.abbreviation || row.pos || "")
+      .toString()
+      .toUpperCase();
+    if (pos === "P" || pos === "SP" || pos === "RP") {
+      return { id: row.id, fullName: row.fullName || row.name || "Unknown" };
+    }
+  }
+  return null;
+}
+
 // Resolve the starting pitcher for a game/side using a 2-tier fallback:
 //   1. probablePitcher from schedule hydration
+//   1b. pitcher row from schedule lineups (hydrate=lineups)
 //   2. Actual starter pulled from boxscore (for started/finished games)
-async function resolvePitcher(probFromSchedule, gamePk, side, gameInfo, gameStatus) {
+async function resolvePitcher(probFromSchedule, gamePk, side, gameInfo, gameStatus, scheduleGame) {
   // Tier 1 – schedule probable pitcher (most common for pre-game)
   if (probFromSchedule && probFromSchedule.id) return probFromSchedule;
+
+  const fromSchedLu = pitcherFromScheduleLineup(scheduleGame, side);
+  if (fromSchedLu?.id) return fromSchedLu;
 
   // Tier 2 – boxscore confirmed starter (game already underway or finished)
   const absState = String(gameStatus?.abstractGameState || "").toLowerCase();
@@ -3178,8 +3205,8 @@ async function buildNRFI(games, season) {
 
     // Step 2: resolve probable pitcher — MLB schedule, then boxscore, then PP team map
     const [awRes, hmRes] = await Promise.all([
-      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team, g.status),
-      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team, g.status),
+      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team, g.status, g),
+      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team, g.status, g),
     ]);
     let apProb = awRes.prob, hpProb = hmRes.prob;
     const apSrc  = awRes.src,  hpSrc  = hmRes.src;
@@ -3599,14 +3626,14 @@ async function isPlayerOnTeam(playerId, teamId) {
   return roster.includes(playerId);
 }
 
-async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, gameStatus) {
+async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, gameStatus, scheduleGame) {
   // Derive the expected team abbreviation from the team ID (abbreviation is absent in schedule data)
   const expAbbr    = teamAbbr(mlbTeam);   // e.g. "PHI" — always works via MLB_ID_TO_ABBR
   const expTeamId  = mlbTeam?.id;
   const ppLoaded   = Object.keys(ppLines).length > 0;
 
   // 1. Standard MLB schedule / boxscore pitcher
-  const mlb = await resolvePitcher(schedProb, gamePk, side, gameInfo, gameStatus);
+  const mlb = await resolvePitcher(schedProb, gamePk, side, gameInfo, gameStatus, scheduleGame);
   if (mlb && mlb.id) {
     if (expAbbr && mlb.fullName) {
       const nk = normName(mlb.fullName);
@@ -3678,12 +3705,16 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, 
         continue;
       }
 
-      // Check 4: MLB people API team ID confirmation (fail-open: only reject on confirmed mismatch)
+      // Check 4: MLB "current team" can lag trades/IL; if Odds-API already tagged this K-line to our team, trust it
       if (expTeamId) {
         const currentTeamId = ident.currentTeamId || null;
         if (currentTeamId && currentTeamId !== expTeamId) {
-          console.warn(`[MLB] PP fallback skip: ${ppE.rawName} teamId=${currentTeamId} ≠ ${expTeamId}`);
-          continue;
+          const oddsTeamMatches =
+            ppE.team && expAbbr && ppE.team.toUpperCase() === expAbbr.toUpperCase();
+          if (!oddsTeamMatches) {
+            console.warn(`[MLB] PP fallback skip: ${ppE.rawName} teamId=${currentTeamId} ≠ ${expTeamId}`);
+            continue;
+          }
         }
       }
 
@@ -3734,8 +3765,8 @@ async function buildSO(games, season) {
     // Resolve pitchers — MLB schedule first, then PP team map fallback
     const gameInfo = await getGameInfo(g.gamePk);
     const [awRes, hmRes] = await Promise.all([
-      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team, g.status),
-      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team, g.status),
+      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team, g.status, g),
+      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team, g.status, g),
     ]);
 
     const entries = [
@@ -3971,6 +4002,7 @@ async function buildSO(games, season) {
       if (h2hBlended) confidence += 2;
       // Near-coin-flip vs book: don’t read 65%+ confidence when edge is tiny
       if (ppEntry && Math.abs(edge) < 0.38) confidence -= 3;
+      if (!e.prob) confidence = Math.min(confidence, 54);
       confidence = Math.max(48, Math.min(88, confidence));
       const pick = `${takeOver ? "Over" : "Under"} ${line.toFixed(1)}`;
 
@@ -3988,6 +4020,7 @@ async function buildSO(games, season) {
         (statcastMatchup?.kPctAdj != null ? 0.09 : 0) +
         Math.min(0.3, Math.max(0, (effKPct - 20) * 0.017));
       soModelRating = Math.min(6.5, Math.max(3.05, parseFloat(soModelRating.toFixed(2))));
+      if (!e.prob) soModelRating = Math.min(soModelRating, 4.12);
 
       // Source label for this pitcher
       const starter = e.isHome ? gameInfo.homeStarter : gameInfo.awayStarter;
@@ -4056,6 +4089,7 @@ async function buildSO(games, season) {
 
       results.push({
         gamePk: g.gamePk,
+        isHome: e.isHome,
         pitcher: e.prob?.fullName || "TBD",
         pitcherSrc,
         hand: p.hand,
@@ -4100,6 +4134,7 @@ async function buildSO(games, season) {
         fdUnderAm: fdB?.underAm ?? null,
         dkOverAm: dkB?.overAm ?? null,
         dkUnderAm: dkB?.underAm ?? null,
+        unresolvedPitcher: !e.prob,
       });
     }
   });
@@ -4816,8 +4851,8 @@ async function buildHitters(games, season) {
     const aw = g.teams.away, hm = g.teams.home;
     const gameInfo = await getGameInfo(g.gamePk);
     const [awRes, hmRes] = await Promise.all([
-      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team, g.status),
-      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team, g.status),
+      resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team, g.status, g),
+      resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team, g.status, g),
     ]);
     let awProb = awRes.prob, hmProb = hmRes.prob;
     const homeAbbr = teamAbbr(hm.team);
@@ -5309,10 +5344,17 @@ async function toggleBatterLog(playerId, season) {
 
 function renderSOCard(g) {
   const color = confColor(g.confidence);
-  const id    = `c${g.gamePk}-${g.pitcher.replace(/\s/g,"")}`;
+  const idSafe = `${g.gamePk}-${g.isHome ? "h" : "a"}-${String(g.team || "").replace(/[^a-zA-Z0-9]/g, "")}-${(g.pitcher || "x").replace(/\s/g, "")}`;
+  const id    = `c${idSafe}`;
   const dir   = g.pickOver != null ? (g.pickOver ? "OVER" : "UNDER") : (g.edge >= 0 ? "OVER" : "UNDER");
+  const placeholderBanner = g.unresolvedPitcher
+    ? `<div style="padding:10px 14px;background:rgba(251,191,36,.1);border-bottom:1px solid rgba(251,191,36,.28);font-size:12px;color:#fcd34d;line-height:1.45">
+        <strong style="color:#fbbf24">Starter not loaded</strong> — MLB hasn’t named a probable yet (or books/IDs didn’t match). Stats shown are <strong>league-average placeholders</strong>; the CALC line is a rough benchmark only. Use <strong>Refresh</strong> closer to first pitch.
+      </div>`
+    : "";
   return `
     <div class="game-card" id="${id}">
+      ${placeholderBanner}
       <div class="card-hd" onclick="toggle('${id}')">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px">
