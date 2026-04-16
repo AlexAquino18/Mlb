@@ -1699,7 +1699,7 @@ async function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v29:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v30:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -1719,7 +1719,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410oddsv29" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410oddsv30" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -1772,27 +1772,33 @@ async function loadPPLines(games, dateStr) {
         showPPDebug(debugLines);
         return;
       }
+      const prevDay = addCalendarDaysYMD(dateStr, -1);
       const nextDay = addCalendarDaysYMD(dateStr, 1);
+      const j0 = await fetchOddsPayload(prevDay);
       const j1 = await fetchOddsPayload(dateStr);
       const j2 = await fetchOddsPayload(nextDay);
       const mergedRows = [];
+      if (j0?.ok && j0.rows) mergedRows.push(...j0.rows);
       if (j1?.ok && j1.rows) mergedRows.push(...j1.rows);
       if (j2?.ok && j2.rows) mergedRows.push(...j2.rows);
       const rowsOut = dedupeOddsRows(mergedRows);
-      if (j1?.ok || j2?.ok) {
+      if (j0?.ok || j1?.ok || j2?.ok) {
         payload = {
           ok: true,
           rows: rowsOut,
           meta: {
-            ...(j1?.meta || j2?.meta || {}),
-            apiCalls: (j1?.meta?.apiCalls ?? 0) + (j2?.meta?.apiCalls ?? 0),
+            ...(j1?.meta || j2?.meta || j0?.meta || {}),
+            apiCalls:
+              (j0?.meta?.apiCalls ?? 0) + (j1?.meta?.apiCalls ?? 0) + (j2?.meta?.apiCalls ?? 0),
             propRows: rowsOut.length,
-            oddsDaysMerged: `${dateStr}+${nextDay}`,
+            oddsDaysMerged: `${prevDay}+${dateStr}+${nextDay}`,
           },
         };
         oddsCacheSet(dateStr, payload);
       } else {
-        debugLines.push(`Odds-API: ${(j1 && j1.error) || (j2 && j2.error) || "request failed"}`);
+        debugLines.push(
+          `Odds-API: ${(j0 && j0.error) || (j1 && j1.error) || (j2 && j2.error) || "request failed"}`
+        );
       }
     }
 
@@ -2701,15 +2707,22 @@ function addCalendarDaysYMD(ymd, delta) {
   const dt = new Date(p[0], p[1] - 1, p[2] + delta);
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
 }
-/** Keep games on the picked calendar day — MLB may bucket late West games under the next UTC day. */
+/** Local calendar day of first pitch (matches <input type="date"> in the user's timezone). */
+function gameLocalCalendarDay(game) {
+  if (!game?.gameDate) return "";
+  const d = new Date(game.gameDate);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+/**
+ * Slate filter: use gameDate→local day only. officialDate can disagree with first pitch for West games
+ * and wrongly kept “tonight” games on “tomorrow” in the picker.
+ */
 function gameMatchesRequestedDate(game, requestedDate) {
   if (!requestedDate || !game) return true;
+  const localDay = gameLocalCalendarDay(game);
+  if (localDay) return localDay === requestedDate;
   const od = (game.officialDate || "").slice(0, 10);
   if (od) return od === requestedDate;
-  if (game.gameDate) {
-    const d = new Date(game.gameDate);
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` === requestedDate;
-  }
   return true;
 }
 function dedupeOddsRows(rows) {
@@ -2773,22 +2786,25 @@ async function getPersonBatSide(id) {
 async function getSchedule(date) {
   const mon = parseInt(date.split("-")[1], 10);
   const gameTypes = mon <= 2 ? ["S", "R"] : ["R", "S"];
-  const flattenGames = (d, requestedDate) =>
-    (d.dates || []).flatMap((dt) => {
-      const bucketDate = (dt.date || "").slice(0, 10);
-      if (requestedDate && bucketDate && bucketDate !== requestedDate) return [];
-      return ((dt && dt.games) || [])
-        .filter((g) => g && g.gamePk)
-        .filter((g) => gameMatchesRequestedDate(g, requestedDate));
-    });
-  for (const gt of gameTypes) {
-    try {
-      const d = await mlbGet(`/schedule?sportId=1&date=${date}&hydrate=probablePitchers,lineups&gameType=${gt}`);
-      const games = flattenGames(d, date);
-      if (games.length > 0) return games;
-    } catch (_) {}
+  /** MLB /schedule?date= buckets can be off by a day vs local first pitch — query neighbors and filter by gameDate. */
+  const datesToQuery = [addCalendarDaysYMD(date, -1), date, addCalendarDaysYMD(date, 1)];
+  const seen = new Set();
+  const out = [];
+  for (const ds of datesToQuery) {
+    for (const gt of gameTypes) {
+      try {
+        const d = await mlbGet(`/schedule?sportId=1&date=${ds}&hydrate=probablePitchers,lineups&gameType=${gt}`);
+        const games = (d.dates || []).flatMap((dt) => ((dt && dt.games) || []).filter((g) => g && g.gamePk));
+        for (const g of games) {
+          if (seen.has(g.gamePk)) continue;
+          if (!gameMatchesRequestedDate(g, date)) continue;
+          seen.add(g.gamePk);
+          out.push(g);
+        }
+      } catch (_) {}
+    }
   }
-  return [];
+  return out;
 }
 
 async function getPitcherData(id, season) {
