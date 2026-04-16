@@ -1396,6 +1396,8 @@ function disambiguateBarePlayerProp(row, g, cl) {
     g.teams?.away?.probablePitcher?.fullName;
   if (mp) return { kind: "pitcher_k" };
   if (mh) {
+    // 3.5–15 K alts look like hits lines in band checks; DH in lineup (e.g. Ohtani) must stay pitcher SO path.
+    if (!Number.isNaN(h) && lineLooksLikePitcherKAlt(h) && h >= 2.5) return { kind: "so_ambiguous" };
     if (!Number.isNaN(h) && h <= 4.5) return { kind: "hitter", statKey: "hits" };
     if (!Number.isNaN(h) && h <= 12) return { kind: "hitter", statKey: "tb" };
     return { kind: "hitter", statKey: "hits" };
@@ -1717,7 +1719,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410oddsv27" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410oddsv28" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -1998,13 +2000,17 @@ function findPPForPitcher(fullName, teamAbbr, scheduleGame) {
       if (!v?.rawName) continue;
       if (pitcherLastToken(v.rawName) !== lastTok) continue;
       if (!fuzzyNameEq(fullName, v.rawName)) continue;
+      const sameGame =
+        scheduleGame &&
+        v.gamesHint &&
+        (eventMatchesGame(v.gamesHint.home, v.gamesHint.away, scheduleGame) ||
+          eventMatchesGameLoose(v.gamesHint.home, v.gamesHint.away, scheduleGame));
       if (v.team) {
-        if (canonAbbrForCompare(v.team) !== canonAbbrForCompare(ta)) continue;
-        return v;
+        if (canonAbbrForCompare(v.team) === canonAbbrForCompare(ta)) return v;
+        if (sameGame) return v; // book team tag stale vs MLB (trades / wrong side)
+        continue;
       }
-      if (scheduleGame && v.gamesHint && eventMatchesGame(v.gamesHint.home, v.gamesHint.away, scheduleGame)) {
-        return v;
-      }
+      if (sameGame) return v;
     }
   }
   return lookupPP(fullName);
@@ -2021,17 +2027,30 @@ function rowLooksLikePitcherStrikeout(row) {
   return !Number.isNaN(h) && lineLooksLikePitcherKAlt(h) && h >= 2.5;
 }
 
-function findPPFromRawOddsRows(fullName, teamAbbr, scheduleGame) {
+/**
+ * @param opts.trustBoxscore — schedule probable can be TBD while boxscore starter is set; allow tying this row to `scheduleGame` when strict event match fails.
+ */
+function findPPFromRawOddsRows(fullName, teamAbbr, scheduleGame, opts) {
   if (!lastOddsRows.length || !fullName || fullName === "TBD" || !scheduleGame) return null;
   const ta = teamAbbr ? String(teamAbbr).toUpperCase() : "";
   const lastTok = pitcherLastToken(fullName);
+  const ph = scheduleGame.teams?.home?.probablePitcher?.fullName;
+  const pa = scheduleGame.teams?.away?.probablePitcher?.fullName;
+  const matchesProbable =
+    (ph && fuzzyNameEq(fullName, ph)) || (pa && fuzzyNameEq(fullName, pa));
+  const trustBoxscore = !!(opts && opts.trustBoxscore);
   for (const row of lastOddsRows) {
     if (row.hdp == null || !row.player) continue;
-    const gg = findGameForOddsRow(row, [scheduleGame]);
-    if (!gg || gg.gamePk !== scheduleGame.gamePk) continue;
     if (pitcherLastToken(row.player) !== lastTok) continue;
     if (!fuzzyNameEq(fullName, row.player)) continue;
     if (!rowLooksLikePitcherStrikeout(row)) continue;
+    let gg = findGameForOddsRow(row, [scheduleGame]);
+    if (!gg || gg.gamePk !== scheduleGame.gamePk) {
+      if (scheduleGame.gamePk == null) continue;
+      if (matchesProbable) gg = scheduleGame;
+      else if (trustBoxscore) gg = scheduleGame;
+      else continue;
+    }
     const line = Number(row.hdp);
     return {
       line,
@@ -3918,7 +3937,11 @@ async function buildSO(games, season) {
       let pitcherName = e.prob?.fullName || "TBD";
       const soTeamAbbr = teamAbbr(e.pitchTeam);
       let ppEntry = findPPForPitcher(pitcherName, soTeamAbbr, g);
-      if (!ppEntry) ppEntry = findPPFromRawOddsRows(pitcherName, soTeamAbbr, g);
+      if (!ppEntry) {
+        ppEntry = findPPFromRawOddsRows(pitcherName, soTeamAbbr, g, {
+          trustBoxscore: e.probSrc === "confirmed",
+        });
+      }
       const ppDataLoaded = Object.keys(ppLines).length > 0 || lastOddsRows.length > 0;
       if (e.prob && ppDataLoaded && soTeamAbbr && ppEntry?.team && canonAbbrForCompare(ppEntry.team) !== canonAbbrForCompare(soTeamAbbr)) {
         const sameGame =
@@ -3926,7 +3949,9 @@ async function buildSO(games, season) {
           g &&
           (eventMatchesGame(ppEntry.gamesHint.home, ppEntry.gamesHint.away, g) ||
             eventMatchesGameLoose(ppEntry.gamesHint.home, ppEntry.gamesHint.away, g));
-        const rawFromEvent = findPPFromRawOddsRows(pitcherName, soTeamAbbr, g);
+        const rawFromEvent = findPPFromRawOddsRows(pitcherName, soTeamAbbr, g, {
+          trustBoxscore: e.probSrc === "confirmed",
+        });
         const staleOddsTeamTag =
           ppEntry.rawName &&
           e.prob.fullName &&
