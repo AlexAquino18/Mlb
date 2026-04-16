@@ -391,19 +391,9 @@
 <script>
 "use strict";
 const MLB    = "https://statsapi.mlb.com/api/v1";
-const PP     = "https://api.prizepicks.com";
 const PROXY  = "https://corsproxy.io/?url=";
 const PROXY2 = "https://api.allorigins.win/raw?url=";
 const PROXY3 = "https://api.codetabs.com/v1/proxy?quest=";
-// ↓ Add all your Deno proxy URLs here — the app rotates through them automatically.
-//   When one gets blocked, the next one is tried. Create new ones at dash.deno.com.
-const DENO_PROXIES = [
-  "https://mlb-pp-proxy.alexaquinojr2015.workers.dev",
-  "https://epic-condor-69.alexaquino18.deno.net",
-  "https://thick-newt-44.alexaquino18.deno.net",
-  "https://kind-gecko-64.alexaquino18.deno.net",
-];
-const CF_WORKER = DENO_PROXIES[0]; // kept for compatibility
 
 let activeTab    = "nrfi";
 let activeFilter = "all";
@@ -817,7 +807,7 @@ function buildStrikeoutTrackingCsv(data, dateStr) {
     "line_source",
   ];
   const rows = (data || []).map((g) => {
-    const pp = lookupPP(g.pitcher);
+    const pp = findPPForPitcher(g.pitcher, g.team) || lookupPP(g.pitcher);
     const dkHdp = pp?.books?.DraftKings?.hdp;
     const projR = g.projection != null ? Number(Number(g.projection).toFixed(1)) : "";
     return [
@@ -1103,110 +1093,6 @@ async function mlbGet(path) {
     } catch (_) {}
   }
   throw new Error("Network error: " + url);
-}
-
-// ── PrizePicks response cache (localStorage, TTL = 60 min) ───────────────────
-const PP_CACHE_TTL = 60 * 60 * 1000;
-function ppCacheKey(path) { return "mlb_pp_v1:" + path; }
-function ppCacheGet(path) {
-  try {
-    const raw = localStorage.getItem(ppCacheKey(path));
-    if (!raw) return null;
-    const { ts, data } = JSON.parse(raw);
-    if (Date.now() - ts > PP_CACHE_TTL) return null;
-    return data;
-  } catch (_) { return null; }
-}
-function ppCacheSet(path, data) {
-  try { localStorage.setItem(ppCacheKey(path), JSON.stringify({ ts: Date.now(), data })); } catch (_) {}
-}
-function ppCacheGetStale(path) {
-  try {
-    const raw = localStorage.getItem(ppCacheKey(path));
-    if (!raw) return null;
-    const { data } = JSON.parse(raw);
-    return data || null;
-  } catch (_) { return null; }
-}
-
-async function ppGet(path) {
-  // ── 1. Fresh cache hit ────────────────────────────────────────────────────
-  const cached = ppCacheGet(path);
-  if (cached) return cached;
-
-  const fullUrl = PP + path;
-
-  const safeParseResponse = async (r) => {
-    if (!r) return null;
-    // Accept 200 or 304; anything else (403, 429, 502) skip to next proxy
-    if (!r.ok && r.status !== 304) return null;
-    let text;
-    try { text = await r.text(); } catch (_) { return null; }
-    if (!text || !String(text).trim()) return null;
-    let j;
-    try { j = JSON.parse(text); } catch (_) { return null; }
-    if (j && j.error && j.data === undefined && j.included === undefined) return null;
-    if (j && j.errors) return null;
-    return j;
-  };
-
-  const netlifyQs = "/.netlify/functions/pp?path=" + encodeURIComponent(path);
-
-  // Build ordered proxy list — own edge function is far most reliable
-  const urls = [];
-
-  // 1a. All Deno proxies — tried in order, rotates automatically when one is blocked
-  for (const p of DENO_PROXIES) {
-    if (p) urls.push(p.replace(/\/$/, "") + "?path=" + encodeURIComponent(path));
-  }
-
-  // 1b. Runtime override — window variable OR localStorage (survives refresh)
-  const _proxyOverride = (typeof window !== "undefined" && window.MLB_EDGE_PP_PROXY)
-    ? String(window.MLB_EDGE_PP_PROXY)
-    : (() => { try { return localStorage.getItem("mlb_pp_proxy_override") || ""; } catch (_) { return ""; } })();
-  if (_proxyOverride && _proxyOverride !== CF_WORKER) {
-    urls.push(_proxyOverride.replace(/\/$/, "") + "?path=" + encodeURIComponent(path));
-  }
-
-  // 2. Own edge function — only try the one that matches the current host
-  if (typeof location !== "undefined" && location.protocol !== "file:") {
-    const host = location.hostname;
-    const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
-    const isVercel  = host.includes("vercel.app");
-    const isLocal   = host === "localhost" || host === "127.0.0.1";
-    if (isNetlify || isLocal) urls.push(location.origin + netlifyQs);
-    if (isVercel  || isLocal) urls.push(location.origin + "/api/pp?path=" + encodeURIComponent(path));
-  }
-
-  // 3. Local dev server (npm start → port 8080) or netlify dev (port 8888)
-  if (typeof location !== "undefined" &&
-      (location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
-    if (location.port !== "8080") urls.push("http://127.0.0.1:8080" + netlifyQs);
-    if (location.port !== "8888") urls.push("http://127.0.0.1:8888" + netlifyQs);
-  }
-
-  // 4. corsproxy.io
-  urls.push(PROXY + encodeURIComponent(fullUrl));
-  // 5. codetabs — different IP pool
-  urls.push(PROXY3 + encodeURIComponent(fullUrl));
-  for (const u of urls) {
-    try {
-      const r = await fetchTimeout(u, 18000, { headers: { Accept: "application/json" } });
-      const j = await safeParseResponse(r);
-      if (j && (j.data !== undefined || j.included !== undefined || j.meta !== undefined)) {
-        ppCacheSet(path, j);
-        return j;
-      }
-    } catch (_) {}
-  }
-
-  // ── All proxies failed — return stale cache if available ──────────────────
-  const stale = ppCacheGetStale(path);
-  if (stale) {
-    console.warn("[PP] All proxies failed; using stale cache for", path);
-    return stale;
-  }
-  return null;
 }
 
 // ─── SPORTSBOOK LINES (Odds-API.io) ─────────────────────────────────────────
@@ -1558,6 +1444,13 @@ async function resolveKAccumTeams(kAccum, games) {
         if (onH && !onA) rec.team = ha;
         else if (onA && !onH) rec.team = aa;
       }
+      // Schedule probable (when present) beats stale MLB "current team" for tagging Odds rows to a side.
+      if (!rec.team) {
+        const pa = gg.teams?.away?.probablePitcher?.fullName;
+        const ph = gg.teams?.home?.probablePitcher?.fullName;
+        if (pa && fuzzyNameEq(rec.rawName, pa)) rec.team = aa;
+        else if (ph && fuzzyNameEq(rec.rawName, ph)) rec.team = ha;
+      }
     } catch (_) {}
   });
 }
@@ -1724,7 +1617,7 @@ async function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v22:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v23:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1994,6 +1887,27 @@ function lookupPPByTeam(fullName, teamAbbr) {
   const lastName = cleanName(fullName).split(/\s+/).pop();
   const teamKey  = `${teamAbbr.toLowerCase()}:${lastName}`;
   return ppLines[teamKey] || null;
+}
+
+/** Odds-API lines: prefer team:lastname, then any entry whose book team matches this game + last name, then global name. */
+function findPPForPitcher(fullName, teamAbbr) {
+  if (!fullName || fullName === "TBD" || Object.keys(ppLines).length === 0) return null;
+  const ta = teamAbbr ? String(teamAbbr).toUpperCase() : "";
+  if (ta) {
+    const scoped = lookupPPByTeam(fullName, teamAbbr);
+    if (scoped) return scoped;
+    const last = cleanName(fullName).split(/\s+/).filter(Boolean).pop() || "";
+    if (last) {
+      for (const [k, v] of Object.entries(ppLines)) {
+        if (k.includes(":")) continue;
+        if (!v?.rawName || !v.team) continue;
+        if (String(v.team).toUpperCase() !== ta) continue;
+        const vl = cleanName(v.rawName).split(/\s+/).pop();
+        if (vl === last) return v;
+      }
+    }
+  }
+  return lookupPP(fullName);
 }
 
 // ─── PP TEAM MAP ──────────────────────────────────────────────────────────────
@@ -3787,9 +3701,9 @@ async function buildSO(games, season) {
       const soAbbrBad = p.currentTeamAbbr && soExpAbbr && p.currentTeamAbbr !== soExpAbbr;
       const soIdBad   = p.currentTeamId   && soExpId   && p.currentTeamId   !== soExpId;
       if (e.prob && (soAbbrBad || soIdBad)) {
-        console.warn(`[MLB] SO: ${e.prob.fullName} currentTeam=${p.currentTeamAbbr||p.currentTeamId} ≠ ${soExpAbbr||soExpId} — resetting to TBD`);
-        e.prob = null;
-        p = AVG_PITCHER;
+        console.warn(
+          `[MLB] SO: ${e.prob.fullName} stats API currentTeam=${p.currentTeamAbbr || p.currentTeamId} ≠ game ${soExpAbbr || soExpId} — keeping starter (game + Odds lines are source of truth)`
+        );
       }
 
       // Get team fallback AND lineup-level K% (per-batter vs pitcher's hand)
@@ -3863,20 +3777,13 @@ async function buildSO(games, season) {
 
       let pitcherName = e.prob?.fullName || "TBD";
       const soTeamAbbr = teamAbbr(e.pitchTeam);
-      // Prefer team:lastname — avoids global name collisions; books tag K lines to the correct side.
-      let ppEntry = lookupPPByTeam(pitcherName, soTeamAbbr) || lookupPP(pitcherName);
-
+      let ppEntry = findPPForPitcher(pitcherName, soTeamAbbr);
       const ppDataLoaded = Object.keys(ppLines).length > 0;
       if (e.prob && ppDataLoaded && soTeamAbbr && ppEntry?.team && ppEntry.team.toUpperCase() !== soTeamAbbr.toUpperCase()) {
-        const scoped = lookupPPByTeam(pitcherName, soTeamAbbr);
-        if (scoped) {
-          ppEntry = scoped;
-        } else {
-          console.warn(
-            `[MLB] SO: book K-line tagged ${ppEntry.team} for ${pitcherName} (${soTeamAbbr}) — using calc line; refresh after odds re-sync`
-          );
-          ppEntry = null;
-        }
+        console.warn(
+          `[MLB] SO: book K-line tagged ${ppEntry.team} for ${pitcherName} (${soTeamAbbr}) — calc line (no team-scoped match)`
+        );
+        ppEntry = null;
       }
 
       if (!ppEntry && pitcherName !== "TBD" && ppDataLoaded) {
@@ -4864,10 +4771,9 @@ async function buildHitters(games, season) {
     const ppDataLoaded = Object.keys(ppLines).length > 0;
     const checkPitcherTeam = (prob, expAbbr) => {
       if (!prob) return prob;
-      const ppE = lookupPP(prob.fullName);
-      if (ppDataLoaded && ppE?.team && expAbbr && ppE.team.toUpperCase() !== expAbbr) {
-        console.warn(`[MLB] Hitters: ${prob.fullName} PP team=${ppE.team} ≠ ${expAbbr} — resetting to TBD`);
-        return null;
+      const ppE = lookupPPByTeam(prob.fullName, expAbbr) || lookupPP(prob.fullName);
+      if (ppDataLoaded && ppE?.team && expAbbr && ppE.team.toUpperCase() !== expAbbr.toUpperCase()) {
+        console.warn(`[MLB] Hitters: book prop team=${ppE.team} ≠ ${expAbbr} for ${prob.fullName} — keeping MLB starter`);
       }
       return prob;
     };
