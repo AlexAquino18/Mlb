@@ -1265,9 +1265,9 @@ function ambiguousStrikeoutCountsAsPitcher(row, g, player) {
     if (Number.isNaN(h)) return true;
     return h >= 2.5;
   }
-  // Schedule lists probables but this row names someone else (late swap, wrong API field): high K lines are still SP props.
+  // Schedule lists probables but this row names someone else (late swap, opener): 2.5–4.5 K alts are still pitcher props.
   const h = numericLineFromRow(row);
-  if (!Number.isNaN(h) && lineLooksLikePitcherKAlt(h) && h >= 5) return true;
+  if (!Number.isNaN(h) && lineLooksLikePitcherKAlt(h) && h >= 2.5) return true;
   return false;
 }
 
@@ -1299,7 +1299,12 @@ function teamAbbrForHitter(playerName, g) {
     if (!pl || !abbr) continue;
     for (const p of pl) {
       const fn = p.fullName || p.name;
-      if (fn && fuzzyNameEq(playerName, fn)) return abbr;
+      if (!fn || !fuzzyNameEq(playerName, fn)) continue;
+      const pos = (p.position?.abbreviation || p.gamePosition?.abbreviation || p.pos || "")
+        .toString()
+        .toUpperCase();
+      if (pos === "P" || pos === "SP" || pos === "RP" || pos === "TWP") continue;
+      return abbr;
     }
   }
   return "";
@@ -1346,25 +1351,21 @@ function disambiguateBarePlayerProp(row, g, cl) {
     if (!Number.isNaN(h) && h <= 12) return { kind: "hitter", statKey: "tb" };
     return { kind: "hitter", statKey: "hits" };
   }
-  // No statHint + no lineup yet: DK/FD batter O/U almost always 0.5–3.5; pitcher K ladders usually 4+. (Avoid h<=2.5-only which tagged ~all rows.)
+  // Batter hit lines are usually ≤2.5; 3.5 is a common pitcher-K alt — do not tag as hits.
   if (
     !mp &&
     (cl.kind === "skip" || cl.kind === "so_ambiguous") &&
     !Number.isNaN(h) &&
     Math.abs(h * 2 - Math.round(h * 2)) < 1e-6 &&
     h >= 0.5 &&
-    h <= 3.5
+    h <= 2.5
   ) {
     return { kind: "hitter", statKey: "hits" };
   }
   if (cl.kind === "so_ambiguous" || cl.kind === "skip") {
     if (!Number.isNaN(h) && lineLooksLikePitcherKAlt(h)) {
       if (h >= 5) return { kind: "so_ambiguous" };
-      if (h >= 2.5 && h < 5) {
-        if (!hasProb) return { kind: "so_ambiguous" };
-        if (h > 3.5) return { kind: "so_ambiguous" };
-        return { kind: "skip" };
-      }
+      if (h >= 2.5 && h < 5) return { kind: "so_ambiguous" };
     }
   }
   return cl;
@@ -1544,7 +1545,12 @@ async function applyOddsRowsToState(rows, games, debugLines) {
     const hasProbableStarter =
       g.teams?.home?.probablePitcher?.fullName ||
       g.teams?.away?.probablePitcher?.fullName;
-    if (hasProbableStarter && !nameMatchesProbable(player, g) && cl.kind === "so_ambiguous") continue;
+    if (hasProbableStarter && !nameMatchesProbable(player, g) && cl.kind === "so_ambiguous") {
+      const hRow = numericLineFromRow(row);
+      const looksLikePK =
+        !Number.isNaN(hRow) && lineLooksLikePitcherKAlt(hRow) && hRow >= 2.5;
+      if (!looksLikePK) continue;
+    }
 
     const nk = normName(player);
     const team = teamAbbrForPitcher(player, g);
@@ -1642,7 +1648,12 @@ async function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v24:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v26:" + dateStr; }
+function clearOddsCacheForDate(dateStr) {
+  try {
+    localStorage.removeItem(oddsCacheKey(dateStr));
+  } catch (_) {}
+}
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1657,7 +1668,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410teamid" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410oddsv26" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -1674,7 +1685,6 @@ function oddsIoFetchUrl(dateStr) {
 
 async function loadPPLines(games, dateStr) {
   if (ppLoaded) return;
-  ppLoaded = true;
   ppLines = {};
   ppHitterLines = {};
   ppNRFI = {};
@@ -1755,6 +1765,7 @@ async function loadPPLines(games, dateStr) {
     debugLines.push(`Team map keys: ${Object.keys(ppTeamMap).join(", ") || "(none — using odds event + MLB id for pitcher match)"}`);
     debugLines.push(`PP rows with event hint: ${ppHinted}/${ppPrimary}`);
     debugLines.push(`Hitter props (book): ${Object.keys(ppHitterLines).length} players`);
+    ppLoaded = true;
   } catch (e) {
     debugLines.push(`Error: ${e.message}`);
     setStatus("Sportsbook load failed — using calculated lines");
@@ -5670,6 +5681,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 });
 
 document.getElementById("refresh-btn").addEventListener("click", () => {
+  clearOddsCacheForDate(selectedDate || today());
   cache = { nrfi: null, strikeouts: null, hitters: null };
   ppLoaded = false; ppLines = {}; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
   ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
@@ -5677,9 +5689,14 @@ document.getElementById("refresh-btn").addEventListener("click", () => {
   [_lineup, _batterKPct, _pitcher, _teamSplit, _personBats].forEach(c => Object.keys(c).forEach(k => delete c[k]));
   loadTab(activeTab);
 });
-document.getElementById("retry-btn").addEventListener("click", () => loadTab(activeTab));
+document.getElementById("retry-btn").addEventListener("click", () => {
+  clearOddsCacheForDate(selectedDate || today());
+  ppLoaded = false;
+  loadTab(activeTab);
+});
 document.getElementById("date-picker").addEventListener("change", e => {
   selectedDate = e.target.value;
+  clearOddsCacheForDate(selectedDate);
   cache = { nrfi: null, strikeouts: null, hitters: null };
   ppLoaded = false; ppLines = {}; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
   ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
@@ -5694,6 +5711,7 @@ async function reloadStrikeoutsQuiet() {
   try {
     const games = await getSchedule(date);
     if (!games.length) return;
+    clearOddsCacheForDate(date);
     ppLoaded = false;
     await loadPPLines(games, date);
     const dateYear = parseInt(date.split("-")[0], 10);
@@ -5717,6 +5735,7 @@ setInterval(() => {
 function jumpTo(date) {
   selectedDate = date;
   document.getElementById("date-picker").value = date;
+  clearOddsCacheForDate(date);
   cache = { nrfi: null, strikeouts: null, hitters: null };
   ppLoaded = false; ppLines = {}; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
   ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
