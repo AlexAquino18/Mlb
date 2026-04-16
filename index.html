@@ -3075,11 +3075,18 @@ async function getGameInfo(gamePk) {
       return null;
     };
 
+    /** Pre-game boxscore often lists probable SP here when pitchers[] is still empty. */
+    const extractProbablePitcher = (teamData) => {
+      const pr = teamData?.probablePitcher;
+      if (pr?.id) return { id: pr.id, fullName: pr.fullName || "Unknown" };
+      return null;
+    };
+
     const result = {
       away:         extractLineup(d.teams?.away),
       home:         extractLineup(d.teams?.home),
-      awayStarter:  extractStarter(d.teams?.away),
-      homeStarter:  extractStarter(d.teams?.home),
+      awayStarter:  extractStarter(d.teams?.away) || extractProbablePitcher(d.teams?.away),
+      homeStarter:  extractStarter(d.teams?.home) || extractProbablePitcher(d.teams?.home),
     };
     _lineup[gamePk] = result;
     return result;
@@ -3154,27 +3161,21 @@ function pitcherFromScheduleLineup(scheduleGame, side) {
 }
 
 // Resolve the starting pitcher for a game/side using a 2-tier fallback:
-//   1. probablePitcher from schedule hydration
+//   1. probablePitcher from schedule hydration (or teams.away/home on schedule game)
 //   1b. pitcher row from schedule lineups (hydrate=lineups)
-//   2. Actual starter pulled from boxscore (for started/finished games)
+//   2. Boxscore: probablePitcher (preview) or confirmed starter from pitchers[] (live/final)
 async function resolvePitcher(probFromSchedule, gamePk, side, gameInfo, gameStatus, scheduleGame) {
   // Tier 1 – schedule probable pitcher (most common for pre-game)
   if (probFromSchedule && probFromSchedule.id) return probFromSchedule;
 
+  const teamSide = side === "away" ? scheduleGame?.teams?.away : scheduleGame?.teams?.home;
+  const probTeam = teamSide?.probablePitcher;
+  if (probTeam?.id) return probTeam;
+
   const fromSchedLu = pitcherFromScheduleLineup(scheduleGame, side);
   if (fromSchedLu?.id) return fromSchedLu;
 
-  // Tier 2 – boxscore confirmed starter (game already underway or finished)
-  const absState = String(gameStatus?.abstractGameState || "").toLowerCase();
-  const detState = String(gameStatus?.detailedState || "").toLowerCase();
-  const allowBoxscoreStarter =
-    absState === "live" ||
-    absState === "final" ||
-    detState.includes("in progress") ||
-    detState.includes("final") ||
-    detState.includes("completed");
-  if (!allowBoxscoreStarter) return null;
-
+  // Tier 2 – boxscore: probable SP (preview) or confirmed starter (live/final)
   const starter = side === "away" ? gameInfo.awayStarter : gameInfo.homeStarter;
   if (starter && starter.id) return starter;
 
@@ -3635,34 +3636,26 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, 
   // 1. Standard MLB schedule / boxscore pitcher
   const mlb = await resolvePitcher(schedProb, gamePk, side, gameInfo, gameStatus, scheduleGame);
   if (mlb && mlb.id) {
+    // MLB schedule/boxscore is authoritative for *who* starts. PP maps are name-keyed and can
+    // point at the wrong team (stale trade, duplicate names, or book tagging). Never drop the
+    // MLB pitcher just because lookupPP disagrees — book K-lines still resolve via team-scoped paths.
     if (expAbbr && mlb.fullName) {
-      const nk = normName(mlb.fullName);
-      let mismatchReason = null;
-
-      // Check A: PP K-line lists this pitcher under a DIFFERENT team
       const ppEntry = lookupPP(mlb.fullName);
-      if (ppLoaded && ppEntry?.team && ppEntry.team.toUpperCase() !== expAbbr) {
-        mismatchReason = `PP-K team=${ppEntry.team}`;
+      if (ppLoaded && ppEntry?.team && ppEntry.team.toUpperCase() !== expAbbr.toUpperCase()) {
+        console.warn(
+          `[MLB] PP-K odds team=${ppEntry.team} ≠ game ${expAbbr} for ${mlb.fullName} — using MLB starter`
+        );
       }
-
-      // Check B: PP batter-line lists this player under a DIFFERENT team
-      if (!mismatchReason) {
-        const hitterEntry = lookupPPHitter(mlb.fullName, expAbbr);
-        if (hitterEntry?.team && hitterEntry.team.toUpperCase() !== expAbbr) {
-          mismatchReason = `PP-batter team=${hitterEntry.team}`;
-        }
+      const hitterEntry = lookupPPHitter(mlb.fullName, expAbbr);
+      if (hitterEntry?.team && hitterEntry.team.toUpperCase() !== expAbbr.toUpperCase()) {
+        console.warn(
+          `[MLB] PP batter-line team=${hitterEntry.team} ≠ ${expAbbr} for ${mlb.fullName} — using MLB starter`
+        );
       }
-
-      if (mismatchReason) {
-        console.warn(`[MLB] Skipping ${mlb.fullName} for ${expAbbr}: ${mismatchReason}`);
-        // fall through to PP team map
-      } else {
-        return { prob: mlb, src: schedProb?.id ? "probable" : "confirmed" };
-      }
-    } else {
-      return { prob: mlb, src: schedProb?.id ? "probable" : "confirmed" };
     }
-  } else if (mlb) {
+    return { prob: mlb, src: schedProb?.id ? "probable" : "confirmed" };
+  }
+  if (mlb) {
     return { prob: mlb, src: "confirmed" };
   }
 
