@@ -1699,7 +1699,7 @@ async function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v27:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v29:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -1719,7 +1719,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410oddsv28" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410oddsv29" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -1755,21 +1755,44 @@ async function loadPPLines(games, dateStr) {
 
     payload = oddsCacheGet(dateStr);
     if (!payload) {
-      const url = oddsIoFetchUrl(dateStr);
-      if (!url) {
+      const fetchOddsPayload = async (ds) => {
+        const url = oddsIoFetchUrl(ds);
+        if (!url) return null;
+        const r = await fetchTimeout(url, 28000, { headers: { Accept: "application/json" } });
+        try {
+          return await r.json();
+        } catch (_) {
+          return null;
+        }
+      };
+      const url0 = oddsIoFetchUrl(dateStr);
+      if (!url0) {
         debugLines.push("Use http://localhost:8080 or a deployed host — file:// cannot call /api/odds_io");
         setStatus("Sportsbook lines need a server — using calculated lines");
         showPPDebug(debugLines);
         return;
       }
-      const r = await fetchTimeout(url, 28000, { headers: { Accept: "application/json" } });
-      let j = null;
-      try { j = await r.json(); } catch (_) {}
-      if (j && j.ok) {
-        oddsCacheSet(dateStr, j);
-        payload = j;
+      const nextDay = addCalendarDaysYMD(dateStr, 1);
+      const j1 = await fetchOddsPayload(dateStr);
+      const j2 = await fetchOddsPayload(nextDay);
+      const mergedRows = [];
+      if (j1?.ok && j1.rows) mergedRows.push(...j1.rows);
+      if (j2?.ok && j2.rows) mergedRows.push(...j2.rows);
+      const rowsOut = dedupeOddsRows(mergedRows);
+      if (j1?.ok || j2?.ok) {
+        payload = {
+          ok: true,
+          rows: rowsOut,
+          meta: {
+            ...(j1?.meta || j2?.meta || {}),
+            apiCalls: (j1?.meta?.apiCalls ?? 0) + (j2?.meta?.apiCalls ?? 0),
+            propRows: rowsOut.length,
+            oddsDaysMerged: `${dateStr}+${nextDay}`,
+          },
+        };
+        oddsCacheSet(dateStr, payload);
       } else {
-        debugLines.push(`Odds-API: ${(j && j.error) || ("HTTP " + r.status)}`);
+        debugLines.push(`Odds-API: ${(j1 && j1.error) || (j2 && j2.error) || "request failed"}`);
       }
     }
 
@@ -1779,7 +1802,7 @@ async function loadPPLines(games, dateStr) {
       return;
     }
 
-    debugLines.push(`Server meta: apiCalls=${payload.meta?.apiCalls ?? "?"} events=${payload.meta?.eventCount ?? "?"} props=${payload.rows?.length ?? 0}`);
+    debugLines.push(`Server meta: apiCalls=${payload.meta?.apiCalls ?? "?"} events=${payload.meta?.eventCount ?? "?"} props=${payload.rows?.length ?? 0}${payload.meta?.oddsDaysMerged ? ` · merged ${payload.meta.oddsDaysMerged}` : ""}`);
     const rFirst = payload.rows && payload.rows[0];
     if (rFirst) {
       debugLines.push(`First prop row: home="${rFirst.home || ""}" away="${rFirst.away || ""}" market="${(rFirst.market || "").slice(0, 80)}" hdp=${rFirst.hdp != null ? rFirst.hdp : "?"} statHint=${rFirst.statHint || "—"}`);
@@ -2671,6 +2694,35 @@ function today() {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
 function pad(n) { return String(n).padStart(2,"0"); }
+/** Calendar YYYY-MM-DD `delta` days from `ymd` (local date math). */
+function addCalendarDaysYMD(ymd, delta) {
+  const p = String(ymd || "").split("-").map(Number);
+  if (p.length < 3) return ymd;
+  const dt = new Date(p[0], p[1] - 1, p[2] + delta);
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+/** Keep games on the picked calendar day — MLB may bucket late West games under the next UTC day. */
+function gameMatchesRequestedDate(game, requestedDate) {
+  if (!requestedDate || !game) return true;
+  const od = (game.officialDate || "").slice(0, 10);
+  if (od) return od === requestedDate;
+  if (game.gameDate) {
+    const d = new Date(game.gameDate);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` === requestedDate;
+  }
+  return true;
+}
+function dedupeOddsRows(rows) {
+  const seen = new Set();
+  const out = [];
+  for (const r of rows || []) {
+    const k = `${r.eventId ?? ""}|${r.player ?? ""}|${r.hdp}|${String(r.market ?? "").slice(0, 80)}|${r.bookmaker ?? ""}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(r);
+  }
+  return out;
+}
 function parseIP(s) {
   const p = String(s||"0").split(".");
   return (parseInt(p[0])||0) + (parseInt(p[1]||0)/3);
@@ -2721,12 +2773,18 @@ async function getPersonBatSide(id) {
 async function getSchedule(date) {
   const mon = parseInt(date.split("-")[1], 10);
   const gameTypes = mon <= 2 ? ["S", "R"] : ["R", "S"];
-  const flattenGames = (d) =>
-    (d.dates || []).flatMap((dt) => (dt && dt.games) || []).filter((g) => g && g.gamePk);
+  const flattenGames = (d, requestedDate) =>
+    (d.dates || []).flatMap((dt) => {
+      const bucketDate = (dt.date || "").slice(0, 10);
+      if (requestedDate && bucketDate && bucketDate !== requestedDate) return [];
+      return ((dt && dt.games) || [])
+        .filter((g) => g && g.gamePk)
+        .filter((g) => gameMatchesRequestedDate(g, requestedDate));
+    });
   for (const gt of gameTypes) {
     try {
       const d = await mlbGet(`/schedule?sportId=1&date=${date}&hydrate=probablePitchers,lineups&gameType=${gt}`);
-      const games = flattenGames(d);
+      const games = flattenGames(d, date);
       if (games.length > 0) return games;
     } catch (_) {}
   }
