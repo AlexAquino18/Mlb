@@ -3261,10 +3261,12 @@ async function buildNRFI(games, season) {
     const gameInfo = await getGameInfo(g.gamePk);
 
     // Step 2: resolve probable pitcher — MLB schedule, then boxscore, then PP team map
-    const [awRes, hmRes] = await Promise.all([
+    const [awRes0, hmRes0] = await Promise.all([
       resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team, g.status, g),
       resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team, g.status, g),
     ]);
+    const awRes = mergePitcherSource(awRes0, aw.probablePitcher, gameInfo.awayStarter);
+    const hmRes = mergePitcherSource(hmRes0, hm.probablePitcher, gameInfo.homeStarter);
     let apProb = awRes.prob, hpProb = hmRes.prob;
     const apSrc  = awRes.src,  hpSrc  = hmRes.src;
 
@@ -3773,6 +3775,20 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, 
   return { prob: null, src: "est" };
 }
 
+/** Odds matched the pitcher before MLB schedule/boxscore lined up — upgrade tag when MLB agrees on same ID. */
+function mergePitcherSource(res, schedProb, boxStarter) {
+  if (!res?.prob?.id) return res;
+  if (boxStarter?.id && res.prob.id === boxStarter.id) {
+    if (res.src === "confirmed") return res;
+    return { prob: res.prob, src: "confirmed" };
+  }
+  if (schedProb?.id && res.prob.id === schedProb.id) {
+    if (res.src === "confirmed" || res.src === "probable") return res;
+    return { prob: res.prob, src: "probable" };
+  }
+  return res;
+}
+
 /**
  * P(Over) for strikeout prop: Poisson tail with λ = projected mean K (discrete strikeouts).
  * Half-lines (e.g. 6.5): over wins at 7+ K. Replaces a normal approx for better calibration on counts.
@@ -3813,10 +3829,12 @@ async function buildSO(games, season) {
 
     // Resolve pitchers — MLB schedule first, then PP team map fallback
     const gameInfo = await getGameInfo(g.gamePk);
-    const [awRes, hmRes] = await Promise.all([
+    const [awRes0, hmRes0] = await Promise.all([
       resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team, g.status, g),
       resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team, g.status, g),
     ]);
+    const awRes = mergePitcherSource(awRes0, aw.probablePitcher, gameInfo.awayStarter);
+    const hmRes = mergePitcherSource(hmRes0, hm.probablePitcher, gameInfo.homeStarter);
 
     const entries = [
       { prob: awRes.prob, probSrc: awRes.src, pitchTeam: aw.team, oppTeam: hm.team, oppId: hm.team.id, isHome: false },
@@ -4900,10 +4918,12 @@ async function buildHitters(games, season) {
   await mapConcurrent(games, async g => {
     const aw = g.teams.away, hm = g.teams.home;
     const gameInfo = await getGameInfo(g.gamePk);
-    const [awRes, hmRes] = await Promise.all([
+    const [awRes0, hmRes0] = await Promise.all([
       resolvePitcherWithPP(aw.probablePitcher, g.gamePk, "away", gameInfo, aw.team, g.status, g),
       resolvePitcherWithPP(hm.probablePitcher, g.gamePk, "home", gameInfo, hm.team, g.status, g),
     ]);
+    const awRes = mergePitcherSource(awRes0, aw.probablePitcher, gameInfo.awayStarter);
+    const hmRes = mergePitcherSource(hmRes0, hm.probablePitcher, gameInfo.homeStarter);
     let awProb = awRes.prob, hmProb = hmRes.prob;
     const homeAbbr = teamAbbr(hm.team);
 
