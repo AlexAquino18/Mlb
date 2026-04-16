@@ -1367,6 +1367,9 @@ function ambiguousStrikeoutCountsAsPitcher(row, g, player) {
     if (Number.isNaN(h)) return true;
     return h >= 2.5;
   }
+  // Schedule lists probables but this row names someone else (late swap, wrong API field): high K lines are still SP props.
+  const h = numericLineFromRow(row);
+  if (!Number.isNaN(h) && lineLooksLikePitcherKAlt(h) && h >= 5) return true;
   return false;
 }
 
@@ -1604,10 +1607,7 @@ async function applyOddsRowsToState(rows, games, debugLines) {
     if (cl.kind === "batter_k") continue;
 
     if (cl.kind === "pitcher_outs") {
-      const hasProbPo =
-        g.teams?.home?.probablePitcher?.fullName ||
-        g.teams?.away?.probablePitcher?.fullName;
-      if (hasProbPo && !nameMatchesProbable(player, g)) continue;
+      // Do not require name≈schedule probable — books list actual starters; MLB probables can be TBD/stale.
       const nk = normName(player);
       if (!outsAccum[nk]) outsAccum[nk] = { lines: [], statTypes: [] };
       outsAccum[nk].lines.push(row.hdp);
@@ -1620,10 +1620,13 @@ async function applyOddsRowsToState(rows, games, debugLines) {
       (cl.kind === "so_ambiguous" && ambiguousStrikeoutCountsAsPitcher(row, g, player));
     if (!isPitcherSO) continue;
 
+    // Only ambiguous strikeout markets need to align with schedule probables (reduces mis-tagged hitter rows).
+    // Explicit pitcher_k rows must always ingest — otherwise confirmed starters missing from schedule probables
+    // never reach ppLines and the UI shows CALC instead of the book K line.
     const hasProbableStarter =
       g.teams?.home?.probablePitcher?.fullName ||
       g.teams?.away?.probablePitcher?.fullName;
-    if (hasProbableStarter && !nameMatchesProbable(player, g)) continue;
+    if (hasProbableStarter && !nameMatchesProbable(player, g) && cl.kind === "so_ambiguous") continue;
 
     const nk = normName(player);
     const team = teamAbbrForPitcher(player, g);
@@ -3860,13 +3863,20 @@ async function buildSO(games, season) {
 
       let pitcherName = e.prob?.fullName || "TBD";
       const soTeamAbbr = teamAbbr(e.pitchTeam);
-      let ppEntry = lookupPP(pitcherName) || lookupPPByTeam(pitcherName, soTeamAbbr);
+      // Prefer team:lastname — avoids global name collisions; books tag K lines to the correct side.
+      let ppEntry = lookupPPByTeam(pitcherName, soTeamAbbr) || lookupPP(pitcherName);
 
-      // Team check: reject if PP lists this pitcher under a different team
       const ppDataLoaded = Object.keys(ppLines).length > 0;
-      if (e.prob && ppDataLoaded && soTeamAbbr && ppEntry?.team && ppEntry.team.toUpperCase() !== soTeamAbbr) {
-        console.warn(`[MLB] SO: ${pitcherName} is a ${ppEntry.team} pitcher, not ${soTeamAbbr} — resetting to TBD`);
-        e.prob = null; p = AVG_PITCHER; pitcherName = "TBD"; ppEntry = null;
+      if (e.prob && ppDataLoaded && soTeamAbbr && ppEntry?.team && ppEntry.team.toUpperCase() !== soTeamAbbr.toUpperCase()) {
+        const scoped = lookupPPByTeam(pitcherName, soTeamAbbr);
+        if (scoped) {
+          ppEntry = scoped;
+        } else {
+          console.warn(
+            `[MLB] SO: book K-line tagged ${ppEntry.team} for ${pitcherName} (${soTeamAbbr}) — using calc line; refresh after odds re-sync`
+          );
+          ppEntry = null;
+        }
       }
 
       if (!ppEntry && pitcherName !== "TBD" && ppDataLoaded) {
