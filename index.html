@@ -3689,28 +3689,12 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, 
   // Derive the expected team abbreviation from the team ID (abbreviation is absent in schedule data)
   const expAbbr    = teamAbbr(mlbTeam);   // e.g. "PHI" — always works via MLB_ID_TO_ABBR
   const expTeamId  = mlbTeam?.id;
-  const ppLoaded   = Object.keys(ppLines).length > 0;
 
   // 1. Standard MLB schedule / boxscore pitcher
   const mlb = await resolvePitcher(schedProb, gamePk, side, gameInfo, gameStatus, scheduleGame);
   if (mlb && mlb.id) {
-    // MLB schedule/boxscore is authoritative for *who* starts. PP maps are name-keyed and can
-    // point at the wrong team (stale trade, duplicate names, or book tagging). Never drop the
-    // MLB pitcher just because lookupPP disagrees — book K-lines still resolve via team-scoped paths.
-    if (expAbbr && mlb.fullName) {
-      const ppEntry = lookupPP(mlb.fullName);
-      if (ppLoaded && ppEntry?.team && ppEntry.team.toUpperCase() !== expAbbr.toUpperCase()) {
-        console.warn(
-          `[MLB] PP-K odds team=${ppEntry.team} ≠ game ${expAbbr} for ${mlb.fullName} — using MLB starter`
-        );
-      }
-      const hitterEntry = lookupPPHitter(mlb.fullName, expAbbr);
-      if (hitterEntry?.team && hitterEntry.team.toUpperCase() !== expAbbr.toUpperCase()) {
-        console.warn(
-          `[MLB] PP batter-line team=${hitterEntry.team} ≠ ${expAbbr} for ${mlb.fullName} — using MLB starter`
-        );
-      }
-    }
+    // MLB schedule/boxscore is authoritative for *who* starts. Odds maps are name-keyed and can
+    // carry a stale team tag (trades, assignments); SO tab still matches by name + game.
     return { prob: mlb, src: schedProb?.id ? "probable" : "confirmed" };
   }
   if (mlb) {
@@ -3942,7 +3926,12 @@ async function buildSO(games, season) {
           g &&
           (eventMatchesGame(ppEntry.gamesHint.home, ppEntry.gamesHint.away, g) ||
             eventMatchesGameLoose(ppEntry.gamesHint.home, ppEntry.gamesHint.away, g));
-        if (!sameGame) {
+        const rawFromEvent = findPPFromRawOddsRows(pitcherName, soTeamAbbr, g);
+        const staleOddsTeamTag =
+          ppEntry.rawName &&
+          e.prob.fullName &&
+          fuzzyNameEq(ppEntry.rawName, e.prob.fullName);
+        if (!sameGame && !rawFromEvent && !staleOddsTeamTag) {
           console.warn(
             `[MLB] SO: book K-line tagged ${ppEntry.team} for ${pitcherName} (${soTeamAbbr}) — calc line (no team-scoped match)`
           );
