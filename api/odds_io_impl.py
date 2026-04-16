@@ -253,6 +253,8 @@ def _stat_hint_from_text(text: str) -> str:
     raw = (text or "").strip().lower()
     if not raw:
         return ""
+    if raw in ("k", "ks", "k's", "k’s"):
+        return "strikeouts"
     if "strikeout" in raw or "strike out" in raw:
         return "strikeouts"
     if "total base" in raw:
@@ -343,7 +345,12 @@ def _append_prop_rows(
                 except (TypeError, ValueError):
                     continue
                 mname = _composite_market_name(m, odd)
-                hint = _stat_hint_from_market(m) or _stat_hint_from_text(label_stat)
+                label_full = str(label or "")
+                hint = (
+                    _stat_hint_from_market(m)
+                    or _stat_hint_from_text(label_stat)
+                    or _stat_hint_from_text(label_full)
+                )
                 if label_stat and mname.strip().lower() == "player props":
                     mname = f"Player Props · {label_stat}"
                 rows.append(
@@ -435,7 +442,7 @@ def fetch_mlb_odds_bundle(
     Pass debug_structure=True to attach meta.oddsStructureSample (not cached).
     """
     date_key = (target_date or "")[:10]
-    cache_key = f"{date_key}|{bookmakers}|v15"
+    cache_key = f"{date_key}|{bookmakers}|v16"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]

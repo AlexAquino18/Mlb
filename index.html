@@ -400,6 +400,8 @@ let activeFilter = "all";
 let selectedDate = "";
 let cache        = { nrfi: null, strikeouts: null, hitters: null };
 let ppLines      = {};
+/** Raw Odds-API rows (last successful load) — fallback when ppLines missed a pitcher. */
+let lastOddsRows = [];
 let ppLoaded     = false;
 let ppTeamMap    = {};
 let ppNRFI       = {};
@@ -809,9 +811,18 @@ function buildStrikeoutTrackingCsv(data, dateStr) {
   const rows = (data || []).map((g) => {
     const stubGame =
       g.away && g.home
-        ? { teams: { away: { team: { name: g.away, teamName: g.away } }, home: { team: { name: g.home, teamName: g.home } } } }
+        ? {
+            gamePk: g.gamePk,
+            teams: {
+              away: { team: { name: g.away, teamName: g.away } },
+              home: { team: { name: g.home, teamName: g.home } },
+            },
+          }
         : null;
-    const pp = findPPForPitcher(g.pitcher, g.team, stubGame) || lookupPP(g.pitcher);
+    const pp =
+      findPPForPitcher(g.pitcher, g.team, stubGame) ||
+      findPPFromRawOddsRows(g.pitcher, g.team, stubGame) ||
+      lookupPP(g.pitcher);
     const dkHdp = pp?.books?.DraftKings?.hdp;
     const projR = g.projection != null ? Number(Number(g.projection).toFixed(1)) : "";
     return [
@@ -1154,8 +1165,10 @@ const MLB_ODDS_ABBR_CANON = {
   sdp: "sd", sd: "sd",
   chw: "cws", cws: "cws",
   chc: "chc",
-  nym: "nym", nyy: "nyy",
-  lad: "lad", laa: "laa", ana: "laa",
+  nym: "nym", nyn: "nym", ny: "nym",
+  nyy: "nyy",
+  lad: "lad", la: "lad", los: "lad",
+  laa: "laa", ana: "laa",
   bal: "bal", tor: "tor", tex: "tex", sea: "sea", mia: "mia", det: "det",
   cin: "cin", cle: "cle", col: "col", pit: "pit", stl: "stl", mil: "mil",
   min: "min", phi: "phi", atl: "atl", hou: "hou",
@@ -1241,10 +1254,46 @@ function eventMatchesGame(home, away, g) {
   return forward || swapped;
 }
 
+function teamLastNickname(mlbTeamObj) {
+  const n = (mlbTeamObj?.teamName || mlbTeamObj?.name || "").trim();
+  if (!n) return "";
+  const p = n.split(/\s+/).filter(Boolean);
+  return (p[p.length - 1] || "").toLowerCase();
+}
+
+/**
+ * Loose match when Odds-API home/away strings differ from MLB (e.g. "LA Dodgers" vs full name).
+ * Requires both teams to be identifiable — avoids false positives when nicknames collide (e.g. both "Sox").
+ */
+function eventMatchesGameLoose(home, away, g) {
+  const ht = g.teams?.home?.team;
+  const at = g.teams?.away?.team;
+  if (!ht || !at) return false;
+  const blob = `${home} ${away}`.toLowerCase();
+  const pairs = [
+    [(ht.name || "").toLowerCase(), (at.name || "").toLowerCase()],
+    [(ht.name || "").toLowerCase(), (at.teamName || "").toLowerCase()],
+    [(ht.teamName || "").toLowerCase(), (at.name || "").toLowerCase()],
+    [(ht.teamName || "").toLowerCase(), (at.teamName || "").toLowerCase()],
+  ];
+  for (const [a, b] of pairs) {
+    if (a.length > 8 && b.length > 8 && blob.includes(a) && blob.includes(b)) return true;
+  }
+  const hNick = teamLastNickname(ht);
+  const aNick = teamLastNickname(at);
+  if (!hNick || !aNick || hNick === aNick) return false;
+  return blob.includes(hNick) && blob.includes(aNick);
+}
+
 function findGameForOddsRow(row, games) {
   for (const g of games) {
     if (eventMatchesGame(row.home, row.away, g)) return g;
   }
+  const loose = [];
+  for (const g of games) {
+    if (eventMatchesGameLoose(row.home, row.away, g)) loose.push(g);
+  }
+  if (loose.length === 1) return loose[0];
   return null;
 }
 
@@ -1648,7 +1697,7 @@ async function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v26:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v27:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -1668,7 +1717,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410oddsv26" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410oddsv27" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -1686,6 +1735,7 @@ function oddsIoFetchUrl(dateStr) {
 async function loadPPLines(games, dateStr) {
   if (ppLoaded) return;
   ppLines = {};
+  lastOddsRows = [];
   ppHitterLines = {};
   ppNRFI = {};
 
@@ -1743,6 +1793,7 @@ async function loadPPLines(games, dateStr) {
     }
 
     await applyOddsRowsToState(payload.rows, games, debugLines);
+    lastOddsRows = Array.isArray(payload.rows) ? payload.rows.slice() : [];
 
     const totalFound = Object.keys(ppLines).filter(k => !k.includes(":")).length;
     if (totalFound > 0) {
@@ -1957,6 +2008,45 @@ function findPPForPitcher(fullName, teamAbbr, scheduleGame) {
     }
   }
   return lookupPP(fullName);
+}
+
+/** When ppLines missed a row (event match or classification), scan last API payload. */
+function rowLooksLikePitcherStrikeout(row) {
+  const sh = (row.statHint || "").toLowerCase();
+  if (sh === "strikeouts") return true;
+  const m = (row.market || "").toLowerCase();
+  if (m.includes("strikeout") || m.includes("strike out")) return true;
+  if ((m.includes("pitcher") || m.includes("pitching") || m.includes("starter")) && /\bk(s|'s|’s)?\b/.test(m)) return true;
+  const h = numericLineFromRow(row);
+  return !Number.isNaN(h) && lineLooksLikePitcherKAlt(h) && h >= 2.5;
+}
+
+function findPPFromRawOddsRows(fullName, teamAbbr, scheduleGame) {
+  if (!lastOddsRows.length || !fullName || fullName === "TBD" || !scheduleGame) return null;
+  const ta = teamAbbr ? String(teamAbbr).toUpperCase() : "";
+  const lastTok = pitcherLastToken(fullName);
+  for (const row of lastOddsRows) {
+    if (row.hdp == null || !row.player) continue;
+    const gg = findGameForOddsRow(row, [scheduleGame]);
+    if (!gg || gg.gamePk !== scheduleGame.gamePk) continue;
+    if (pitcherLastToken(row.player) !== lastTok) continue;
+    if (!fuzzyNameEq(fullName, row.player)) continue;
+    if (!rowLooksLikePitcherStrikeout(row)) continue;
+    const line = Number(row.hdp);
+    return {
+      line,
+      statType: (row.market || "").slice(0, 120) || "Strikeouts",
+      rawName: row.player,
+      team: ta,
+      gamesHint: row.home && row.away ? { home: row.home, away: row.away } : null,
+      allLines: [line],
+      books: null,
+      outsLine: null,
+      outsStatType: null,
+      outsAllLines: null,
+    };
+  }
+  return null;
 }
 
 // ─── PP TEAM MAP ──────────────────────────────────────────────────────────────
@@ -3827,7 +3917,8 @@ async function buildSO(games, season) {
       let pitcherName = e.prob?.fullName || "TBD";
       const soTeamAbbr = teamAbbr(e.pitchTeam);
       let ppEntry = findPPForPitcher(pitcherName, soTeamAbbr, g);
-      const ppDataLoaded = Object.keys(ppLines).length > 0;
+      if (!ppEntry) ppEntry = findPPFromRawOddsRows(pitcherName, soTeamAbbr, g);
+      const ppDataLoaded = Object.keys(ppLines).length > 0 || lastOddsRows.length > 0;
       if (e.prob && ppDataLoaded && soTeamAbbr && ppEntry?.team && canonAbbrForCompare(ppEntry.team) !== canonAbbrForCompare(soTeamAbbr)) {
         console.warn(
           `[MLB] SO: book K-line tagged ${ppEntry.team} for ${pitcherName} (${soTeamAbbr}) — calc line (no team-scoped match)`
@@ -5683,7 +5774,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 document.getElementById("refresh-btn").addEventListener("click", () => {
   clearOddsCacheForDate(selectedDate || today());
   cache = { nrfi: null, strikeouts: null, hitters: null };
-  ppLoaded = false; ppLines = {}; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
+  ppLoaded = false; ppLines = {}; lastOddsRows = []; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
   ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
   _umpData = {}; _weather = {};
   [_lineup, _batterKPct, _pitcher, _teamSplit, _personBats].forEach(c => Object.keys(c).forEach(k => delete c[k]));
@@ -5698,7 +5789,7 @@ document.getElementById("date-picker").addEventListener("change", e => {
   selectedDate = e.target.value;
   clearOddsCacheForDate(selectedDate);
   cache = { nrfi: null, strikeouts: null, hitters: null };
-  ppLoaded = false; ppLines = {}; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
+  ppLoaded = false; ppLines = {}; lastOddsRows = []; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
   ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
   _umpData = {}; _weather = {};
   [_lineup, _batterKPct, _pitcher, _teamSplit, _personBats].forEach(c => Object.keys(c).forEach(k => delete c[k]));
@@ -5737,7 +5828,7 @@ function jumpTo(date) {
   document.getElementById("date-picker").value = date;
   clearOddsCacheForDate(date);
   cache = { nrfi: null, strikeouts: null, hitters: null };
-  ppLoaded = false; ppLines = {}; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
+  ppLoaded = false; ppLines = {}; lastOddsRows = []; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
   ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
   _umpData = {}; _weather = {};
   [_lineup, _batterKPct, _pitcher, _teamSplit, _personBats].forEach(c => Object.keys(c).forEach(k => delete c[k]));
