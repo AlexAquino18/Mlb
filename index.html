@@ -3727,24 +3727,25 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, 
     });
     if (narrowed.length) ppEntries = narrowed;
   }
+  // Drop non–pitcher-K lines (hitter props mis-tagged) before expensive name→MLB lookups.
+  if (ppEntries && ppEntries.length) {
+    ppEntries = ppEntries.filter((e) => lineLooksLikePitcherKAlt(Number(e.line)));
+  }
   if (ppEntries && ppEntries.length > 0) {
     for (const ppE of ppEntries) {
       // Check 1: PP batter-line lists this player for a team that ≠ PP's K-line team → misassigned
       const hE = lookupPPHitter(ppE.rawName, expAbbr || ppE.team || "");
       if (hE?.team && ppE.team && hE.team.toUpperCase() !== ppE.team.toUpperCase()) {
-        console.warn(`[MLB] PP fallback skip: ${ppE.rawName} K-line=${ppE.team} ≠ batter-line=${hE.team}`);
         continue;
       }
 
       // Check 2: PP batter-line team doesn't match the game's expected team
       if (hE?.team && expAbbr && hE.team.toUpperCase() !== expAbbr) {
-        console.warn(`[MLB] PP fallback skip: ${ppE.rawName} batter-line=${hE.team} ≠ expected=${expAbbr}`);
         continue;
       }
 
       // Check 3: PP K-line team doesn't match the game's expected team
       if (ppE.team && expAbbr && ppE.team.toUpperCase() !== expAbbr) {
-        console.warn(`[MLB] PP fallback skip: ${ppE.rawName} K-line=${ppE.team} ≠ expected=${expAbbr}`);
         continue;
       }
 
@@ -3752,7 +3753,6 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, 
       if (!mlbId) continue;
       const ident = await getPlayerIdentity(mlbId);
       if (!ident?.isPitcher) {
-        console.warn(`[MLB] PP fallback skip: ${ppE.rawName} is not a pitcher`);
         continue;
       }
 
@@ -3763,7 +3763,6 @@ async function resolvePitcherWithPP(schedProb, gamePk, side, gameInfo, mlbTeam, 
           const oddsTeamMatches =
             ppE.team && expAbbr && ppE.team.toUpperCase() === expAbbr.toUpperCase();
           if (!oddsTeamMatches) {
-            console.warn(`[MLB] PP fallback skip: ${ppE.rawName} teamId=${currentTeamId} ≠ ${expTeamId}`);
             continue;
           }
         }
@@ -3938,10 +3937,17 @@ async function buildSO(games, season) {
       if (!ppEntry) ppEntry = findPPFromRawOddsRows(pitcherName, soTeamAbbr, g);
       const ppDataLoaded = Object.keys(ppLines).length > 0 || lastOddsRows.length > 0;
       if (e.prob && ppDataLoaded && soTeamAbbr && ppEntry?.team && canonAbbrForCompare(ppEntry.team) !== canonAbbrForCompare(soTeamAbbr)) {
-        console.warn(
-          `[MLB] SO: book K-line tagged ${ppEntry.team} for ${pitcherName} (${soTeamAbbr}) — calc line (no team-scoped match)`
-        );
-        ppEntry = null;
+        const sameGame =
+          ppEntry.gamesHint &&
+          g &&
+          (eventMatchesGame(ppEntry.gamesHint.home, ppEntry.gamesHint.away, g) ||
+            eventMatchesGameLoose(ppEntry.gamesHint.home, ppEntry.gamesHint.away, g));
+        if (!sameGame) {
+          console.warn(
+            `[MLB] SO: book K-line tagged ${ppEntry.team} for ${pitcherName} (${soTeamAbbr}) — calc line (no team-scoped match)`
+          );
+          ppEntry = null;
+        }
       }
 
       if (!ppEntry && pitcherName !== "TBD" && ppDataLoaded) {
