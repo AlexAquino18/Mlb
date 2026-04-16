@@ -807,7 +807,11 @@ function buildStrikeoutTrackingCsv(data, dateStr) {
     "line_source",
   ];
   const rows = (data || []).map((g) => {
-    const pp = findPPForPitcher(g.pitcher, g.team) || lookupPP(g.pitcher);
+    const stubGame =
+      g.away && g.home
+        ? { teams: { away: { team: { name: g.away, teamName: g.away } }, home: { team: { name: g.home, teamName: g.home } } } }
+        : null;
+    const pp = findPPForPitcher(g.pitcher, g.team, stubGame) || lookupPP(g.pitcher);
     const dkHdp = pp?.books?.DraftKings?.hdp;
     const projR = g.projection != null ? Number(Number(g.projection).toFixed(1)) : "";
     return [
@@ -1164,7 +1168,15 @@ function fuzzyNameEq(a, b) {
   const pb = cleanName(b).split(/\s+/).filter(Boolean);
   if (!pa.length || !pb.length) return false;
   if (pa[pa.length - 1] !== pb[pb.length - 1]) return false;
-  return pa[0][0] === pb[0][0];
+  if (pa[0][0] === pb[0][0]) return true;
+  // "j t" vs "jt" before last name (J.T. Ginn vs JT Ginn)
+  const initialsA = pa.slice(0, -1).map((t) => t[0]).join("");
+  const initialsB = pb.slice(0, -1).map((t) => t[0]).join("");
+  if (initialsA && initialsB && initialsA === initialsB) return true;
+  const joinedA = pa.slice(0, -1).join("");
+  const joinedB = pb.slice(0, -1).join("");
+  if (joinedA === joinedB) return true;
+  return false;
 }
 
 function normTeamStr(s) {
@@ -1264,6 +1276,19 @@ function teamAbbrForPitcher(playerName, g) {
   const pa = g.teams?.away?.probablePitcher?.fullName;
   if (fuzzyNameEq(playerName, ph)) return teamAbbr(g.teams.home.team);
   if (fuzzyNameEq(playerName, pa)) return teamAbbr(g.teams.away.team);
+  for (const side of ["away", "home"]) {
+    const pl = g.lineups?.[`${side}Players`];
+    const abbr = teamAbbr(g.teams?.[side]?.team);
+    if (!pl || !abbr) continue;
+    for (const p of pl) {
+      const fn = p.fullName || p.name;
+      if (!fn || !fuzzyNameEq(playerName, fn)) continue;
+      const pos = (p.position?.abbreviation || p.gamePosition?.abbreviation || p.pos || "")
+        .toString()
+        .toUpperCase();
+      if (pos === "P" || pos === "SP" || pos === "RP") return abbr;
+    }
+  }
   return "";
 }
 
@@ -1617,7 +1642,7 @@ async function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v23:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v24:" + dateStr; }
 function oddsCacheGet(dateStr) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(dateStr));
@@ -1770,6 +1795,11 @@ function cleanName(s) {
     .trim();
 }
 
+function pitcherLastToken(fullName) {
+  const parts = cleanName(fullName || "").split(/\s+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : "";
+}
+
 // Fuzzy lookup: multiple strategies in decreasing confidence
 function lookupPP(fullName) {
   if (!fullName || fullName === "TBD" || Object.keys(ppLines).length === 0) return null;
@@ -1889,21 +1919,29 @@ function lookupPPByTeam(fullName, teamAbbr) {
   return ppLines[teamKey] || null;
 }
 
-/** Odds-API lines: prefer team:lastname, then any entry whose book team matches this game + last name, then global name. */
-function findPPForPitcher(fullName, teamAbbr) {
+/**
+ * Odds-API lines: team:lastname, then same game + name (when team tag missing), then global name.
+ * Many rows have no `team` until schedule probables match — use `gamesHint` + fuzzyNameEq vs MLB `scheduleGame`.
+ */
+function findPPForPitcher(fullName, teamAbbr, scheduleGame) {
   if (!fullName || fullName === "TBD" || Object.keys(ppLines).length === 0) return null;
   const ta = teamAbbr ? String(teamAbbr).toUpperCase() : "";
+  const lastTok = pitcherLastToken(fullName);
+
   if (ta) {
     const scoped = lookupPPByTeam(fullName, teamAbbr);
     if (scoped) return scoped;
-    const last = cleanName(fullName).split(/\s+/).filter(Boolean).pop() || "";
-    if (last) {
-      for (const [k, v] of Object.entries(ppLines)) {
-        if (k.includes(":")) continue;
-        if (!v?.rawName || !v.team) continue;
-        if (String(v.team).toUpperCase() !== ta) continue;
-        const vl = cleanName(v.rawName).split(/\s+/).pop();
-        if (vl === last) return v;
+    for (const [k, v] of Object.entries(ppLines)) {
+      if (k.includes(":")) continue;
+      if (!v?.rawName) continue;
+      if (pitcherLastToken(v.rawName) !== lastTok) continue;
+      if (!fuzzyNameEq(fullName, v.rawName)) continue;
+      if (v.team) {
+        if (canonAbbrForCompare(v.team) !== canonAbbrForCompare(ta)) continue;
+        return v;
+      }
+      if (scheduleGame && v.gamesHint && eventMatchesGame(v.gamesHint.home, v.gamesHint.away, scheduleGame)) {
+        return v;
       }
     }
   }
@@ -3777,9 +3815,9 @@ async function buildSO(games, season) {
 
       let pitcherName = e.prob?.fullName || "TBD";
       const soTeamAbbr = teamAbbr(e.pitchTeam);
-      let ppEntry = findPPForPitcher(pitcherName, soTeamAbbr);
+      let ppEntry = findPPForPitcher(pitcherName, soTeamAbbr, g);
       const ppDataLoaded = Object.keys(ppLines).length > 0;
-      if (e.prob && ppDataLoaded && soTeamAbbr && ppEntry?.team && ppEntry.team.toUpperCase() !== soTeamAbbr.toUpperCase()) {
+      if (e.prob && ppDataLoaded && soTeamAbbr && ppEntry?.team && canonAbbrForCompare(ppEntry.team) !== canonAbbrForCompare(soTeamAbbr)) {
         console.warn(
           `[MLB] SO: book K-line tagged ${ppEntry.team} for ${pitcherName} (${soTeamAbbr}) — calc line (no team-scoped match)`
         );
