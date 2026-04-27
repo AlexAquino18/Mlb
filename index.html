@@ -3865,6 +3865,30 @@ function mergePitcherSource(res, schedProb, boxStarter) {
   return res;
 }
 
+/** Schedule/boxscore probables often omit `.hand`; MLB uses `pitchHand.code`. Fetch once per id for platoon-aware projections. */
+const _pitcherHandById = {};
+async function ensureProbablePitchHand(prob) {
+  if (!prob || !prob.id) return prob;
+  const fromObj =
+    (prob.hand === "R" || prob.hand === "L" ? prob.hand : null) ||
+    (prob.pitchHand?.code === "R" || prob.pitchHand?.code === "L" ? prob.pitchHand.code : null);
+  if (fromObj) return { ...prob, hand: fromObj };
+  if (_pitcherHandById[prob.id] !== undefined) {
+    const h = _pitcherHandById[prob.id];
+    return { ...prob, hand: h };
+  }
+  try {
+    const d = await mlbGet(`/people/${prob.id}`);
+    const ph = d?.people?.[0]?.pitchHand?.code;
+    const h = ph === "L" || ph === "R" ? ph : "R";
+    _pitcherHandById[prob.id] = h;
+    return { ...prob, hand: h };
+  } catch (_) {
+    _pitcherHandById[prob.id] = "R";
+    return { ...prob, hand: "R" };
+  }
+}
+
 /**
  * P(Over) for strikeout prop: Poisson tail with λ = projected mean K (discrete strikeouts).
  * Half-lines (e.g. 6.5): over wins at 7+ K. Replaces a normal approx for better calibration on counts.
@@ -4942,24 +4966,34 @@ async function getH2H(batterId, pitcherId) {
   } catch(_) { _h2hCache[key] = null; return null; }
 }
 
-// Fetch batter stats vs left or right-handed pitchers (platoon split)
+// Fetch batter stats vs left or right-handed pitchers (platoon split; MLB statSplits vr / vl — same idea as BR team platoons)
 async function getHitterVsSplit(playerId, season, pitcherHand) {
+  if (pitcherHand !== "R" && pitcherHand !== "L") return null;
   const sitCode = pitcherHand === "L" ? "vl" : "vr";
   const key = `split_${playerId}_${season}_${sitCode}`;
   if (_hitterStats[key] !== undefined) return _hitterStats[key];
+  const MIN_PA = 15;
   try {
     const d = await mlbGet(`/people/${playerId}/stats?stats=statSplits&group=hitting&gameType=R&season=${season}&sitCodes=${sitCode}`);
-    const s = d?.stats?.[0]?.splits?.[0]?.stat;
-    if (!s || (s.plateAppearances || 0) < 20) { _hitterStats[key] = null; return null; }
+    const splits = d?.stats?.[0]?.splits || [];
+    const s = splits.find((sp) => sp.split?.code === sitCode)?.stat || splits[0]?.stat;
+    if (!s || (s.plateAppearances || 0) < MIN_PA) { _hitterStats[key] = null; return null; }
+    const pa = s.plateAppearances || 0;
+    const ab = Math.max(1, s.atBats || 0);
     _hitterStats[key] = {
       avg: parseFloat(s.avg) || null,
       slg: parseFloat(s.slg) || null,
       obp: parseFloat(s.obp) || null,
-      pa:  s.plateAppearances || 0,
-      hits: s.hits || 0, hr: s.homeRuns || 0, bb: s.baseOnBalls || 0,
+      pa,
+      ab,
+      hits: s.hits || 0,
+      hr: s.homeRuns || 0,
+      bb: s.baseOnBalls || 0,
+      runs: s.runs || 0,
+      rbi: s.rbi || 0,
     };
     return _hitterStats[key];
-  } catch(_) { _hitterStats[key] = null; return null; }
+  } catch (_) { _hitterStats[key] = null; return null; }
 }
 
 // Fetch last 5 regular-season games for a batter (tries current year first, then falls back)
@@ -5033,6 +5067,9 @@ async function buildHitters(games, season) {
     };
     awProb = checkPitcherTeam(awProb, teamAbbr(aw.team));
     hmProb = checkPitcherTeam(hmProb, teamAbbr(hm.team));
+    const [awProbH, hmProbH] = await Promise.all([ensureProbablePitchHand(awProb), ensureProbablePitchHand(hmProb)]);
+    awProb = awProbH;
+    hmProb = hmProbH;
 
     const parkInfo = PARK_DIMS[homeAbbr] || {};
     const parkHit  = PARK_HIT_FACTOR[homeAbbr] || { hit:1.0, tb:1.0 };
@@ -5060,22 +5097,29 @@ async function buildHitters(games, season) {
         const h2h   = oppPitcher ? await getH2H(b.id, oppPitcher.id) : null;
         const ppE   = lookupPPHitter(b.name, teamAbbr({ id: teamId })) || null;
 
-        // Platoon split: fetch batter vs pitcher hand if we know the pitcher hand
+        // Platoon split: vs RHP (vr) / vs LHP (vl) from MLB — requires opposing SP throwing hand (ensured above)
         const platoon = oppHand ? await getHitterVsSplit(b.id, season, oppHand) : null;
         const platoonLabel = platoon ? `vs${oppHand}HP` : null;
 
-        const PA   = 4.1;
-        const bbR  = stats.pa > 0 ? Math.min(0.18, stats.bb / stats.pa) : 0.085;
-        const abPG = PA * (1 - bbR);
-        const hrR  = stats.ab > 0 ? Math.min(0.09, stats.hr / stats.ab) : 0.022;
-
-        // Blend season avg with platoon split (60/40 if enough PAs)
-        let useAvg = stats.avg, useSlg = stats.slg;
-        if (platoon && platoon.pa >= 30) {
-          const w = Math.min(0.45, platoon.pa / 200);
-          useAvg = useAvg * (1-w) + (platoon.avg || useAvg) * w;
-          useSlg = useSlg * (1-w) + (platoon.slg || useSlg) * w;
+        const PA = 4.1;
+        let bbR = stats.pa > 0 ? Math.min(0.18, stats.bb / stats.pa) : 0.085;
+        let hrR = stats.ab > 0 ? Math.min(0.09, stats.hr / stats.ab) : 0.022;
+        let useAvg = stats.avg;
+        let useSlg = stats.slg;
+        let platoonW = 0;
+        if (platoon && oppHand && platoon.pa >= 12) {
+          platoonW = Math.min(0.52, Math.max(0.10, (platoon.pa - 8) / 165));
+          useAvg = useAvg * (1 - platoonW) + (platoon.avg ?? useAvg) * platoonW;
+          useSlg = useSlg * (1 - platoonW) + (platoon.slg ?? useSlg) * platoonW;
+          const pBbR = Math.min(0.18, (platoon.bb || 0) / platoon.pa);
+          const wBB = Math.min(platoonW * 0.85, 0.42);
+          bbR = bbR * (1 - wBB) + pBbR * wBB;
+          if (platoon.ab >= 20) {
+            const phr = Math.min(0.09, (platoon.hr || 0) / platoon.ab);
+            hrR = hrR * (1 - platoonW * 0.65) + phr * (platoonW * 0.65);
+          }
         }
+        const abPG = PA * (1 - bbR);
 
         // H2H adjustment on top of platoon-blended avg
         let pAvg = useAvg;
@@ -5103,9 +5147,13 @@ async function buildHitters(games, season) {
         // Umpire: tight zone (negative runsAdj) slightly reduces hits/BB
         const umpMult = 1 + umpRunsAdj * 0.04;
         const pBB   = bbR * PA * Math.max(0.80, umpMult);
-        // Runs and RBIs: per-PA rates from season stats scaled to today's PAs
-        const runsR = stats.pa > 0 && Number.isFinite(stats.runs) ? stats.runs / stats.pa : 0.14;
-        const rbiR  = stats.pa > 0 && Number.isFinite(stats.rbi) ? stats.rbi / stats.pa : 0.12;
+        let runsR = stats.pa > 0 && Number.isFinite(stats.runs) ? stats.runs / stats.pa : 0.14;
+        let rbiR  = stats.pa > 0 && Number.isFinite(stats.rbi) ? stats.rbi / stats.pa : 0.12;
+        if (platoon && oppHand && platoon.pa >= 25 && platoonW > 0) {
+          const wR = Math.min(0.38, platoonW * 0.72);
+          runsR = runsR * (1 - wR) + (platoon.runs / platoon.pa) * wR;
+          rbiR  = rbiR * (1 - wR) + (platoon.rbi / platoon.pa) * wR;
+        }
         const pRuns = runsR * PA * Math.max(0.80, umpMult) * pyBlend * runEnvOffMult;
         const pRBI  = rbiR  * PA * hrFactor * pyBlend * runEnvOffMult;
         // Hits+Runs+RBIs combo
@@ -5137,7 +5185,8 @@ async function buildHitters(games, season) {
           conf += Math.min(20, Math.abs(bestProp.edge) * 12);
           if (h2h && h2h.ab >= 10) conf += 8;
           else if (h2h && h2h.ab >= 5) conf += 4;
-          if (platoon && platoon.pa >= 30) conf += 4;
+          if (platoon && platoon.pa >= 15) conf += 5;
+          else if (platoon && platoon.pa >= 12) conf += 2;
           if (bestProp.edge < 0) conf -= 3;
         } else { conf = 44; }
         if (stats.scOk) conf += 3;
@@ -5162,9 +5211,11 @@ async function buildHitters(games, season) {
       }));
     };
 
+    const hmHand = hmProb != null ? (hmProb.hand || "R") : null;
+    const awHand = awProb != null ? (awProb.hand || "R") : null;
     const [awayData, homeData] = await Promise.all([
-      buildSide(gameInfo.away, hmProb, hmProb?.fullName||"TBD", hmProb?.hand||null, aw.team.id),
-      buildSide(gameInfo.home, awProb, awProb?.fullName||"TBD", awProb?.hand||null, hm.team.id),
+      buildSide(gameInfo.away, hmProb, hmProb?.fullName || "TBD", hmHand, aw.team.id),
+      buildSide(gameInfo.home, awProb, awProb?.fullName || "TBD", awHand, hm.team.id),
     ]);
 
     const allB = [...awayData, ...homeData];
@@ -5176,8 +5227,8 @@ async function buildHitters(games, season) {
       gamePk:g.gamePk, gameTime:g.gameDate, status:g.status?.detailedState||"",
       awayTeam:aw.team.abbreviation||aw.team.name,
       homeTeam:hm.team.abbreviation||hm.team.name,
-      awayPitcher:awProb?.fullName||"TBD", awayPitcherHand:awProb?.hand||"R",
-      homePitcher:hmProb?.fullName||"TBD", homePitcherHand:hmProb?.hand||"R",
+      awayPitcher:awProb?.fullName||"TBD", awayPitcherHand:awHand,
+      homePitcher:hmProb?.fullName||"TBD", homePitcherHand:hmHand,
       parkName:parkInfo.name||"", hrFactor,
       hitFactor:parkHit.hit, tbFactor:parkHit.tb,
       parkRunEnvPF: pfRunEnv,
@@ -5323,10 +5374,13 @@ function renderHitterCard(g) {
 
       // Platoon split chip
       let platoonHtml = "";
-      if (platoon && platoon.pa >= 20) {
+      if (platoon && platoon.pa >= 15) {
         const pitHand = pitcherHand || "?";
-        const advantage = (b.bats==="L"&&pitHand==="R")||(b.bats==="R"&&pitHand==="L");
-        const disadvantage = (b.bats==="L"&&pitHand==="L")||(b.bats==="R"&&pitHand==="R");
+        const batSide = b.bats === "S" && (pitHand === "R" || pitHand === "L")
+          ? (pitHand === "R" ? "L" : "R")
+          : b.bats;
+        const advantage = (batSide==="L"&&pitHand==="R")||(batSide==="R"&&pitHand==="L");
+        const disadvantage = (batSide==="L"&&pitHand==="L")||(batSide==="R"&&pitHand==="R");
         const splitColor = advantage?"#34d399":disadvantage?"#fb7185":"#94a3b8";
         const platoonAvg = platoon.avg ? `.${avg3(platoon.avg)}` : "—";
         platoonHtml = `<span class="stat-chip" style="color:${splitColor};border-color:${splitColor}55;background:${splitColor}11">`
@@ -5455,9 +5509,9 @@ function renderHitterCard(g) {
       <div class="card-bd" id="hg-${g.gamePk}-bd">
         <div style="margin-top:14px">
           ${topH2HSection}
-          <div class="hitter-section-title">${g.awayTeam} BATTERS vs <span style="color:#22d3ee">${g.homePitcher}</span> <span class="hand-tag">${g.homePitcherHand||"R"}HP</span></div>
+          <div class="hitter-section-title">${g.awayTeam} BATTERS vs <span style="color:#22d3ee">${g.homePitcher}</span> <span class="hand-tag">${g.homePitcherHand != null ? g.homePitcherHand + "HP" : "—"}</span></div>
           ${renderSide(g.awayBatters, g.awayTeam, g.homePitcher, g.homePitcherHand, g.gamePk)}
-          <div class="hitter-section-title" style="margin-top:18px">${g.homeTeam} BATTERS vs <span style="color:#22d3ee">${g.awayPitcher}</span> <span class="hand-tag">${g.awayPitcherHand||"R"}HP</span></div>
+          <div class="hitter-section-title" style="margin-top:18px">${g.homeTeam} BATTERS vs <span style="color:#22d3ee">${g.awayPitcher}</span> <span class="hand-tag">${g.awayPitcherHand != null ? g.awayPitcherHand + "HP" : "—"}</span></div>
           ${renderSide(g.homeBatters, g.homeTeam, g.awayPitcher, g.awayPitcherHand, g.gamePk)}
         </div>
       </div>
