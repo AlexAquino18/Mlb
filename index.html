@@ -1707,7 +1707,7 @@ async function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v34:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v35:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -1727,7 +1727,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260706oddsv34" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260706oddsv35" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -5929,16 +5929,14 @@ async function buildEV(games) {
     out.push(row);
   }
 
-  // Grade every FD/DK prop line at PrizePicks -119 breakeven (fair prob > 54.3%).
-  // ppOnBoard = true when PrizePicks also lists that exact standard line today.
-  for (const g of Object.values(groups)) {
+  // A) PrizePicks standard board only — exact line match required (no goblin/demon, no book-only lines)
+  for (const pp of board.allLines || []) {
+    const g = groups[`${pp.nk}|${pp.statKey}|${pp.line}`];
+    if (!g) continue;
     const fair = evFairOverFromBooks(g.books);
     if (!fair) continue;
-    diag.twoWayGroups++;
+    diag.ppExactMatches++;
     const matchup = g.away && g.home ? `${g.away} @ ${g.home}` : "";
-    const ppOnBoard = !!board.mapByLine[`${normName(g.player)}|${g.statKey}|${g.line}`];
-    if (ppOnBoard) diag.ppExactMatches++;
-
     for (const side of ["Over", "Under"]) {
       const pFair = side === "Over" ? fair.pOverFair : 1 - fair.pOverFair;
       const ev = pFair * PP_EV_DEC - 1;
@@ -5947,15 +5945,22 @@ async function buildEV(games) {
       const b = PP_EV_DEC - 1;
       const kelly = Math.max(0, (pFair * (b + 1) - 1) / b);
       pushEV({
-        evRow: true, isPP: true, ppOnBoard,
-        player: g.player, statKey: g.statKey, statLabel: EV_STAT_LABELS[g.statKey],
-        line: g.line, side, book: "PrizePicks", dec: PP_EV_DEC,
+        evRow: true, isPP: true, ppOnBoard: true,
+        player: pp.player, statKey: pp.statKey, statLabel: EV_STAT_LABELS[pp.statKey],
+        line: pp.line, side, book: "PrizePicks", dec: PP_EV_DEC,
         matchup, pFair, fairDec: 1 / pFair, ev, kellyQ: kelly / 4,
         baselineSrc: fair.baselineSrc, detailTxt: evBookPricesTxt(g.books, side),
       });
     }
+  }
 
-    // Book-vs-book: grade each book against the other's de-vig
+  // B) Book-vs-book edges (FanDuel vs DraftKings de-vig — not labeled as PrizePicks)
+  for (const g of Object.values(groups)) {
+    const fair = evFairOverFromBooks(g.books);
+    if (!fair) continue;
+    diag.twoWayGroups++;
+    const matchup = g.away && g.home ? `${g.away} @ ${g.home}` : "";
+
     for (const side of ["Over", "Under"]) {
       for (const book of EV_BOOKS) {
         const other = book === "FanDuel" ? "DraftKings" : "FanDuel";
@@ -5990,24 +5995,24 @@ let lastPPBoardMeta = null;
 function evColor(ev) { return ev >= 0.05 ? "#34d399" : ev >= 0.03 ? "#22d3ee" : ev >= 0.015 ? "#fbbf24" : "#94a3b8"; }
 
 function renderEVCards(rows) {
-  const ppCount = rows.filter(r => r.isPP).length;
+  const ppCount = rows.filter(r => r.isPP && r.ppOnBoard).length;
   const meta = lastPPBoardMeta || {};
   const matchTxt = meta.bookGroups != null
-    ? `${meta.bookGroups} book prop lines · ${meta.twoWayGroups || 0} with FD/DK two-way prices · ${meta.ppExactMatches || 0} exact PP line matches`
+    ? `${meta.standard || 0} PP standard lines · ${meta.ppExactMatches || 0} matched FD/DK at same number · ${meta.twoWayGroups || 0} book two-way props`
     : "";
   const boardTxt = meta.error
     ? `<span style="color:#fb7185">PrizePicks board unavailable (${meta.error}) — showing book-vs-book edges only.</span>`
-    : `PrizePicks board: ${meta.standard || 0} standard lines loaded (${meta.skippedAlt || 0} goblin/demon ignored). ${ppCount} +EV plays at −119.${matchTxt ? `<br><span style="color:#64748b">${matchTxt}${meta.ppExactMatches ? ` · ${meta.ppExactMatches} also on PP standard board today` : ""}</span>` : ""}`;
+    : `${ppCount} +EV PrizePicks standard plays (goblin/demon alt lines excluded).${matchTxt ? `<br><span style="color:#64748b">${matchTxt}${meta.ppExactMatches === 0 && meta.standard ? " — no PP standard line shares the same number as FD/DK today." : meta.ppExactMatches > 0 && ppCount === 0 ? ` · ${meta.ppNearEv || 0} matched but none cleared +EV vs −119 (need fair prob &gt; ${(PP_EV_BREAKEVEN * 100).toFixed(1)}%).` : ""}</span>` : ""}`;
   const header = `
     <div class="card" style="margin-bottom:14px">
       <div style="padding:14px 16px">
         <div style="font-size:13px;font-weight:700;color:#22d3ee;margin-bottom:6px">💰 POSITIVE EV — PRIZEPICKS (−119) vs FANDUEL / DRAFTKINGS</div>
         <div style="font-size:11px;color:#94a3b8;line-height:1.7">
-          FanDuel and DraftKings Over/Under prices are de-vigged into a fair win probability for each prop line.
-          Any side whose fair probability beats <strong>${(PP_EV_BREAKEVEN * 100).toFixed(1)}%</strong> is +EV at PrizePicks' standard <strong style="color:#a78bfa">−119</strong> payout
+          Only <strong>PrizePicks standard board lines</strong> (goblin/demon alt lines excluded) are graded at the <strong style="color:#a78bfa">−119</strong> payout.
+          The PP line must match FanDuel/DraftKings on the <em>exact same number</em>; FD/DK prices are de-vigged into fair probability
+          and any side above <strong>${(PP_EV_BREAKEVEN * 100).toFixed(1)}%</strong> is +EV
           (<strong style="color:#34d399">EV% = fair prob × 1.84 − 1</strong>).
-          Plays on the PP standard board today are highlighted; goblin/demon alt lines are ignored.
-          Book-vs-book rows (FD priced softer than DK's de-vig, etc.) are also listed. Stake column is quarter-Kelly.
+          Book-vs-book rows (FD vs DK de-vig) are listed separately. Stake column is quarter-Kelly.
           <div style="margin-top:6px;color:#64748b">${boardTxt}</div>
         </div>
       </div>
@@ -6016,7 +6021,7 @@ function renderEVCards(rows) {
     return header + `
       <div style="text-align:center;padding:40px 0;color:#64748b">
         <div style="font-size:38px;margin-bottom:10px">💤</div>
-        <p style="font-size:13px">No +EV spots right now. Books may not have posted props yet, or PrizePicks lines don't match book lines — try refreshing closer to first pitch.</p>
+        <p style="font-size:13px">No +EV PrizePicks standard plays right now. Goblin/demon alt lines are excluded — only PP standard board lines that match FD/DK on the exact same number are graded. Try refreshing closer to first pitch.</p>
       </div>`;
   }
   const rowsHtml = rows.map(r => {
@@ -6025,7 +6030,7 @@ function renderEVCards(rows) {
     const fairPct = (r.pFair * 100).toFixed(1);
     const stake = (r.kellyQ * 100).toFixed(1);
     const bookChip = r.isPP
-      ? `<span class="stat-chip" style="color:#a78bfa;font-weight:700;border-color:#a78bfa">${r.ppOnBoard ? "PrizePicks" : "PP −119"}</span>`
+      ? `<span class="stat-chip" style="color:#a78bfa;font-weight:700;border-color:#a78bfa">PrizePicks −119</span>`
       : `<span class="stat-chip" style="color:#e2e8f0;font-weight:700">${r.book} ${evAmerican(r.dec)}</span>`;
     return `
       <div class="batter-row" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
@@ -6220,7 +6225,7 @@ async function loadTab(tab) {
 
     cache[tab] = data;
     if (tab === "strikeouts") recordStrikeoutOddsHistory(data, date);
-    activeFilter = "all";
+    activeFilter = tab === "ev" ? "pp" : "all";
     renderFilters(tab);
     renderSummary(data, tab);
     renderCards(data, tab);
