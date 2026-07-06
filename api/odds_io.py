@@ -37,7 +37,7 @@ class handler(BaseHTTPRequestHandler):
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
             raw_date = (qs.get("date") or [None])[0]
-            bookmakers = (qs.get("bookmakers") or ["DraftKings,FanDuel"])[0]
+            bookmakers = (qs.get("bookmakers") or ["DraftKings,FanDuel,Pinnacle"])[0]
             dbg = (qs.get("structure") or qs.get("debug") or [""])[0]
             debug_structure = str(dbg).lower() in ("1", "true", "yes")
             api_key = os.environ.get("ODDS_API_KEY") or os.environ.get("ODDS_API_IO_KEY")

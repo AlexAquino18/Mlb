@@ -434,7 +434,7 @@ def _debug_trim_event(ev: dict) -> Dict[str, Any]:
 def fetch_mlb_odds_bundle(
     api_key: str,
     target_date: str,
-    bookmakers: str = "DraftKings,FanDuel",
+    bookmakers: str = "DraftKings,FanDuel,Pinnacle",
     debug_structure: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -442,7 +442,7 @@ def fetch_mlb_odds_bundle(
     Pass debug_structure=True to attach meta.oddsStructureSample (not cached).
     """
     date_key = (target_date or "")[:10]
-    cache_key = f"{date_key}|{bookmakers}|v16"
+    cache_key = f"{date_key}|{bookmakers}|v17"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]

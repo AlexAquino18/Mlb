@@ -221,7 +221,7 @@ def odds_io_route():
 
         api_key = _os.environ.get("ODDS_API_KEY") or _os.environ.get("ODDS_API_IO_KEY")
         raw_date = request.args.get("date")
-        bookmakers = request.args.get("bookmakers") or "DraftKings,FanDuel"
+        bookmakers = request.args.get("bookmakers") or "DraftKings,FanDuel,Pinnacle"
         dbg = request.args.get("structure") or request.args.get("debug") or ""
         debug_structure = str(dbg).lower() in ("1", "true", "yes")
         if not api_key:

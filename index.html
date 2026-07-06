@@ -360,6 +360,7 @@
     <button class="tab-btn active" data-tab="nrfi">⚾ NRFI / YRFI</button>
     <button class="tab-btn" data-tab="strikeouts">🔥 STRIKEOUT PROPS</button>
     <button class="tab-btn" data-tab="hitters">🏏 HITTER PROPS</button>
+    <button class="tab-btn" data-tab="ev">💰 +EV ODDS</button>
   </div>
   <div id="filters" style="display:none"></div>
   <div id="loader" style="display:none">
@@ -383,8 +384,8 @@
 
   <div id="disclaimer" style="display:none">
     ⚠ <strong style="color:#fbbf24">DISCLAIMER:</strong> For informational purposes only.
-    Stats from MLB Stats API. Weather from Open-Meteo. Umpire data from Umpire Scorecards (2023–2025 averages).
-    Verify lineups/props with official sources before wagering. Bet responsibly.
+    Stats from MLB Stats API. Weather from Open-Meteo. Park factors from Statcast (2026 3-yr rolling). Umpire data from Umpire Scorecards (multi-year averages).
+    Odds compared across FanDuel / DraftKings / Pinnacle. Verify lineups/props with official sources before wagering. Bet responsibly.
   </div>
 </div>
 
@@ -398,7 +399,7 @@ const PROXY3 = "https://api.codetabs.com/v1/proxy?quest=";
 let activeTab    = "nrfi";
 let activeFilter = "all";
 let selectedDate = "";
-let cache        = { nrfi: null, strikeouts: null, hitters: null };
+let cache        = { nrfi: null, strikeouts: null, hitters: null, ev: null };
 let ppLines      = {};
 /** Raw Odds-API rows (last successful load) — fallback when ppLines missed a pitcher. */
 let lastOddsRows = [];
@@ -500,12 +501,13 @@ function normBookmakerLabel(name) {
   const n = (name || "").toLowerCase();
   if (n.includes("fanduel")) return "FanDuel";
   if (n.includes("draftking")) return "DraftKings";
+  if (n.includes("pinnacle")) return "Pinnacle";
   return name || "";
 }
 /** Per-book Over/Under only for rows whose line matches the card line (same hdp). No “closest alt line” — avoids FD @5.5 vs DK @6.5 on one card. */
 function buildBooksFromRows(bookRows, targetLine) {
   const out = {};
-  const want = ["FanDuel", "DraftKings"];
+  const want = ["FanDuel", "DraftKings", "Pinnacle"];
   const tol = 0.01;
   for (const bn of want) {
     const rows = (bookRows || []).filter((r) => normBookmakerLabel(r.book) === bn);
@@ -879,89 +881,91 @@ function getLineMovement(pitcherName) {
 }
 
 // ── PARK DIMENSIONS & HR FACTOR ────────────────────────────────────────────
+// hrFactor: Statcast/RotoWire 2026 park factors (3-yr rolling 2023-2025; ATH = 2025 only, TB = 2022-2024 pre-repair Trop)
 const PARK_DIMS = {
-  ARI:{ name:"Chase Field",         lf:330, cf:407, rf:335, wallHt:7.5,  hrFactor:1.06, surface:"Turf",  roof:true,  note:"Roof closed in heat, humidor used" },
-  ATL:{ name:"Truist Park",         lf:335, cf:400, rf:325, wallHt:8,    hrFactor:1.04, surface:"Grass", roof:false, note:"Asymmetric RF, hitter-friendly" },
-  BAL:{ name:"Oriole Park",         lf:333, cf:400, rf:318, wallHt:7,    hrFactor:1.08, surface:"Grass", roof:false, note:"Short RF, very hitter-friendly" },
-  BOS:{ name:"Fenway Park",         lf:310, cf:420, rf:302, wallHt:37,   hrFactor:0.97, surface:"Grass", roof:false, note:"Green Monster suppresses LF HRs" },
-  CHC:{ name:"Wrigley Field",       lf:355, cf:400, rf:353, wallHt:11.5, hrFactor:1.03, surface:"Grass", roof:false, note:"Wind-dependent — can play big or small" },
-  CWS:{ name:"Guaranteed Rate",     lf:330, cf:400, rf:335, wallHt:8,    hrFactor:1.05, surface:"Grass", roof:false, note:"Moderate hitter park" },
-  CIN:{ name:"Great American BP",   lf:328, cf:404, rf:325, wallHt:12,   hrFactor:1.11, surface:"Grass", roof:false, note:"One of MLB most hitter-friendly" },
-  CLE:{ name:"Progressive Field",   lf:325, cf:405, rf:325, wallHt:19,   hrFactor:0.96, surface:"Grass", roof:false, note:"Pitcher-friendly, tall CF wall" },
-  COL:{ name:"Coors Field",         lf:347, cf:415, rf:350, wallHt:8,    hrFactor:1.38, surface:"Grass", roof:false, note:"Mile High altitude — massive HR park" },
-  DET:{ name:"Comerica Park",       lf:345, cf:420, rf:330, wallHt:8,    hrFactor:0.93, surface:"Grass", roof:false, note:"Large CF, pitcher-friendly" },
-  HOU:{ name:"Minute Maid Park",    lf:315, cf:409, rf:326, wallHt:21,   hrFactor:1.02, surface:"Turf",  roof:true,  note:"Crawford Boxes boost LF HRs" },
-  KC: { name:"Kauffman Stadium",    lf:330, cf:410, rf:330, wallHt:9,    hrFactor:0.95, surface:"Grass", roof:false, note:"Spacious, pitcher-friendly" },
-  LAA:{ name:"Angel Stadium",       lf:330, cf:400, rf:350, wallHt:8,    hrFactor:0.98, surface:"Grass", roof:false, note:"Near-average park" },
-  LAD:{ name:"Dodger Stadium",      lf:330, cf:395, rf:330, wallHt:8,    hrFactor:0.94, surface:"Grass", roof:false, note:"Marine layer suppresses offense at night" },
-  MIA:{ name:"loanDepot Park",      lf:344, cf:407, rf:335, wallHt:8,    hrFactor:0.88, surface:"Grass", roof:true,  note:"Most pitcher-friendly dome in MLB" },
-  MIL:{ name:"American Family Fld", lf:344, cf:400, rf:345, wallHt:8,    hrFactor:1.01, surface:"Turf",  roof:true,  note:"Neutral; roof protects from weather" },
-  MIN:{ name:"Target Field",        lf:339, cf:404, rf:328, wallHt:8,    hrFactor:0.99, surface:"Grass", roof:false, note:"Cold early season suppresses scoring" },
-  NYM:{ name:"Citi Field",          lf:335, cf:408, rf:330, wallHt:8,    hrFactor:0.97, surface:"Grass", roof:false, note:"Pitcher-friendly, large foul territory" },
-  NYY:{ name:"Yankee Stadium",      lf:318, cf:408, rf:314, wallHt:8,    hrFactor:1.12, surface:"Grass", roof:false, note:"Short RF porch, elite HR park" },
-  ATH:{ name:"Sutter Health Park",  lf:330, cf:403, rf:325, wallHt:8,    hrFactor:0.98, surface:"Grass", roof:false, note:"Sacramento temporary home" },
-  PHI:{ name:"Citizens Bank Park",  lf:329, cf:401, rf:330, wallHt:8,    hrFactor:1.09, surface:"Grass", roof:false, note:"Very hitter-friendly, humid summers" },
-  PIT:{ name:"PNC Park",            lf:325, cf:399, rf:320, wallHt:21,   hrFactor:0.96, surface:"Grass", roof:false, note:"Beautiful park, tall RF wall" },
-  SD: { name:"Petco Park",          lf:336, cf:396, rf:322, wallHt:8,    hrFactor:0.88, surface:"Grass", roof:false, note:"Most pitcher-friendly open-air park" },
-  SEA:{ name:"T-Mobile Park",       lf:331, cf:401, rf:326, wallHt:8,    hrFactor:0.97, surface:"Turf",  roof:true,  note:"Retractable roof, marine air" },
-  SF: { name:"Oracle Park",         lf:339, cf:399, rf:309, wallHt:24,   hrFactor:0.89, surface:"Grass", roof:false, note:"Marine layer + deep CF suppress offense" },
-  STL:{ name:"Busch Stadium",       lf:336, cf:400, rf:335, wallHt:8,    hrFactor:0.96, surface:"Grass", roof:false, note:"Pitcher-friendly, large outfield" },
-  TB: { name:"Tropicana Field",     lf:315, cf:404, rf:322, wallHt:9.5,  hrFactor:1.00, surface:"Turf",  roof:true,  note:"Dome, catwalks affect play" },
-  TEX:{ name:"Globe Life Field",    lf:329, cf:407, rf:326, wallHt:8,    hrFactor:1.03, surface:"Turf",  roof:true,  note:"Climate-controlled dome" },
-  TOR:{ name:"Rogers Centre",       lf:328, cf:400, rf:328, wallHt:10,   hrFactor:1.07, surface:"Turf",  roof:true,  note:"Turf boosts offense, dome = neutral weather" },
-  WSH:{ name:"Nationals Park",      lf:336, cf:402, rf:335, wallHt:8,    hrFactor:1.05, surface:"Grass", roof:false, note:"Hitter-friendly, hot summers" },
+  ARI:{ name:"Chase Field",         lf:330, cf:407, rf:335, wallHt:7.5,  hrFactor:0.88, surface:"Turf",  roof:true,  note:"Boosts hits/runs, humidor suppresses HRs" },
+  ATL:{ name:"Truist Park",         lf:335, cf:400, rf:325, wallHt:8,    hrFactor:1.05, surface:"Grass", roof:false, note:"Asymmetric RF, HR-friendly" },
+  BAL:{ name:"Oriole Park",         lf:333, cf:400, rf:318, wallHt:7,    hrFactor:0.97, surface:"Grass", roof:false, note:"Post-Walltimore: strong for hits/runs, HR near avg" },
+  BOS:{ name:"Fenway Park",         lf:310, cf:420, rf:302, wallHt:37,   hrFactor:0.89, surface:"Grass", roof:false, note:"Green Monster: doubles up, HRs down" },
+  CHC:{ name:"Wrigley Field",       lf:355, cf:400, rf:353, wallHt:11.5, hrFactor:0.99, surface:"Grass", roof:false, note:"Wind-dependent — can play big or small" },
+  CWS:{ name:"Rate Field",          lf:330, cf:400, rf:335, wallHt:8,    hrFactor:0.96, surface:"Grass", roof:false, note:"Slightly pitcher-leaning" },
+  CIN:{ name:"Great American BP",   lf:328, cf:404, rf:325, wallHt:12,   hrFactor:1.23, surface:"Grass", roof:false, note:"Elite HR park" },
+  CLE:{ name:"Progressive Field",   lf:325, cf:405, rf:325, wallHt:19,   hrFactor:0.85, surface:"Grass", roof:false, note:"Pitcher-friendly, tall CF wall" },
+  COL:{ name:"Coors Field",         lf:347, cf:415, rf:350, wallHt:8,    hrFactor:1.05, surface:"Grass", roof:false, note:"Altitude: massive for hits/runs, HR above avg" },
+  DET:{ name:"Comerica Park",       lf:345, cf:420, rf:330, wallHt:8,    hrFactor:0.99, surface:"Grass", roof:false, note:"Large CF, plays near neutral now" },
+  HOU:{ name:"Daikin Park",         lf:315, cf:409, rf:326, wallHt:21,   hrFactor:1.05, surface:"Turf",  roof:true,  note:"Crawford Boxes boost LF HRs" },
+  KC: { name:"Kauffman Stadium",    lf:330, cf:410, rf:330, wallHt:9,    hrFactor:0.85, surface:"Grass", roof:false, note:"Spacious — hits OK, HRs die" },
+  LAA:{ name:"Angel Stadium",       lf:330, cf:400, rf:350, wallHt:8,    hrFactor:1.13, surface:"Grass", roof:false, note:"Quiet HR-friendly park" },
+  LAD:{ name:"Dodger Stadium",      lf:330, cf:395, rf:330, wallHt:8,    hrFactor:1.27, surface:"Grass", roof:false, note:"Suppresses hits but elite HR park" },
+  MIA:{ name:"loanDepot Park",      lf:344, cf:407, rf:335, wallHt:8,    hrFactor:0.90, surface:"Grass", roof:true,  note:"HR-suppressing dome, hits near avg" },
+  MIL:{ name:"American Family Fld", lf:344, cf:400, rf:345, wallHt:8,    hrFactor:1.06, surface:"Turf",  roof:true,  note:"HRs up, hits down; high K park" },
+  MIN:{ name:"Target Field",        lf:339, cf:404, rf:328, wallHt:8,    hrFactor:1.02, surface:"Grass", roof:false, note:"Sneaky strong run environment" },
+  NYM:{ name:"Citi Field",          lf:335, cf:408, rf:330, wallHt:8,    hrFactor:1.04, surface:"Grass", roof:false, note:"Hits down, HR slightly up" },
+  NYY:{ name:"Yankee Stadium",      lf:318, cf:408, rf:314, wallHt:8,    hrFactor:1.19, surface:"Grass", roof:false, note:"Short RF porch, elite HR park" },
+  ATH:{ name:"Sutter Health Park",  lf:330, cf:403, rf:325, wallHt:8,    hrFactor:1.12, surface:"Grass", roof:false, note:"Sacramento — hitter-friendly, Delta breeze out to RF" },
+  PHI:{ name:"Citizens Bank Park",  lf:329, cf:401, rf:330, wallHt:8,    hrFactor:1.15, surface:"Grass", roof:false, note:"Very HR-friendly, humid summers" },
+  PIT:{ name:"PNC Park",            lf:325, cf:399, rf:320, wallHt:21,   hrFactor:0.76, surface:"Grass", roof:false, note:"Toughest HR park in MLB" },
+  SD: { name:"Petco Park",          lf:336, cf:396, rf:322, wallHt:8,    hrFactor:1.02, surface:"Grass", roof:false, note:"Run-suppressing but HR near avg now" },
+  SEA:{ name:"T-Mobile Park",       lf:331, cf:401, rf:326, wallHt:8,    hrFactor:0.93, surface:"Turf",  roof:true,  note:"MLB's best pitcher park — huge K boost" },
+  SF: { name:"Oracle Park",         lf:339, cf:399, rf:309, wallHt:24,   hrFactor:0.81, surface:"Grass", roof:false, note:"Marine layer + deep CF suppress HRs" },
+  STL:{ name:"Busch Stadium",       lf:336, cf:400, rf:335, wallHt:8,    hrFactor:0.87, surface:"Grass", roof:false, note:"Hits fine, HRs suppressed" },
+  TB: { name:"Tropicana Field",     lf:315, cf:404, rf:322, wallHt:9.5,  hrFactor:0.98, surface:"Turf",  roof:true,  note:"Reopened 2026 — new roof/turf, catwalks remain" },
+  TEX:{ name:"Globe Life Field",    lf:329, cf:407, rf:326, wallHt:8,    hrFactor:1.04, surface:"Turf",  roof:true,  note:"Run-suppressing dome, HR slightly up" },
+  TOR:{ name:"Rogers Centre",       lf:328, cf:400, rf:328, wallHt:10,   hrFactor:1.04, surface:"Turf",  roof:true,  note:"Solid offensive park post-renovation" },
+  WSH:{ name:"Nationals Park",      lf:336, cf:402, rf:335, wallHt:8,    hrFactor:0.94, surface:"Grass", roof:false, note:"Hits/runs up, HR slightly down" },
 };
 
 // ── PARK HIT / TB FACTORS ─────────────────────────────────────────────────
 // hit factor = park's effect on base hits (separate from HR factor)
 // tb  factor = effect on total bases (singles, doubles, triples, HR combined)
-// Sources: Baseball Reference multi-year park factors
+// Source: Statcast/RotoWire 2026 park factors (3-yr rolling 2023-2025; ATH 2025 only) — tb ≈ 0.7·H + 0.3·HR
 const PARK_HIT_FACTOR = {
-  ARI:{ hit:1.04, tb:1.05 }, ATL:{ hit:1.03, tb:1.03 }, BAL:{ hit:1.05, tb:1.06 },
-  BOS:{ hit:1.05, tb:1.02 }, CHC:{ hit:1.02, tb:1.02 }, CWS:{ hit:1.03, tb:1.04 },
-  CIN:{ hit:1.07, tb:1.08 }, CLE:{ hit:0.97, tb:0.97 }, COL:{ hit:1.15, tb:1.18 },
-  DET:{ hit:0.97, tb:0.96 }, HOU:{ hit:1.01, tb:1.01 }, KC: { hit:0.97, tb:0.96 },
-  LAA:{ hit:0.99, tb:0.99 }, LAD:{ hit:0.96, tb:0.95 }, MIA:{ hit:0.94, tb:0.92 },
-  MIL:{ hit:1.00, tb:1.01 }, MIN:{ hit:0.99, tb:0.99 }, NYM:{ hit:0.97, tb:0.97 },
-  NYY:{ hit:1.04, tb:1.07 }, ATH:{ hit:0.97, tb:0.97 }, PHI:{ hit:1.06, tb:1.07 },
-  PIT:{ hit:0.97, tb:0.96 }, SD: { hit:0.93, tb:0.91 }, SEA:{ hit:0.98, tb:0.97 },
-  SF: { hit:0.94, tb:0.93 }, STL:{ hit:0.97, tb:0.96 }, TB: { hit:1.00, tb:1.00 },
-  TEX:{ hit:1.02, tb:1.03 }, TOR:{ hit:1.04, tb:1.05 }, WSH:{ hit:1.03, tb:1.04 },
+  ARI:{ hit:1.05, tb:1.00 }, ATL:{ hit:1.02, tb:1.03 }, BAL:{ hit:1.02, tb:1.01 },
+  BOS:{ hit:1.07, tb:1.02 }, CHC:{ hit:0.96, tb:0.97 }, CWS:{ hit:0.98, tb:0.97 },
+  CIN:{ hit:1.00, tb:1.07 }, CLE:{ hit:0.97, tb:0.93 }, COL:{ hit:1.17, tb:1.13 },
+  DET:{ hit:1.00, tb:1.00 }, HOU:{ hit:1.00, tb:1.02 }, KC: { hit:1.04, tb:0.98 },
+  LAA:{ hit:0.98, tb:1.03 }, LAD:{ hit:0.97, tb:1.06 }, MIA:{ hit:1.03, tb:0.99 },
+  MIL:{ hit:0.94, tb:0.98 }, MIN:{ hit:1.02, tb:1.02 }, NYM:{ hit:0.94, tb:0.97 },
+  NYY:{ hit:0.94, tb:1.02 }, ATH:{ hit:1.07, tb:1.09 }, PHI:{ hit:1.01, tb:1.05 },
+  PIT:{ hit:1.01, tb:0.94 }, SD: { hit:0.96, tb:0.98 }, SEA:{ hit:0.89, tb:0.90 },
+  SF: { hit:1.01, tb:0.95 }, STL:{ hit:1.03, tb:0.98 }, TB: { hit:0.96, tb:0.97 },
+  TEX:{ hit:0.97, tb:0.99 }, TOR:{ hit:0.99, tb:1.01 }, WSH:{ hit:1.04, tb:1.01 },
 };
 
 // ── RANK & VENUE · RUN-ENVIRONMENT PARK FACTOR (reference table) ─────────────
 // Higher factor → more offense (favors batters). Lower → favors pitchers. 100 ≈ neutral.
+// Source: Baseball Savant Statcast 2026 run park factors (3-yr rolling); ATH from 2025 single-season (no stable Savant factor yet).
 const PARK_RANK_VENUE = [
-  { rank: 1, key: "COL", abbr: "COL", venue: "Coors Field", factor: 115 },
-  { rank: 2, key: "ATH", abbr: "ATH", venue: "Sutter Health Park", factor: 108 },
-  { rank: 3, key: "DET", abbr: "DET", venue: "Comerica Park", factor: 105 },
-  { rank: 4, key: "LAD", abbr: "LAD", venue: "UNIQLO Field at Dodger Stadium", factor: 104 },
-  { rank: 5, key: "BOS", abbr: "BOS", venue: "Fenway Park", factor: 103 },
-  { rank: 5, key: "TOR", abbr: "TOR", venue: "Rogers Centre", factor: 103 },
-  { rank: 5, key: "BAL", abbr: "BAL", venue: "Oriole Park at Camden Yards", factor: 103 },
-  { rank: 8, key: "ARI", abbr: "AZ", venue: "Chase Field", factor: 102 },
-  { rank: 8, key: "PHI", abbr: "PHI", venue: "Citizens Bank Park", factor: 102 },
-  { rank: 8, key: "TB", abbr: "TB", venue: "George M. Steinbrenner Field", factor: 102 },
-  { rank: 11, key: "MIN", abbr: "MIN", venue: "Target Field", factor: 101 },
-  { rank: 11, key: "WSH", abbr: "WSH", venue: "Nationals Park", factor: 101 },
-  { rank: 11, key: "LAA", abbr: "LAA", venue: "Angel Stadium", factor: 101 },
-  { rank: 11, key: "ATL", abbr: "ATL", venue: "Truist Park", factor: 101 },
-  { rank: 15, key: "NYY", abbr: "NYY", venue: "Yankee Stadium", factor: 99 },
-  { rank: 15, key: "SF", abbr: "SF", venue: "Oracle Park", factor: 99 },
-  { rank: 15, key: "NYM", abbr: "NYM", venue: "Citi Field", factor: 99 },
-  { rank: 15, key: "CIN", abbr: "CIN", venue: "Great American Ball Park", factor: 99 },
+  { rank: 1, key: "COL", abbr: "COL", venue: "Coors Field", factor: 125 },
+  { rank: 2, key: "ATH", abbr: "ATH", venue: "Sutter Health Park", factor: 110 },
+  { rank: 3, key: "ARI", abbr: "AZ", venue: "Chase Field", factor: 108 },
+  { rank: 4, key: "MIN", abbr: "MIN", venue: "Target Field", factor: 106 },
+  { rank: 4, key: "BAL", abbr: "BAL", venue: "Oriole Park at Camden Yards", factor: 106 },
+  { rank: 6, key: "NYY", abbr: "NYY", venue: "Yankee Stadium", factor: 104 },
+  { rank: 6, key: "BOS", abbr: "BOS", venue: "Fenway Park", factor: 104 },
+  { rank: 6, key: "CIN", abbr: "CIN", venue: "Great American Ball Park", factor: 104 },
+  { rank: 6, key: "PHI", abbr: "PHI", venue: "Citizens Bank Park", factor: 104 },
+  { rank: 6, key: "WSH", abbr: "WSH", venue: "Nationals Park", factor: 104 },
+  { rank: 6, key: "TOR", abbr: "TOR", venue: "Rogers Centre", factor: 104 },
+  { rank: 12, key: "HOU", abbr: "HOU", venue: "Daikin Park", factor: 102 },
+  { rank: 12, key: "PIT", abbr: "PIT", venue: "PNC Park", factor: 102 },
+  { rank: 12, key: "KC", abbr: "KC", venue: "Kauffman Stadium", factor: 102 },
+  { rank: 12, key: "LAD", abbr: "LAD", venue: "Dodger Stadium", factor: 102 },
+  { rank: 16, key: "MIA", abbr: "MIA", venue: "loanDepot park", factor: 100 },
+  { rank: 16, key: "LAA", abbr: "LAA", venue: "Angel Stadium", factor: 100 },
+  { rank: 16, key: "DET", abbr: "DET", venue: "Comerica Park", factor: 100 },
+  { rank: 19, key: "ATL", abbr: "ATL", venue: "Truist Park", factor: 98 },
+  { rank: 19, key: "NYM", abbr: "NYM", venue: "Citi Field", factor: 98 },
   { rank: 19, key: "CWS", abbr: "CWS", venue: "Rate Field", factor: 98 },
-  { rank: 19, key: "MIL", abbr: "MIL", venue: "American Family Field", factor: 98 },
-  { rank: 19, key: "CHC", abbr: "CHC", venue: "Wrigley Field", factor: 98 },
-  { rank: 22, key: "MIA", abbr: "MIA", venue: "loanDepot park", factor: 97 },
-  { rank: 22, key: "HOU", abbr: "HOU", venue: "Daikin Park", factor: 97 },
-  { rank: 22, key: "KC", abbr: "KC", venue: "Kauffman Stadium", factor: 97 },
-  { rank: 22, key: "STL", abbr: "STL", venue: "Busch Stadium", factor: 97 },
-  { rank: 26, key: "PIT", abbr: "PIT", venue: "PNC Park", factor: 96 },
-  { rank: 27, key: "SD", abbr: "SD", venue: "Petco Park", factor: 95 },
-  { rank: 27, key: "CLE", abbr: "CLE", venue: "Progressive Field", factor: 95 },
-  { rank: 29, key: "TEX", abbr: "TEX", venue: "Globe Life Field", factor: 91 },
-  { rank: 29, key: "SEA", abbr: "SEA", venue: "T-Mobile Park", factor: 91 },
+  { rank: 22, key: "CLE", abbr: "CLE", venue: "Progressive Field", factor: 96 },
+  { rank: 23, key: "TB", abbr: "TB", venue: "Tropicana Field", factor: 94 },
+  { rank: 23, key: "MIL", abbr: "MIL", venue: "American Family Field", factor: 94 },
+  { rank: 23, key: "STL", abbr: "STL", venue: "Busch Stadium", factor: 94 },
+  { rank: 23, key: "SD", abbr: "SD", venue: "Petco Park", factor: 94 },
+  { rank: 23, key: "SF", abbr: "SF", venue: "Oracle Park", factor: 94 },
+  { rank: 28, key: "CHC", abbr: "CHC", venue: "Wrigley Field", factor: 92 },
+  { rank: 29, key: "TEX", abbr: "TEX", venue: "Globe Life Field", factor: 86 },
+  { rank: 30, key: "SEA", abbr: "SEA", venue: "T-Mobile Park", factor: 83 },
 ];
 
 function getParkRunEnvPF(homeAbbr) {
@@ -1699,7 +1703,7 @@ async function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v30:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v31:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -1719,7 +1723,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260410oddsv30" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260706oddsv31" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -2249,7 +2253,7 @@ const PARK_COORDS = {
   CLE:{lat:41.496,lon:-81.685, elv:197,name:"Progressive Field"},
   COL:{lat:39.756,lon:-104.994,elv:1580,name:"Coors Field"},
   DET:{lat:42.339,lon:-83.048, elv:178,name:"Comerica Park"},
-  HOU:{lat:29.757,lon:-95.355, elv:12, name:"Minute Maid Park",roof:true},
+  HOU:{lat:29.757,lon:-95.355, elv:12, name:"Daikin Park",roof:true},
   KC: {lat:39.051,lon:-94.480, elv:303,name:"Kauffman Stadium"},
   LAA:{lat:33.800,lon:-117.883,elv:48, name:"Angel Stadium"},
   LAD:{lat:34.074,lon:-118.240,elv:161,name:"Dodger Stadium"},
@@ -2259,7 +2263,7 @@ const PARK_COORDS = {
   NYM:{lat:40.757,lon:-73.846, elv:10, name:"Citi Field"},
   NYY:{lat:40.829,lon:-73.926, elv:16, name:"Yankee Stadium"},
   OAK:{lat:37.751,lon:-122.201,elv:5,  name:"Oakland Coliseum"},
-  ATH:{lat:37.751,lon:-122.201,elv:5,  name:"Oakland Coliseum"},
+  ATH:{lat:38.580,lon:-121.513,elv:9,  name:"Sutter Health Park"},
   PHI:{lat:39.906,lon:-75.167, elv:6,  name:"Citizens Bank Park"},
   PIT:{lat:40.447,lon:-80.006, elv:222,name:"PNC Park"},
   SD: {lat:32.707,lon:-117.157,elv:5,  name:"Petco Park"},
@@ -4782,7 +4786,7 @@ function renderNRFICard(g) {
               <div style="font-size:11px;color:#94a3b8">${g.home}: ${g.homeTeam1st.rs.toFixed(1)}% score rate</div>
             </div>` : ""}
             ${(g.awayNRFIRec || g.homeNRFIRec) ? `<div>
-              <div style="font-size:11px;color:#94a3b8;margin-bottom:6px;font-weight:700">📋 2025 NRFI RECORDS</div>
+              <div style="font-size:11px;color:#94a3b8;margin-bottom:6px;font-weight:700">📋 2025 NRFI RECORDS (LAST FULL SEASON)</div>
               ${g.awayNRFIRec ? `<div style="margin-bottom:4px">
                 <div style="font-size:11px;color:#e2e8f0;font-weight:700">${g.away}</div>
                 <div style="font-size:12px;color:${g.awayNRFIRec.pct>=54?"#34d399":g.awayNRFIRec.pct>=48?"#fbbf24":"#fb7185"};font-weight:700">${g.awayNRFIRec.w}-${g.awayNRFIRec.l} <span style="font-size:10px;opacity:.8">(${g.awayNRFIRec.pct.toFixed(1)}%)</span></div>
@@ -5765,6 +5769,156 @@ function setError(msg) {
   document.getElementById("error-msg").textContent = msg ? "⚠ " + msg : "";
 }
 
+// ─── +EV ODDS (FanDuel / DraftKings priced against de-vigged Pinnacle) ───────
+const EV_STAT_LABELS = {
+  strikeouts: "Pitcher Ks", hits: "Hits", tb: "Total Bases", hr: "Home Runs",
+  rbi: "RBI", runs: "Runs", bb: "Walks", sb: "Stolen Bases", hrr: "H+R+RBI",
+};
+const EV_BOOKS = ["FanDuel", "DraftKings", "Pinnacle"];
+
+/** Accepts decimal (1.87) or American (+120 / -135) prices; returns decimal or null. */
+function evDecimalOdds(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n === 0) return null;
+  if (n >= 1.01 && n < 100) return n;
+  if (n >= 100) return 1 + n / 100;
+  if (n <= -100) return 1 + 100 / Math.abs(n);
+  return null;
+}
+function evAmerican(dec) {
+  if (!dec || dec <= 1) return "—";
+  return dec >= 2 ? `+${Math.round((dec - 1) * 100)}` : `${Math.round(-100 / (dec - 1))}`;
+}
+
+async function buildEV(games) {
+  setStatus("Comparing FanDuel / DraftKings prices vs de-vigged Pinnacle…");
+  const groups = {};
+  for (const row of lastOddsRows || []) {
+    const statKey = (row.statHint || "").toLowerCase();
+    if (!statKey || !EV_STAT_LABELS[statKey]) continue;
+    const book = normBookmakerLabel(row.bookmaker || row.book || "");
+    if (!EV_BOOKS.includes(book)) continue;
+    const line = Number(row.hdp);
+    if (!Number.isFinite(line) || line <= 0) continue;
+    const oDec = evDecimalOdds(row.over);
+    const uDec = evDecimalOdds(row.under);
+    if (oDec == null && uDec == null) continue;
+    const key = `${normName(row.player)}|${statKey}|${line}`;
+    if (!groups[key]) {
+      groups[key] = { player: row.player, statKey, line, home: row.home || "", away: row.away || "", books: {} };
+    }
+    const g = groups[key];
+    if (!g.books[book]) g.books[book] = {};
+    // Duplicate rows per book (merged days): keep the best available price on each side
+    if (oDec != null) g.books[book].over = Math.max(g.books[book].over || 0, oDec);
+    if (uDec != null) g.books[book].under = Math.max(g.books[book].under || 0, uDec);
+    if (!g.home && row.home) { g.home = row.home; g.away = row.away || g.away; }
+  }
+
+  const out = [];
+  for (const g of Object.values(groups)) {
+    // Fair probability baseline: de-vigged Pinnacle two-way; consensus of 2+ books as fallback
+    const pin = g.books["Pinnacle"];
+    let baseOver = null, baseUnder = null, baselineSrc = null;
+    if (pin && pin.over && pin.under) {
+      baseOver = pin.over; baseUnder = pin.under; baselineSrc = "Pinnacle";
+    } else {
+      const both = Object.entries(g.books).filter(([, b]) => b.over && b.under);
+      if (both.length >= 2) {
+        const avgIO = both.reduce((s, [, b]) => s + 1 / b.over, 0) / both.length;
+        const avgIU = both.reduce((s, [, b]) => s + 1 / b.under, 0) / both.length;
+        baseOver = 1 / avgIO; baseUnder = 1 / avgIU; baselineSrc = "consensus";
+      }
+    }
+    if (!baseOver || !baseUnder) continue;
+    const iO = 1 / baseOver, iU = 1 / baseUnder;
+    const pOverFair = Math.min(0.98, Math.max(0.02, iO / (iO + iU)));
+
+    for (const side of ["Over", "Under"]) {
+      const pFair = side === "Over" ? pOverFair : 1 - pOverFair;
+      for (const book of ["FanDuel", "DraftKings"]) {
+        const dec = g.books[book] && g.books[book][side.toLowerCase()];
+        if (!dec) continue;
+        const ev = pFair * dec - 1;
+        if (ev < 0.005) continue; // keep only +EV ≥ 0.5%
+        // Quarter-Kelly stake suggestion (b = dec-1)
+        const b = dec - 1;
+        const kelly = b > 0 ? Math.max(0, (pFair * (b + 1) - 1) / b) : 0;
+        out.push({
+          evRow: true,
+          player: g.player, statKey: g.statKey, statLabel: EV_STAT_LABELS[g.statKey],
+          line: g.line, side, book, dec,
+          matchup: g.away && g.home ? `${g.away} @ ${g.home}` : "",
+          pFair, fairDec: 1 / pFair, ev, kellyQ: kelly / 4,
+          baselineSrc,
+          pinOver: pin ? pin.over || null : null,
+          pinUnder: pin ? pin.under || null : null,
+          otherBook: book === "FanDuel" ? (g.books["DraftKings"] || null) : (g.books["FanDuel"] || null),
+        });
+      }
+    }
+  }
+  out.sort((a, b) => b.ev - a.ev);
+  return out.slice(0, 150);
+}
+
+function evColor(ev) { return ev >= 0.05 ? "#34d399" : ev >= 0.03 ? "#22d3ee" : ev >= 0.015 ? "#fbbf24" : "#94a3b8"; }
+
+function renderEVCards(rows) {
+  const pinCount = rows.filter(r => r.baselineSrc === "Pinnacle").length;
+  const header = `
+    <div class="card" style="margin-bottom:14px">
+      <div style="padding:14px 16px">
+        <div style="font-size:13px;font-weight:700;color:#22d3ee;margin-bottom:6px">💰 POSITIVE EV — FANDUEL / DRAFTKINGS vs PINNACLE</div>
+        <div style="font-size:11px;color:#94a3b8;line-height:1.7">
+          Pinnacle (sharp, low-margin book) Over/Under prices are de-vigged into a fair win probability for each player prop line.
+          FanDuel and DraftKings prices on the <em>same line</em> are then graded: <strong style="color:#34d399">EV% = fair prob × decimal odds − 1</strong>.
+          Positive EV means the book is paying more than the sharp fair price. ${pinCount ? `${pinCount} of ${rows.length} plays are Pinnacle-anchored` : "Pinnacle lines unavailable — consensus de-vig used"}; stake column is quarter-Kelly.
+        </div>
+      </div>
+    </div>`;
+  if (!rows.length) {
+    return header + `
+      <div style="text-align:center;padding:40px 0;color:#64748b">
+        <div style="font-size:38px;margin-bottom:10px">💤</div>
+        <p style="font-size:13px">No +EV spots right now. Books may not have posted props yet, or Pinnacle isn't offering these markets — try refreshing closer to first pitch.</p>
+      </div>`;
+  }
+  const rowsHtml = rows.map(r => {
+    const c = evColor(r.ev);
+    const evPct = (r.ev * 100).toFixed(1);
+    const fairPct = (r.pFair * 100).toFixed(1);
+    const stake = (r.kellyQ * 100).toFixed(1);
+    const pinTxt = r.pinOver && r.pinUnder
+      ? `Pinnacle ${evAmerican(r.pinOver)} / ${evAmerican(r.pinUnder)}`
+      : `${r.baselineSrc === "consensus" ? "consensus baseline" : "Pinnacle one-sided"}`;
+    const otherTxt = r.otherBook && r.otherBook[r.side.toLowerCase()]
+      ? ` · ${r.book === "FanDuel" ? "DK" : "FD"} ${evAmerican(r.otherBook[r.side.toLowerCase()])}`
+      : "";
+    return `
+      <div class="batter-row" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+        <div style="min-width:210px">
+          <span class="pitcher-name">${r.player}</span>
+          <span class="stat-chip" style="margin-left:6px">${r.statLabel}</span>
+          <div style="font-size:10px;color:#64748b;margin-top:2px">${r.matchup || ""}</div>
+        </div>
+        <div style="font-size:12px;font-weight:700;color:${r.side === "Over" ? "#34d399" : "#fb7185"}">
+          ${r.side.toUpperCase()} ${r.line}
+        </div>
+        <div style="font-size:12px">
+          <span class="stat-chip" style="color:#e2e8f0;font-weight:700">${r.book} ${evAmerican(r.dec)}</span>
+          <div style="font-size:10px;color:#64748b;margin-top:2px">${pinTxt}${otherTxt}</div>
+        </div>
+        <div style="font-size:11px;color:#94a3b8;text-align:right">
+          Fair ${fairPct}% (${evAmerican(r.fairDec)})
+          <div style="font-size:10px;color:#64748b;margin-top:2px">¼-Kelly ${stake}% bankroll</div>
+        </div>
+        <div style="font-size:14px;font-weight:800;color:${c};min-width:64px;text-align:right">+${evPct}% EV</div>
+      </div>`;
+  }).join("");
+  return header + `<div class="card"><div style="padding:6px 12px">${rowsHtml}</div></div>`;
+}
+
 function renderFilters(tab) {
   const opts = tab === "nrfi"
     ? ["all","strong","nrfi","yrfi"]
@@ -5778,7 +5932,7 @@ function renderFilters(tab) {
       : "";
   f.innerHTML =
     opts.map(o => `
-    <button class="filter-btn${o===activeFilter?" active":""}" onclick="setFilter('${o}')">${o==="strong"?"70%+":o==="pp"?"Has book line":o.toUpperCase()}</button>
+    <button class="filter-btn${o===activeFilter?" active":""}" onclick="setFilter('${o}')">${o==="strong"?(tab==="ev"?"3%+ EV":"70%+"):o==="pp"?"Has book line":o.toUpperCase()}</button>
   `).join("") +
     `<span class="filters-trail" style="margin-left:auto;display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap">` +
     exportStrikeouts +
@@ -5788,6 +5942,13 @@ function renderFilters(tab) {
 
 function filterData(data) {
   return data.filter(g => {
+    if (g.evRow) {
+      if (activeFilter==="all")    return true;
+      if (activeFilter==="strong") return g.ev >= 0.03;
+      if (activeFilter==="over")   return g.side === "Over";
+      if (activeFilter==="under")  return g.side === "Under";
+      return true;
+    }
     if (activeFilter==="all")    return true;
     if (activeFilter==="strong") return g.confidence>=70;
     if (activeFilter==="nrfi")   return g.confidence>=50;
@@ -5806,6 +5967,12 @@ function renderSummary(data, tab) {
         { l:"NRFI Plays",    v:data.filter(g=>g.confidence>=50).length, c:"#34d399" },
         { l:"Strong (70%+)", v:data.filter(g=>g.confidence>=70).length, c:"#22d3ee" },
         { l:"📊 Book lines",   v:data.filter(g=>g.ppNRFILine!=null).length, c:"#a78bfa" },
+      ]
+    : tab === "ev"
+    ? [
+        { l:"+EV plays",          v:data.length,                                        c:"#34d399" },
+        { l:"Strong (3%+ EV)",    v:data.filter(r=>r.ev>=0.03).length,                  c:"#22d3ee" },
+        { l:"Pinnacle-anchored",  v:data.filter(r=>r.baselineSrc==="Pinnacle").length,  c:"#a78bfa" },
       ]
     : tab === "hitters"
     ? [
@@ -5829,6 +5996,13 @@ function renderSummary(data, tab) {
 
 function renderCards(data, tab) {
   const filtered = filterData(data);
+  if (tab === "ev") {
+    document.getElementById("cards").innerHTML = renderEVCards(filtered);
+    const cntEv = document.getElementById("game-count");
+    if (cntEv) cntEv.textContent = `${filtered.length} +EV bets`;
+    document.getElementById("disclaimer").style.display = "block";
+    return;
+  }
   const top10 = tab === "hitters" ? renderTop10Hitters(filtered) : "";
   document.getElementById("cards").innerHTML = top10 + filtered.map(g =>
     tab === "nrfi" ? renderNRFICard(g) : tab === "hitters" ? renderHitterCard(g) : renderSOCard(g)
@@ -5905,6 +6079,8 @@ async function loadTab(tab) {
       ? await buildNRFI(games, season)
       : tab === "hitters"
       ? await buildHitters(games, season)
+      : tab === "ev"
+      ? await buildEV(games)
       : await buildSO(games, season);
 
     cache[tab] = data;
@@ -5941,7 +6117,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 
 document.getElementById("refresh-btn").addEventListener("click", () => {
   clearOddsCacheForDate(selectedDate || today());
-  cache = { nrfi: null, strikeouts: null, hitters: null };
+  cache = { nrfi: null, strikeouts: null, hitters: null, ev: null };
   ppLoaded = false; ppLines = {}; lastOddsRows = []; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
   ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
   _umpData = {}; _weather = {};
@@ -5956,7 +6132,7 @@ document.getElementById("retry-btn").addEventListener("click", () => {
 document.getElementById("date-picker").addEventListener("change", e => {
   selectedDate = e.target.value;
   clearOddsCacheForDate(selectedDate);
-  cache = { nrfi: null, strikeouts: null, hitters: null };
+  cache = { nrfi: null, strikeouts: null, hitters: null, ev: null };
   ppLoaded = false; ppLines = {}; lastOddsRows = []; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
   ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
   _umpData = {}; _weather = {};
@@ -5995,7 +6171,7 @@ function jumpTo(date) {
   selectedDate = date;
   document.getElementById("date-picker").value = date;
   clearOddsCacheForDate(date);
-  cache = { nrfi: null, strikeouts: null, hitters: null };
+  cache = { nrfi: null, strikeouts: null, hitters: null, ev: null };
   ppLoaded = false; ppLines = {}; lastOddsRows = []; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
   ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
   _umpData = {}; _weather = {};
