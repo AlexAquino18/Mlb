@@ -7,7 +7,8 @@
 
 export const config = { runtime: "edge" };
 
-const PP_BASE = "https://api.prizepicks.com";
+// partner-api serves the same JSON:API board without the PerimeterX captcha wall
+const PP_BASE = "https://partner-api.prizepicks.com";
 
 const UA_POOL = [
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
@@ -18,26 +19,12 @@ const UA_POOL = [
 ];
 
 function ppFetchHeaders(ua) {
-  const h = {
+  // partner-api rejects spoofed app.prizepicks.com Origin/Referer — send plain headers
+  return {
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",
     "User-Agent": ua,
-    "Referer": "https://app.prizepicks.com/",
-    "Origin": "https://app.prizepicks.com",
-    "X-Device-ID": crypto.randomUUID(),
-    "X-App-Version": "9.0.0",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-site",
   };
-  if (ua.includes("Chrome")) {
-    h["sec-ch-ua"] = '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"';
-    h["sec-ch-ua-mobile"] = ua.includes("iPhone") || ua.includes("Android") ? "?1" : "?0";
-    h["sec-ch-ua-platform"] = ua.includes("Windows") ? '"Windows"' : ua.includes("Mac") ? '"macOS"' : '"Android"';
-  }
-  return h;
 }
 
 function corsHeaders() {

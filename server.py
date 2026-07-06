@@ -20,7 +20,8 @@ from curl_cffi import requests as cffi_requests
 
 app = Flask(__name__, static_folder=".")
 PORT = int(os.environ.get("PORT", 8080))
-PP_BASE = "https://api.prizepicks.com"
+# partner-api serves the same JSON:API board without the PerimeterX captcha wall
+PP_BASE = "https://partner-api.prizepicks.com"
 
 UA_POOL = [
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
@@ -45,15 +46,11 @@ def proxy_prizepicks(path_param: str):
     last_err = None
     for attempt in range(3):
         ua = random.choice(UA_POOL)
+        # partner-api rejects spoofed app.prizepicks.com Origin/Referer — send plain headers
         headers = {
             "Accept":          "application/json, text/plain, */*",
             "Accept-Language": "en-US,en;q=0.9",
             "User-Agent":      ua,
-            "Referer":         "https://app.prizepicks.com/",
-            "Origin":          "https://app.prizepicks.com",
-            "X-App-Version":   "9.0.0",
-            "Cache-Control":   "no-cache",
-            "Pragma":          "no-cache",
         }
         try:
             # impersonate="chrome120" makes curl_cffi mimic Chrome's exact TLS fingerprint

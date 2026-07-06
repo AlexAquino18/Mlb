@@ -28,9 +28,10 @@ export default async (request, context) => {
   }
 
   // Only proxy to PrizePicks — safety check
+  // partner-api serves the same JSON:API board without the PerimeterX captcha wall
   const decoded = decodeURIComponent(path);
-  const target  = "https://api.prizepicks.com" + decoded;
-  if (!target.startsWith("https://api.prizepicks.com/")) {
+  const target  = "https://partner-api.prizepicks.com" + decoded;
+  if (!target.startsWith("https://partner-api.prizepicks.com/")) {
     return json({ error: "Invalid target" }, 403);
   }
 
@@ -43,20 +44,11 @@ export default async (request, context) => {
   ];
   const ua = UA_POOL[Math.floor(Math.random() * UA_POOL.length)];
 
+  // partner-api rejects spoofed app.prizepicks.com Origin/Referer — send plain headers
   const ppHeaders = {
     "Accept":            "application/json, text/plain, */*",
     "Accept-Language":   "en-US,en;q=0.9",
-    "Accept-Encoding":   "gzip, deflate, br",
     "User-Agent":        ua,
-    "Referer":           "https://app.prizepicks.com/",
-    "Origin":            "https://app.prizepicks.com",
-    "X-Device-ID":       crypto.randomUUID(),
-    "X-App-Version":     "9.0.0",
-    "Cache-Control":     "no-cache",
-    "Pragma":            "no-cache",
-    "Sec-Fetch-Dest":    "empty",
-    "Sec-Fetch-Mode":    "cors",
-    "Sec-Fetch-Site":    "same-site",
   };
 
   // Retry up to 3 times with exponential backoff
@@ -66,7 +58,6 @@ export default async (request, context) => {
       await new Promise(r => setTimeout(r, 300 * Math.pow(2, attempt)));
       // Rotate UA on retry
       ppHeaders["User-Agent"] = UA_POOL[(attempt) % UA_POOL.length];
-      ppHeaders["X-Device-ID"] = crypto.randomUUID();
     }
     try {
       const resp = await fetch(target, {

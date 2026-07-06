@@ -385,7 +385,7 @@
   <div id="disclaimer" style="display:none">
     ⚠ <strong style="color:#fbbf24">DISCLAIMER:</strong> For informational purposes only.
     Stats from MLB Stats API. Weather from Open-Meteo. Park factors from Statcast (2026 3-yr rolling). Umpire data from Umpire Scorecards (multi-year averages).
-    Odds compared across FanDuel / DraftKings vs sharp books (NoVig, Circa, LowVig, BetOnline, BookMaker). Verify lineups/props with official sources before wagering. Bet responsibly.
+    Odds from FanDuel / DraftKings; +EV grades PrizePicks standard lines (assumed −119 per leg, goblin/demon lines ignored) against de-vigged book prices. Verify lineups/props with official sources before wagering. Bet responsibly.
   </div>
 </div>
 
@@ -1707,7 +1707,7 @@ async function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v32:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v33:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -1727,7 +1727,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260706oddsv32" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260706oddsv33" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -5773,15 +5773,89 @@ function setError(msg) {
   document.getElementById("error-msg").textContent = msg ? "⚠ " + msg : "";
 }
 
-// ─── +EV ODDS (FanDuel / DraftKings priced against de-vigged sharp books) ────
-// odds-api.io doesn't carry Pinnacle; sharp anchors on this feed, in preference order:
-// NoVig (no-vig exchange) > Circa (sharp Vegas) > LowVig > BetOnline > BookMaker.
+// ─── +EV ODDS (PrizePicks standard lines graded vs de-vigged FanDuel/DraftKings) ──
+// API plan carries only FanDuel + DraftKings. Their two-way prices are de-vigged into a
+// fair win probability. A PrizePicks standard (non-goblin/demon) pick pays like -119 per
+// leg, so any side whose fair probability beats 119/219 ≈ 54.3% is a +EV PrizePicks play.
 const EV_STAT_LABELS = {
   strikeouts: "Pitcher Ks", hits: "Hits", tb: "Total Bases", hr: "Home Runs",
   rbi: "RBI", runs: "Runs", bb: "Walks", sb: "Stolen Bases", hrr: "H+R+RBI",
 };
-const EV_SHARP_BOOKS = ["NoVig", "Circa", "LowVig", "BetOnline", "BookMaker"];
-const EV_BOOKS = ["FanDuel", "DraftKings", ...EV_SHARP_BOOKS];
+const EV_BOOKS = ["FanDuel", "DraftKings"];
+const PP_EV_DEC = 1 + 100 / 119;      // -119 → 1.8403 decimal
+const PP_EV_BREAKEVEN = 119 / 219;    // ≈ 54.34% win prob needed to break even
+
+function ppEvStatKey(statType) {
+  const st = (statType || "").toLowerCase().trim();
+  return ({
+    "pitcher strikeouts": "strikeouts", "strikeouts": "strikeouts",
+    "hits": "hits", "total bases": "tb",
+    "home runs": "hr", "home run": "hr",
+    "rbis": "rbi", "rbi": "rbi", "runs batted in": "rbi",
+    "runs": "runs", "runs scored": "runs",
+    "walks": "bb", "base on balls": "bb",
+    "stolen bases": "sb",
+    "hits+runs+rbis": "hrr", "hits + runs + rbis": "hrr", "h+r+rbi": "hrr",
+  })[st] || null;
+}
+
+function ppProxyUrl(path) {
+  if (typeof location === "undefined" || location.protocol === "file:") return "";
+  const qs = "path=" + encodeURIComponent(path);
+  const host = location.hostname;
+  if (host.includes("netlify.app") || host.includes("netlify.com")) return `${location.origin}/.netlify/functions/pp?${qs}`;
+  if (host.includes("vercel.app")) return `${location.origin}/api/pp?${qs}`;
+  if (host === "localhost" || host === "127.0.0.1") {
+    if (location.port === "8888") return `${location.origin}/.netlify/functions/pp?${qs}`;
+    return `http://127.0.0.1:8080/.netlify/functions/pp?${qs}`;
+  }
+  return `${location.origin}/api/pp?${qs}`;
+}
+
+let _ppBoard = null; // { ts, map, meta }
+async function fetchPrizePicksStandardLines() {
+  if (_ppBoard && Date.now() - _ppBoard.ts < 10 * 60 * 1000) return _ppBoard;
+  const map = {}; // normName|statKey → { line, player, team }
+  const meta = { fetched: 0, standard: 0, skippedAlt: 0, error: null };
+  try {
+    // partner-api returns the full MLB board in one call
+    const url = ppProxyUrl(`/projections?league_id=2&per_page=1000&single_stat=true`);
+    if (!url) throw new Error("no proxy on file:// host");
+    const r = await fetchTimeout(url, 25000, { headers: { Accept: "application/json" } });
+    if (!r.ok) throw new Error(`PrizePicks proxy http_${r.status}`);
+    const j = await r.json();
+    const data = Array.isArray(j?.data) ? j.data : [];
+    const players = {};
+    for (const inc of j?.included || []) {
+      if (inc.type === "new_player" || inc.type === "player") {
+        players[inc.id] = {
+          name: inc.attributes?.display_name || inc.attributes?.name || "",
+          team: inc.attributes?.team || "",
+        };
+      }
+    }
+    for (const proj of data) {
+      const attr = proj.attributes || {};
+      meta.fetched++;
+      // Ignore goblin/demon alt lines — only standard board lines pay full odds
+      const oddsType = (attr.odds_type || "standard").toLowerCase();
+      if (oddsType !== "standard") { meta.skippedAlt++; continue; }
+      const statKey = ppEvStatKey(attr.stat_type);
+      if (!statKey) continue;
+      const line = parseFloat(attr.line_score);
+      if (!Number.isFinite(line) || line <= 0) continue;
+      const pid = proj.relationships?.new_player?.data?.id || proj.relationships?.player?.data?.id;
+      const pl = pid ? players[pid] : null;
+      if (!pl || !pl.name) continue;
+      map[`${normName(pl.name)}|${statKey}`] = { line, player: pl.name, team: pl.team };
+      meta.standard++;
+    }
+  } catch (e) {
+    meta.error = e.message;
+  }
+  _ppBoard = { ts: Date.now(), map, meta };
+  return _ppBoard;
+}
 
 /** Accepts decimal (1.87) or American (+120 / -135) prices; returns decimal or null. */
 function evDecimalOdds(v) {
@@ -5798,7 +5872,7 @@ function evAmerican(dec) {
 }
 
 async function buildEV(games) {
-  setStatus("Comparing FanDuel / DraftKings prices vs de-vigged sharp books…");
+  setStatus("Grading PrizePicks standard lines vs de-vigged FanDuel / DraftKings…");
   const groups = {};
   for (const row of lastOddsRows || []) {
     const statKey = (row.statHint || "").toLowerCase();
@@ -5822,46 +5896,64 @@ async function buildEV(games) {
     if (!g.home && row.home) { g.home = row.home; g.away = row.away || g.away; }
   }
 
+  const board = await fetchPrizePicksStandardLines();
+  lastPPBoardMeta = board.meta;
+
   const out = [];
   for (const g of Object.values(groups)) {
-    // Fair probability baseline: first sharp book with a two-way price; consensus of 2+ books as fallback
-    let baseOver = null, baseUnder = null, baselineSrc = null, pin = null;
-    for (const sb of EV_SHARP_BOOKS) {
-      const b = g.books[sb];
-      if (b && b.over && b.under) { pin = b; baseOver = b.over; baseUnder = b.under; baselineSrc = sb; break; }
-    }
-    if (!baseOver) {
-      const both = Object.entries(g.books).filter(([, b]) => b.over && b.under);
-      if (both.length >= 2) {
-        const avgIO = both.reduce((s, [, b]) => s + 1 / b.over, 0) / both.length;
-        const avgIU = both.reduce((s, [, b]) => s + 1 / b.under, 0) / both.length;
-        baseOver = 1 / avgIO; baseUnder = 1 / avgIU; baselineSrc = "consensus";
+    // Fair probability = average of each book's two-way de-vig (FD and/or DK)
+    const twoWay = Object.entries(g.books).filter(([, b]) => b.over && b.under);
+    if (!twoWay.length) continue;
+    let pSum = 0;
+    for (const [, b] of twoWay) { const iO = 1 / b.over, iU = 1 / b.under; pSum += iO / (iO + iU); }
+    const pOverFair = Math.min(0.98, Math.max(0.02, pSum / twoWay.length));
+    const baselineSrc = twoWay.map(([n]) => (n === "FanDuel" ? "FD" : "DK")).join("+") + " de-vig";
+    const matchup = g.away && g.home ? `${g.away} @ ${g.home}` : "";
+    const bookPricesTxt = (side) => EV_BOOKS
+      .filter(bk => g.books[bk] && g.books[bk][side.toLowerCase()])
+      .map(bk => `${bk === "FanDuel" ? "FD" : "DK"} ${evAmerican(g.books[bk][side.toLowerCase()])}`)
+      .join(" / ");
+
+    // A) PrizePicks play: PP standard board line must match the book line exactly
+    const pp = board.map[`${normName(g.player)}|${g.statKey}`];
+    if (pp && Math.abs(pp.line - g.line) < 0.01) {
+      for (const side of ["Over", "Under"]) {
+        const pFair = side === "Over" ? pOverFair : 1 - pOverFair;
+        const ev = pFair * PP_EV_DEC - 1;
+        if (ev < 0.005) continue; // keep only +EV ≥ 0.5%
+        const b = PP_EV_DEC - 1;
+        const kelly = Math.max(0, (pFair * (b + 1) - 1) / b);
+        out.push({
+          evRow: true, isPP: true,
+          player: g.player, statKey: g.statKey, statLabel: EV_STAT_LABELS[g.statKey],
+          line: g.line, side, book: "PrizePicks", dec: PP_EV_DEC,
+          matchup, pFair, fairDec: 1 / pFair, ev, kellyQ: kelly / 4,
+          baselineSrc, detailTxt: bookPricesTxt(side),
+        });
       }
     }
-    if (!baseOver || !baseUnder) continue;
-    const iO = 1 / baseOver, iU = 1 / baseUnder;
-    const pOverFair = Math.min(0.98, Math.max(0.02, iO / (iO + iU)));
 
+    // B) Book-vs-book: grade each book's price against the OTHER book's de-vig
     for (const side of ["Over", "Under"]) {
-      const pFair = side === "Over" ? pOverFair : 1 - pOverFair;
-      for (const book of ["FanDuel", "DraftKings"]) {
+      for (const book of EV_BOOKS) {
+        const other = book === "FanDuel" ? "DraftKings" : "FanDuel";
+        const ob = g.books[other];
+        if (!ob || !ob.over || !ob.under) continue;
         const dec = g.books[book] && g.books[book][side.toLowerCase()];
         if (!dec) continue;
+        const iO = 1 / ob.over, iU = 1 / ob.under;
+        const pFair = Math.min(0.98, Math.max(0.02, side === "Over" ? iO / (iO + iU) : iU / (iO + iU)));
         const ev = pFair * dec - 1;
-        if (ev < 0.005) continue; // keep only +EV ≥ 0.5%
-        // Quarter-Kelly stake suggestion (b = dec-1)
+        if (ev < 0.005) continue;
         const b = dec - 1;
         const kelly = b > 0 ? Math.max(0, (pFair * (b + 1) - 1) / b) : 0;
         out.push({
-          evRow: true,
+          evRow: true, isPP: false,
           player: g.player, statKey: g.statKey, statLabel: EV_STAT_LABELS[g.statKey],
           line: g.line, side, book, dec,
-          matchup: g.away && g.home ? `${g.away} @ ${g.home}` : "",
-          pFair, fairDec: 1 / pFair, ev, kellyQ: kelly / 4,
-          baselineSrc,
-          sharpOver: pin ? pin.over || null : null,
-          sharpUnder: pin ? pin.under || null : null,
-          otherBook: book === "FanDuel" ? (g.books["DraftKings"] || null) : (g.books["FanDuel"] || null),
+          matchup, pFair, fairDec: 1 / pFair, ev, kellyQ: kelly / 4,
+          baselineSrc: `${other === "FanDuel" ? "FD" : "DK"} de-vig`,
+          detailTxt: `${other === "FanDuel" ? "FD" : "DK"} ${evAmerican(ob.over)} / ${evAmerican(ob.under)}`,
         });
       }
     }
@@ -5869,19 +5961,27 @@ async function buildEV(games) {
   out.sort((a, b) => b.ev - a.ev);
   return out.slice(0, 150);
 }
+let lastPPBoardMeta = null;
 
 function evColor(ev) { return ev >= 0.05 ? "#34d399" : ev >= 0.03 ? "#22d3ee" : ev >= 0.015 ? "#fbbf24" : "#94a3b8"; }
 
 function renderEVCards(rows) {
-  const sharpCount = rows.filter(r => r.baselineSrc && r.baselineSrc !== "consensus").length;
+  const ppCount = rows.filter(r => r.isPP).length;
+  const meta = lastPPBoardMeta || {};
+  const boardTxt = meta.error
+    ? `<span style="color:#fb7185">PrizePicks board unavailable (${meta.error}) — showing book-vs-book edges only.</span>`
+    : `PrizePicks board: ${meta.standard || 0} standard lines loaded (${meta.skippedAlt || 0} goblin/demon lines ignored). ${ppCount} PrizePicks +EV plays found.`;
   const header = `
     <div class="card" style="margin-bottom:14px">
       <div style="padding:14px 16px">
-        <div style="font-size:13px;font-weight:700;color:#22d3ee;margin-bottom:6px">💰 POSITIVE EV — FANDUEL / DRAFTKINGS vs SHARP BOOKS</div>
+        <div style="font-size:13px;font-weight:700;color:#22d3ee;margin-bottom:6px">💰 POSITIVE EV — PRIZEPICKS (−119) vs FANDUEL / DRAFTKINGS</div>
         <div style="font-size:11px;color:#94a3b8;line-height:1.7">
-          Sharp / low-margin books (NoVig, Circa, LowVig, BetOnline, BookMaker) have their Over/Under prices de-vigged into a fair win probability for each player prop line.
-          FanDuel and DraftKings prices on the <em>same line</em> are then graded: <strong style="color:#34d399">EV% = fair prob × decimal odds − 1</strong>.
-          Positive EV means the book is paying more than the sharp fair price. ${sharpCount ? `${sharpCount} of ${rows.length} plays are sharp-anchored` : "Sharp lines unavailable — consensus de-vig used"}; stake column is quarter-Kelly.
+          FanDuel and DraftKings Over/Under prices are de-vigged into a fair win probability for each prop line.
+          A PrizePicks <em>standard</em> pick pays like <strong style="color:#a78bfa">−119</strong> per leg (goblin/demon alt lines are ignored),
+          so any side whose fair probability beats <strong>${(PP_EV_BREAKEVEN * 100).toFixed(1)}%</strong> on the same line is a +EV PrizePicks play:
+          <strong style="color:#34d399">EV% = fair prob × 1.84 − 1</strong>.
+          Book-vs-book rows (e.g. FD priced softer than DK's de-vig) are also listed. Stake column is quarter-Kelly.
+          <div style="margin-top:6px;color:#64748b">${boardTxt}</div>
         </div>
       </div>
     </div>`;
@@ -5889,7 +5989,7 @@ function renderEVCards(rows) {
     return header + `
       <div style="text-align:center;padding:40px 0;color:#64748b">
         <div style="font-size:38px;margin-bottom:10px">💤</div>
-        <p style="font-size:13px">No +EV spots right now. Books may not have posted props yet, or the sharp books aren't offering these markets — try refreshing closer to first pitch.</p>
+        <p style="font-size:13px">No +EV spots right now. Books may not have posted props yet, or PrizePicks lines don't match book lines — try refreshing closer to first pitch.</p>
       </div>`;
   }
   const rowsHtml = rows.map(r => {
@@ -5897,12 +5997,9 @@ function renderEVCards(rows) {
     const evPct = (r.ev * 100).toFixed(1);
     const fairPct = (r.pFair * 100).toFixed(1);
     const stake = (r.kellyQ * 100).toFixed(1);
-    const pinTxt = r.sharpOver && r.sharpUnder
-      ? `${r.baselineSrc} ${evAmerican(r.sharpOver)} / ${evAmerican(r.sharpUnder)}`
-      : `consensus baseline`;
-    const otherTxt = r.otherBook && r.otherBook[r.side.toLowerCase()]
-      ? ` · ${r.book === "FanDuel" ? "DK" : "FD"} ${evAmerican(r.otherBook[r.side.toLowerCase()])}`
-      : "";
+    const bookChip = r.isPP
+      ? `<span class="stat-chip" style="color:#a78bfa;font-weight:700;border-color:#a78bfa">PrizePicks −119</span>`
+      : `<span class="stat-chip" style="color:#e2e8f0;font-weight:700">${r.book} ${evAmerican(r.dec)}</span>`;
     return `
       <div class="batter-row" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
         <div style="min-width:210px">
@@ -5914,8 +6011,8 @@ function renderEVCards(rows) {
           ${r.side.toUpperCase()} ${r.line}
         </div>
         <div style="font-size:12px">
-          <span class="stat-chip" style="color:#e2e8f0;font-weight:700">${r.book} ${evAmerican(r.dec)}</span>
-          <div style="font-size:10px;color:#64748b;margin-top:2px">${pinTxt}${otherTxt}</div>
+          ${bookChip}
+          <div style="font-size:10px;color:#64748b;margin-top:2px">${r.baselineSrc}${r.detailTxt ? ` · ${r.detailTxt}` : ""}</div>
         </div>
         <div style="font-size:11px;color:#94a3b8;text-align:right">
           Fair ${fairPct}% (${evAmerican(r.fairDec)})
@@ -5932,6 +6029,8 @@ function renderFilters(tab) {
     ? ["all","strong","nrfi","yrfi"]
     : tab === "hitters"
     ? ["all","pp","over","under"]
+    : tab === "ev"
+    ? ["all","pp","strong","over","under"]
     : ["all","strong","over","under"];
   const f = document.getElementById("filters");
   const exportStrikeouts =
@@ -5940,7 +6039,7 @@ function renderFilters(tab) {
       : "";
   f.innerHTML =
     opts.map(o => `
-    <button class="filter-btn${o===activeFilter?" active":""}" onclick="setFilter('${o}')">${o==="strong"?(tab==="ev"?"3%+ EV":"70%+"):o==="pp"?"Has book line":o.toUpperCase()}</button>
+    <button class="filter-btn${o===activeFilter?" active":""}" onclick="setFilter('${o}')">${o==="strong"?(tab==="ev"?"3%+ EV":"70%+"):o==="pp"?(tab==="ev"?"PrizePicks":"Has book line"):o.toUpperCase()}</button>
   `).join("") +
     `<span class="filters-trail" style="margin-left:auto;display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap">` +
     exportStrikeouts +
@@ -5952,6 +6051,7 @@ function filterData(data) {
   return data.filter(g => {
     if (g.evRow) {
       if (activeFilter==="all")    return true;
+      if (activeFilter==="pp")     return !!g.isPP;
       if (activeFilter==="strong") return g.ev >= 0.03;
       if (activeFilter==="over")   return g.side === "Over";
       if (activeFilter==="under")  return g.side === "Under";
@@ -5978,9 +6078,9 @@ function renderSummary(data, tab) {
       ]
     : tab === "ev"
     ? [
-        { l:"+EV plays",       v:data.length,                                                        c:"#34d399" },
-        { l:"Strong (3%+ EV)", v:data.filter(r=>r.ev>=0.03).length,                                  c:"#22d3ee" },
-        { l:"Sharp-anchored",  v:data.filter(r=>r.baselineSrc&&r.baselineSrc!=="consensus").length,  c:"#a78bfa" },
+        { l:"+EV plays",        v:data.length,                        c:"#34d399" },
+        { l:"Strong (3%+ EV)",  v:data.filter(r=>r.ev>=0.03).length,  c:"#22d3ee" },
+        { l:"PrizePicks plays", v:data.filter(r=>r.isPP).length,      c:"#a78bfa" },
       ]
     : tab === "hitters"
     ? [

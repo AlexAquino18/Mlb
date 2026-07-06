@@ -317,8 +317,8 @@ export default async (request) => {
 
   const url = new URL(request.url);
   const date = url.searchParams.get("date");
-  // Pinnacle is not on odds-api.io — use sharp/low-vig books this feed actually carries.
-  const bookmakers = url.searchParams.get("bookmakers") || "DraftKings,FanDuel,NoVig,Circa,BetOnline.ag,LowVig AG,BookMaker.eu";
+  // API plan allows max 2 bookmakers (FanDuel, DraftKings).
+  const bookmakers = url.searchParams.get("bookmakers") || "DraftKings,FanDuel";
   const dbg = url.searchParams.get("structure") || url.searchParams.get("debug");
   const wantStructure = ["1", "true", "yes"].includes(String(dbg || "").toLowerCase());
   const apiKey = Deno.env.get("ODDS_API_KEY") || Deno.env.get("ODDS_API_IO_KEY");
