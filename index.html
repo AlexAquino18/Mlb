@@ -1707,7 +1707,7 @@ async function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v35:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v36:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -1727,7 +1727,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260706oddsv35" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260706oddsv36" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -5870,11 +5870,39 @@ function evFairOverFromBooks(books) {
   };
 }
 
+/** Best fair-prob estimate for one side — max of each book's de-vig and raw juice (captures FD -135 vs PP -119). */
+function evPPSideFair(books, side) {
+  let bestP = 0, bestSrc = "";
+  const sideKey = side.toLowerCase();
+  for (const [name, b] of Object.entries(books || {})) {
+    if (!b) continue;
+    const lbl = name === "FanDuel" ? "FD" : "DK";
+    const dec = b[sideKey];
+    if (dec) {
+      const pImp = 1 / dec;
+      if (pImp > bestP) { bestP = pImp; bestSrc = `${lbl} juice`; }
+    }
+    if (b.over && b.under) {
+      const iO = 1 / b.over, iU = 1 / b.under;
+      const pDev = side === "Over" ? iO / (iO + iU) : iU / (iO + iU);
+      if (pDev > bestP) { bestP = pDev; bestSrc = `${lbl} de-vig`; }
+    }
+  }
+  if (bestP <= 0) return null;
+  return { pFair: Math.min(0.98, Math.max(0.02, bestP)), baselineSrc: bestSrc };
+}
+
 function evBookPricesTxt(books, side) {
   return EV_BOOKS
     .filter(bk => books[bk] && books[bk][side.toLowerCase()])
     .map(bk => `${bk === "FanDuel" ? "FD" : "DK"} ${evAmerican(books[bk][side.toLowerCase()])}`)
     .join(" / ");
+}
+
+/** Easy alt lines (PP goblin-style): Over 0.5 on counting stats — not regular PP picks. */
+function isGoblinStylePlay(statKey, line, side) {
+  if (side !== "Over" || line > 0.5) return false;
+  return ["hits", "tb", "runs", "rbi", "hrr", "sb", "bb"].includes(statKey);
 }
 
 /** Accepts decimal (1.87) or American (+120 / -135) prices; returns decimal or null. */
@@ -5929,19 +5957,20 @@ async function buildEV(games) {
     out.push(row);
   }
 
-  // A) PrizePicks standard board only — exact line match required (no goblin/demon, no book-only lines)
+  // A) PrizePicks standard board only — exact line match (goblin/demon excluded on PP side)
   for (const pp of board.allLines || []) {
     const g = groups[`${pp.nk}|${pp.statKey}|${pp.line}`];
     if (!g) continue;
-    const fair = evFairOverFromBooks(g.books);
-    if (!fair) continue;
     diag.ppExactMatches++;
     const matchup = g.away && g.home ? `${g.away} @ ${g.home}` : "";
     for (const side of ["Over", "Under"]) {
-      const pFair = side === "Over" ? fair.pOverFair : 1 - fair.pOverFair;
+      if (isGoblinStylePlay(pp.statKey, pp.line, side)) continue;
+      const est = evPPSideFair(g.books, side);
+      if (!est) continue;
+      const { pFair, baselineSrc } = est;
       const ev = pFair * PP_EV_DEC - 1;
       if (ev > 0) diag.ppNearEv++;
-      if (ev < 0.005) continue;
+      if (ev < 0.001) continue;
       const b = PP_EV_DEC - 1;
       const kelly = Math.max(0, (pFair * (b + 1) - 1) / b);
       pushEV({
@@ -5949,7 +5978,7 @@ async function buildEV(games) {
         player: pp.player, statKey: pp.statKey, statLabel: EV_STAT_LABELS[pp.statKey],
         line: pp.line, side, book: "PrizePicks", dec: PP_EV_DEC,
         matchup, pFair, fairDec: 1 / pFair, ev, kellyQ: kelly / 4,
-        baselineSrc: fair.baselineSrc, detailTxt: evBookPricesTxt(g.books, side),
+        baselineSrc, detailTxt: evBookPricesTxt(g.books, side),
       });
     }
   }
@@ -5971,7 +6000,7 @@ async function buildEV(games) {
         const iO = 1 / ob.over, iU = 1 / ob.under;
         const pFair = Math.min(0.98, Math.max(0.02, side === "Over" ? iO / (iO + iU) : iU / (iO + iU)));
         const ev = pFair * dec - 1;
-        if (ev < 0.005) continue;
+        if (ev < 0.001) continue;
         const b = dec - 1;
         const kelly = b > 0 ? Math.max(0, (pFair * (b + 1) - 1) / b) : 0;
         pushEV({
@@ -6009,8 +6038,9 @@ function renderEVCards(rows) {
         <div style="font-size:13px;font-weight:700;color:#22d3ee;margin-bottom:6px">💰 POSITIVE EV — PRIZEPICKS (−119) vs FANDUEL / DRAFTKINGS</div>
         <div style="font-size:11px;color:#94a3b8;line-height:1.7">
           Only <strong>PrizePicks standard board lines</strong> (goblin/demon alt lines excluded) are graded at the <strong style="color:#a78bfa">−119</strong> payout.
-          The PP line must match FanDuel/DraftKings on the <em>exact same number</em>; FD/DK prices are de-vigged into fair probability
-          and any side above <strong>${(PP_EV_BREAKEVEN * 100).toFixed(1)}%</strong> is +EV
+          The PP line must match FanDuel/DraftKings on the <em>exact same number</em>.
+          Fair probability uses the best of each book's de-vig or juice on that side (e.g. FD −135 → ~57% vs PP −119 breakeven 54.3%).
+          Any side above <strong>${(PP_EV_BREAKEVEN * 100).toFixed(1)}%</strong> is +EV
           (<strong style="color:#34d399">EV% = fair prob × 1.84 − 1</strong>).
           Book-vs-book rows (FD vs DK de-vig) are listed separately. Stake column is quarter-Kelly.
           <div style="margin-top:6px;color:#64748b">${boardTxt}</div>
@@ -6225,7 +6255,7 @@ async function loadTab(tab) {
 
     cache[tab] = data;
     if (tab === "strikeouts") recordStrikeoutOddsHistory(data, date);
-    activeFilter = tab === "ev" ? "pp" : "all";
+    activeFilter = "all";
     renderFilters(tab);
     renderSummary(data, tab);
     renderCards(data, tab);
