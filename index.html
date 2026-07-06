@@ -385,7 +385,7 @@
   <div id="disclaimer" style="display:none">
     ⚠ <strong style="color:#fbbf24">DISCLAIMER:</strong> For informational purposes only.
     Stats from MLB Stats API. Weather from Open-Meteo. Park factors from Statcast (2026 3-yr rolling). Umpire data from Umpire Scorecards (multi-year averages).
-    Odds compared across FanDuel / DraftKings / Pinnacle. Verify lineups/props with official sources before wagering. Bet responsibly.
+    Odds compared across FanDuel / DraftKings vs sharp books (NoVig, Circa, LowVig, BetOnline, BookMaker). Verify lineups/props with official sources before wagering. Bet responsibly.
   </div>
 </div>
 
@@ -501,13 +501,17 @@ function normBookmakerLabel(name) {
   const n = (name || "").toLowerCase();
   if (n.includes("fanduel")) return "FanDuel";
   if (n.includes("draftking")) return "DraftKings";
-  if (n.includes("pinnacle")) return "Pinnacle";
+  if (n.includes("novig")) return "NoVig";
+  if (n.includes("circa")) return "Circa";
+  if (n.includes("lowvig")) return "LowVig";
+  if (n.includes("betonline")) return "BetOnline";
+  if (n.includes("bookmaker")) return "BookMaker";
   return name || "";
 }
 /** Per-book Over/Under only for rows whose line matches the card line (same hdp). No “closest alt line” — avoids FD @5.5 vs DK @6.5 on one card. */
 function buildBooksFromRows(bookRows, targetLine) {
   const out = {};
-  const want = ["FanDuel", "DraftKings", "Pinnacle"];
+  const want = ["FanDuel", "DraftKings", "NoVig", "Circa"];
   const tol = 0.01;
   for (const bn of want) {
     const rows = (bookRows || []).filter((r) => normBookmakerLabel(r.book) === bn);
@@ -1703,7 +1707,7 @@ async function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v31:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v32:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -1723,7 +1727,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260706oddsv31" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260706oddsv32" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -5769,12 +5773,15 @@ function setError(msg) {
   document.getElementById("error-msg").textContent = msg ? "⚠ " + msg : "";
 }
 
-// ─── +EV ODDS (FanDuel / DraftKings priced against de-vigged Pinnacle) ───────
+// ─── +EV ODDS (FanDuel / DraftKings priced against de-vigged sharp books) ────
+// odds-api.io doesn't carry Pinnacle; sharp anchors on this feed, in preference order:
+// NoVig (no-vig exchange) > Circa (sharp Vegas) > LowVig > BetOnline > BookMaker.
 const EV_STAT_LABELS = {
   strikeouts: "Pitcher Ks", hits: "Hits", tb: "Total Bases", hr: "Home Runs",
   rbi: "RBI", runs: "Runs", bb: "Walks", sb: "Stolen Bases", hrr: "H+R+RBI",
 };
-const EV_BOOKS = ["FanDuel", "DraftKings", "Pinnacle"];
+const EV_SHARP_BOOKS = ["NoVig", "Circa", "LowVig", "BetOnline", "BookMaker"];
+const EV_BOOKS = ["FanDuel", "DraftKings", ...EV_SHARP_BOOKS];
 
 /** Accepts decimal (1.87) or American (+120 / -135) prices; returns decimal or null. */
 function evDecimalOdds(v) {
@@ -5791,7 +5798,7 @@ function evAmerican(dec) {
 }
 
 async function buildEV(games) {
-  setStatus("Comparing FanDuel / DraftKings prices vs de-vigged Pinnacle…");
+  setStatus("Comparing FanDuel / DraftKings prices vs de-vigged sharp books…");
   const groups = {};
   for (const row of lastOddsRows || []) {
     const statKey = (row.statHint || "").toLowerCase();
@@ -5817,12 +5824,13 @@ async function buildEV(games) {
 
   const out = [];
   for (const g of Object.values(groups)) {
-    // Fair probability baseline: de-vigged Pinnacle two-way; consensus of 2+ books as fallback
-    const pin = g.books["Pinnacle"];
-    let baseOver = null, baseUnder = null, baselineSrc = null;
-    if (pin && pin.over && pin.under) {
-      baseOver = pin.over; baseUnder = pin.under; baselineSrc = "Pinnacle";
-    } else {
+    // Fair probability baseline: first sharp book with a two-way price; consensus of 2+ books as fallback
+    let baseOver = null, baseUnder = null, baselineSrc = null, pin = null;
+    for (const sb of EV_SHARP_BOOKS) {
+      const b = g.books[sb];
+      if (b && b.over && b.under) { pin = b; baseOver = b.over; baseUnder = b.under; baselineSrc = sb; break; }
+    }
+    if (!baseOver) {
       const both = Object.entries(g.books).filter(([, b]) => b.over && b.under);
       if (both.length >= 2) {
         const avgIO = both.reduce((s, [, b]) => s + 1 / b.over, 0) / both.length;
@@ -5851,8 +5859,8 @@ async function buildEV(games) {
           matchup: g.away && g.home ? `${g.away} @ ${g.home}` : "",
           pFair, fairDec: 1 / pFair, ev, kellyQ: kelly / 4,
           baselineSrc,
-          pinOver: pin ? pin.over || null : null,
-          pinUnder: pin ? pin.under || null : null,
+          sharpOver: pin ? pin.over || null : null,
+          sharpUnder: pin ? pin.under || null : null,
           otherBook: book === "FanDuel" ? (g.books["DraftKings"] || null) : (g.books["FanDuel"] || null),
         });
       }
@@ -5865,15 +5873,15 @@ async function buildEV(games) {
 function evColor(ev) { return ev >= 0.05 ? "#34d399" : ev >= 0.03 ? "#22d3ee" : ev >= 0.015 ? "#fbbf24" : "#94a3b8"; }
 
 function renderEVCards(rows) {
-  const pinCount = rows.filter(r => r.baselineSrc === "Pinnacle").length;
+  const sharpCount = rows.filter(r => r.baselineSrc && r.baselineSrc !== "consensus").length;
   const header = `
     <div class="card" style="margin-bottom:14px">
       <div style="padding:14px 16px">
-        <div style="font-size:13px;font-weight:700;color:#22d3ee;margin-bottom:6px">💰 POSITIVE EV — FANDUEL / DRAFTKINGS vs PINNACLE</div>
+        <div style="font-size:13px;font-weight:700;color:#22d3ee;margin-bottom:6px">💰 POSITIVE EV — FANDUEL / DRAFTKINGS vs SHARP BOOKS</div>
         <div style="font-size:11px;color:#94a3b8;line-height:1.7">
-          Pinnacle (sharp, low-margin book) Over/Under prices are de-vigged into a fair win probability for each player prop line.
+          Sharp / low-margin books (NoVig, Circa, LowVig, BetOnline, BookMaker) have their Over/Under prices de-vigged into a fair win probability for each player prop line.
           FanDuel and DraftKings prices on the <em>same line</em> are then graded: <strong style="color:#34d399">EV% = fair prob × decimal odds − 1</strong>.
-          Positive EV means the book is paying more than the sharp fair price. ${pinCount ? `${pinCount} of ${rows.length} plays are Pinnacle-anchored` : "Pinnacle lines unavailable — consensus de-vig used"}; stake column is quarter-Kelly.
+          Positive EV means the book is paying more than the sharp fair price. ${sharpCount ? `${sharpCount} of ${rows.length} plays are sharp-anchored` : "Sharp lines unavailable — consensus de-vig used"}; stake column is quarter-Kelly.
         </div>
       </div>
     </div>`;
@@ -5881,7 +5889,7 @@ function renderEVCards(rows) {
     return header + `
       <div style="text-align:center;padding:40px 0;color:#64748b">
         <div style="font-size:38px;margin-bottom:10px">💤</div>
-        <p style="font-size:13px">No +EV spots right now. Books may not have posted props yet, or Pinnacle isn't offering these markets — try refreshing closer to first pitch.</p>
+        <p style="font-size:13px">No +EV spots right now. Books may not have posted props yet, or the sharp books aren't offering these markets — try refreshing closer to first pitch.</p>
       </div>`;
   }
   const rowsHtml = rows.map(r => {
@@ -5889,9 +5897,9 @@ function renderEVCards(rows) {
     const evPct = (r.ev * 100).toFixed(1);
     const fairPct = (r.pFair * 100).toFixed(1);
     const stake = (r.kellyQ * 100).toFixed(1);
-    const pinTxt = r.pinOver && r.pinUnder
-      ? `Pinnacle ${evAmerican(r.pinOver)} / ${evAmerican(r.pinUnder)}`
-      : `${r.baselineSrc === "consensus" ? "consensus baseline" : "Pinnacle one-sided"}`;
+    const pinTxt = r.sharpOver && r.sharpUnder
+      ? `${r.baselineSrc} ${evAmerican(r.sharpOver)} / ${evAmerican(r.sharpUnder)}`
+      : `consensus baseline`;
     const otherTxt = r.otherBook && r.otherBook[r.side.toLowerCase()]
       ? ` · ${r.book === "FanDuel" ? "DK" : "FD"} ${evAmerican(r.otherBook[r.side.toLowerCase()])}`
       : "";
@@ -5970,9 +5978,9 @@ function renderSummary(data, tab) {
       ]
     : tab === "ev"
     ? [
-        { l:"+EV plays",          v:data.length,                                        c:"#34d399" },
-        { l:"Strong (3%+ EV)",    v:data.filter(r=>r.ev>=0.03).length,                  c:"#22d3ee" },
-        { l:"Pinnacle-anchored",  v:data.filter(r=>r.baselineSrc==="Pinnacle").length,  c:"#a78bfa" },
+        { l:"+EV plays",       v:data.length,                                                        c:"#34d399" },
+        { l:"Strong (3%+ EV)", v:data.filter(r=>r.ev>=0.03).length,                                  c:"#22d3ee" },
+        { l:"Sharp-anchored",  v:data.filter(r=>r.baselineSrc&&r.baselineSrc!=="consensus").length,  c:"#a78bfa" },
       ]
     : tab === "hitters"
     ? [

@@ -431,10 +431,15 @@ def _debug_trim_event(ev: dict) -> Dict[str, Any]:
     return out
 
 
+# Pinnacle is NOT carried by odds-api.io (see /v3/bookmakers). Sharp anchors available
+# on this feed: NoVig (no-vig exchange), Circa (sharp US), BetOnline.ag / LowVig AG / BookMaker.eu.
+DEFAULT_BOOKMAKERS = "DraftKings,FanDuel,NoVig,Circa,BetOnline.ag,LowVig AG,BookMaker.eu"
+
+
 def fetch_mlb_odds_bundle(
     api_key: str,
     target_date: str,
-    bookmakers: str = "DraftKings,FanDuel,Pinnacle",
+    bookmakers: str = DEFAULT_BOOKMAKERS,
     debug_structure: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -442,7 +447,7 @@ def fetch_mlb_odds_bundle(
     Pass debug_structure=True to attach meta.oddsStructureSample (not cached).
     """
     date_key = (target_date or "")[:10]
-    cache_key = f"{date_key}|{bookmakers}|v17"
+    cache_key = f"{date_key}|{bookmakers}|v18"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]

@@ -32,12 +32,12 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         out: dict = {"ok": False, "error": "bad_request"}
         try:
-            from odds_io_impl import fetch_mlb_odds_bundle  # noqa: E402
+            from odds_io_impl import DEFAULT_BOOKMAKERS, fetch_mlb_odds_bundle  # noqa: E402
 
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
             raw_date = (qs.get("date") or [None])[0]
-            bookmakers = (qs.get("bookmakers") or ["DraftKings,FanDuel,Pinnacle"])[0]
+            bookmakers = (qs.get("bookmakers") or [DEFAULT_BOOKMAKERS])[0]
             dbg = (qs.get("structure") or qs.get("debug") or [""])[0]
             debug_structure = str(dbg).lower() in ("1", "true", "yes")
             api_key = os.environ.get("ODDS_API_KEY") or os.environ.get("ODDS_API_IO_KEY")
