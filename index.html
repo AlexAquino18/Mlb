@@ -467,9 +467,33 @@ function toAmericanOdds(raw) {
   if (d >= 2) return Math.round((d - 1) * 100);
   return Math.round(-100 / (d - 1));
 }
+/** Decimal odds for comparison (decimal or American string/number from Odds-API). */
+function oddsToDecimal(raw) {
+  if (raw == null || raw === "") return null;
+  const s = String(raw).trim();
+  if (/^[+\-]?\d{3,5}$/.test(s)) {
+    const am = parseInt(s, 10);
+    return am >= 100 ? 1 + am / 100 : 1 + 100 / Math.abs(am);
+  }
+  const n = parseOddsNumber(raw);
+  if (n == null || n <= 1) return null;
+  if (n >= 1.01 && n < 100) return n;
+  if (n >= 100) return 1 + n / 100;
+  if (n <= -100) return 1 + 100 / Math.abs(n);
+  return null;
+}
 function formatAmerican(am) {
   if (am == null || Number.isNaN(am)) return "—";
   return am > 0 ? `+${am}` : `${am}`;
+}
+/** FD / DK chips for one side — only books that actually posted a price. */
+function formatBookSideOddsChips(fdAm, dkAm, sideLabel) {
+  const tag = sideLabel === "Under" ? "U" : "O";
+  const parts = [];
+  if (fdAm != null) parts.push(`<span style="color:#7EC8FF">FD ${tag} ${formatAmerican(fdAm)}</span>`);
+  if (dkAm != null) parts.push(`<span style="color:#7FD67A">DK ${tag} ${formatAmerican(dkAm)}</span>`);
+  if (!parts.length) return "";
+  return parts.join(`<span style="color:#475569;font-weight:600"> · </span>`);
 }
 function detectOddsMovements() {
   oddsMovements = {};
@@ -508,22 +532,30 @@ function normBookmakerLabel(name) {
   if (n.includes("bookmaker")) return "BookMaker";
   return name || "";
 }
-/** Per-book Over/Under only for rows whose line matches the card line (same hdp). No “closest alt line” — avoids FD @5.5 vs DK @6.5 on one card. */
+/** Per-book Over/Under for rows matching the card line — merge partial rows (some feeds split O/U). */
 function buildBooksFromRows(bookRows, targetLine) {
   const out = {};
-  const want = ["FanDuel", "DraftKings", "NoVig", "Circa"];
+  const want = ["FanDuel", "DraftKings"];
   const tol = 0.01;
   for (const bn of want) {
-    const rows = (bookRows || []).filter((r) => normBookmakerLabel(r.book) === bn);
-    if (!rows.length) continue;
-    const pick = rows.find((r) => Math.abs(Number(r.hdp) - Number(targetLine)) < tol);
-    if (!pick) continue;
+    const atLine = (bookRows || []).filter(
+      (r) => normBookmakerLabel(r.book) === bn && Math.abs(Number(r.hdp) - Number(targetLine)) < tol
+    );
+    if (!atLine.length) continue;
+    let bestOver = null, bestUnder = null;
+    for (const r of atLine) {
+      const oDec = oddsToDecimal(r.over);
+      const uDec = oddsToDecimal(r.under);
+      if (oDec != null && oDec > (bestOver?.dec || 0)) bestOver = { raw: r.over, dec: oDec };
+      if (uDec != null && uDec > (bestUnder?.dec || 0)) bestUnder = { raw: r.under, dec: uDec };
+    }
+    if (!bestOver && !bestUnder) continue;
     out[bn] = {
-      hdp: pick.hdp,
-      over: pick.over,
-      under: pick.under,
-      overAm: toAmericanOdds(pick.over),
-      underAm: toAmericanOdds(pick.under),
+      hdp: targetLine,
+      over: bestOver?.raw ?? null,
+      under: bestUnder?.raw ?? null,
+      overAm: toAmericanOdds(bestOver?.raw),
+      underAm: toAmericanOdds(bestUnder?.raw),
     };
   }
   return out;
@@ -732,48 +764,25 @@ function renderOddsSparkChart(hist, opts = {}) {
 
 function renderBookOddsBadges(g) {
   if (!g.lineSrc || g.lineSrc !== "sportsbook") return "";
-  const fdO = g.fdOverAm;
-  const dkO = g.dkOverAm;
-  const fdU = g.fdUnderAm;
-  const dkU = g.dkUnderAm;
-  if (fdO == null && dkO == null) return "";
-  const side = g.pickOver ? "O" : "U";
-  const fd = g.pickOver ? fdO : fdU;
-  const dk = g.pickOver ? dkO : dkU;
+  const fdO = g.fdOverAm, dkO = g.dkOverAm, fdU = g.fdUnderAm, dkU = g.dkUnderAm;
+  if (fdO == null && dkO == null && fdU == null && dkU == null) return "";
+  const side = g.pickOver ? "Over" : "Under";
+  const fdPick = g.pickOver ? fdO : fdU;
+  const dkPick = g.pickOver ? dkO : dkU;
   const om = g.oddsMov;
-  const fdM = om?.fd;
-  const dkM = om?.dk;
+  const fdM = om?.fd, dkM = om?.dk;
   const pillO = "border-radius:8px;padding:8px 14px;font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:.02em";
   const pillU = "border-radius:7px;padding:5px 11px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums";
+  const pickChips = formatBookSideOddsChips(fdPick, dkPick, side);
   return `
     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px">
-      ${
-        fdO != null
-          ? `<span style="background:rgba(43,138,235,.14);border:1px solid rgba(43,138,235,.5);color:#7EC8FF;${pillO}" title="FanDuel Over (American)">FD O ${formatAmerican(fdO)}</span>`
-          : ""
-      }
-      ${
-        dkO != null
-          ? `<span style="background:rgba(67,160,71,.14);border:1px solid rgba(67,160,71,.5);color:#7FD67A;${pillO}" title="DraftKings Over (American)">DK O ${formatAmerican(dkO)}</span>`
-          : ""
-      }
-      ${
-        fdU != null
-          ? `<span style="background:rgba(43,138,235,.08);border:1px solid rgba(43,138,235,.28);color:#9EC5FF;${pillU}" title="FanDuel Under">FD U ${formatAmerican(fdU)}</span>`
-          : ""
-      }
-      ${
-        dkU != null
-          ? `<span style="background:rgba(67,160,71,.08);border:1px solid rgba(67,160,71,.28);color:#A5D9A0;${pillU}" title="DraftKings Under">DK U ${formatAmerican(dkU)}</span>`
-          : ""
-      }
+      ${fdO != null ? `<span style="background:rgba(43,138,235,.14);border:1px solid rgba(43,138,235,.5);color:#7EC8FF;${pillO}" title="FanDuel Over">FD O ${formatAmerican(fdO)}</span>` : ""}
+      ${dkO != null ? `<span style="background:rgba(67,160,71,.14);border:1px solid rgba(67,160,71,.5);color:#7FD67A;${pillO}" title="DraftKings Over">DK O ${formatAmerican(dkO)}</span>` : ""}
+      ${fdU != null ? `<span style="background:rgba(43,138,235,.08);border:1px solid rgba(43,138,235,.28);color:#9EC5FF;${pillU}" title="FanDuel Under">FD U ${formatAmerican(fdU)}</span>` : ""}
+      ${dkU != null ? `<span style="background:rgba(67,160,71,.08);border:1px solid rgba(67,160,71,.28);color:#A5D9A0;${pillU}" title="DraftKings Under">DK U ${formatAmerican(dkU)}</span>` : ""}
     </div>
-    ${
-      fdM || dkM
-        ? `<div style="margin-top:6px;font-size:12px;color:#94a3b8">vs first load today — Over price: ${fdM ? `<span style="color:#7EC8FF">FD ${formatAmerican(fdM.from)}→${formatAmerican(fdM.to)} ${fdM.dir === "up" ? "▲" : "▼"}</span>` : ""}${fdM && dkM ? " · " : ""}${dkM ? `<span style="color:#7FD67A">DK ${formatAmerican(dkM.from)}→${formatAmerican(dkM.to)} ${dkM.dir === "up" ? "▲" : "▼"}</span>` : ""}</div>`
-        : ""
-    }
-    <div style="margin-top:4px;font-size:12px;color:#94a3b8">Pick side (${side === "O" ? "Over" : "Under"}): <strong style="color:#f1f5f9;font-size:13px;font-variant-numeric:tabular-nums">FD ${formatAmerican(fd)}</strong> · <strong style="color:#f1f5f9;font-size:13px;font-variant-numeric:tabular-nums">DK ${formatAmerican(dk)}</strong></div>
+    ${fdM || dkM ? `<div style="margin-top:6px;font-size:12px;color:#94a3b8">vs first load today — Over price: ${fdM ? `<span style="color:#7EC8FF">FD ${formatAmerican(fdM.from)}→${formatAmerican(fdM.to)} ${fdM.dir === "up" ? "▲" : "▼"}</span>` : ""}${fdM && dkM ? " · " : ""}${dkM ? `<span style="color:#7FD67A">DK ${formatAmerican(dkM.from)}→${formatAmerican(dkM.to)} ${dkM.dir === "up" ? "▲" : "▼"}</span>` : ""}</div>` : ""}
+    ${pickChips ? `<div style="margin-top:4px;font-size:12px;color:#94a3b8">Pick side (${side}): ${pickChips}</div>` : ""}
   `;
 }
 
@@ -1707,7 +1716,7 @@ async function applyOddsRowsToState(rows, games, debugLines) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v36:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v37:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -1727,7 +1736,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260706oddsv36" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260707oddsv37" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
@@ -4075,6 +4084,8 @@ async function buildSO(games, season) {
         if (body) body.innerHTML += `<div style="color:#fbbf24">⚠ No PP match: "${pitcherName}" (${soTeamAbbr})</div>`;
       }
 
+      if (!ppEntry && !e.prob) continue;
+
       // Expected IP: blend PP outs line with season avg IP/start
       const seasonIP = (p.gs && p.ip) ? Math.min(7.0, Math.max(4.0, p.ip / Math.max(p.gs, 1))) : 5.0;
       const ppIpFromOuts = ppEntry?.outsLine != null ? ppEntry.outsLine / 3 : null;
@@ -5587,8 +5598,8 @@ function renderSOCard(g) {
               ? `<span style="background:#22d3ee22;border:1px solid #22d3eeaa;color:#22d3ee;border-radius:6px;padding:5px 12px;font-size:14px;font-weight:800;letter-spacing:.04em;font-variant-numeric:tabular-nums">📊 Book: ${g.line} K</span>`
               : `<span style="background:rgba(100,116,139,.18);border:1px solid rgba(100,116,139,.35);color:#64748b;border-radius:6px;padding:5px 12px;font-size:13px;font-weight:700">CALC: ${g.line} K</span>`}
             ${g.lineMov ? renderLineMovement(g.lineMov) : ""}
-            ${g.lineSrc === "sportsbook" && (g.fdOverAm != null || g.dkOverAm != null)
-              ? `<span style="display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:14px;font-weight:800;font-variant-numeric:tabular-nums" title="American odds on Over (FanDuel & DraftKings)"><span style="color:#7EC8FF">FD O ${formatAmerican(g.fdOverAm)}</span><span style="color:#475569;font-weight:600">·</span><span style="color:#7FD67A">DK O ${formatAmerican(g.dkOverAm)}</span>${g.oddsMov?.fd || g.oddsMov?.dk ? `<span style="color:#fbbf24;font-size:11px;font-weight:800;margin-left:4px" title="Over price changed vs first load today">odds shift</span>` : ""}</span>`
+            ${g.lineSrc === "sportsbook" && (g.fdOverAm != null || g.dkOverAm != null || g.fdUnderAm != null || g.dkUnderAm != null)
+              ? `<span style="display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:14px;font-weight:800;font-variant-numeric:tabular-nums" title="Sportsbook odds on ${g.pickOver ? "Over" : "Under"} ${g.line}">${formatBookSideOddsChips(g.pickOver ? g.fdOverAm : g.fdUnderAm, g.pickOver ? g.dkOverAm : g.dkUnderAm, g.pickOver ? "Over" : "Under")}${g.oddsMov?.fd || g.oddsMov?.dk ? `<span style="color:#fbbf24;font-size:11px;font-weight:800;margin-left:4px" title="Over price changed vs first load today">odds shift</span>` : ""}</span>`
               : ""}
             ${g.fanGraphsInModel ? (g.fgSource === "statcast"
               ? `<span style="font-size:10px;font-weight:700;color:#c4b5fd;border:1px solid rgba(196,181,253,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="Savant Statcast rates (K%, whiff%)">Statcast</span>`
@@ -5899,6 +5910,24 @@ function evBookPricesTxt(books, side) {
     .join(" / ");
 }
 
+/** Best (heaviest) American price on one side across FD/DK. */
+function bestSideAmerican(books, side) {
+  let best = null;
+  const sideKey = side.toLowerCase();
+  for (const bk of EV_BOOKS) {
+    const dec = books?.[bk]?.[sideKey];
+    if (!dec) continue;
+    const am = evAmerican(dec);
+    if (am == null) continue;
+    if (best == null || am < best) best = am;
+  }
+  return best;
+}
+/** Book charges more juice than PP −119 on this side (e.g. FD −135 → PP −119 is better). */
+function bookJuiceBetterThanPP(am) {
+  return am != null && am <= -120;
+}
+
 /** Easy alt lines (PP goblin-style): Over 0.5 on counting stats — not regular PP picks. */
 function isGoblinStylePlay(statKey, line, side) {
   if (side !== "Over" || line > 0.5) return false;
@@ -5907,12 +5936,7 @@ function isGoblinStylePlay(statKey, line, side) {
 
 /** Accepts decimal (1.87) or American (+120 / -135) prices; returns decimal or null. */
 function evDecimalOdds(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n) || n === 0) return null;
-  if (n >= 1.01 && n < 100) return n;
-  if (n >= 100) return 1 + n / 100;
-  if (n <= -100) return 1 + 100 / Math.abs(n);
-  return null;
+  return oddsToDecimal(v);
 }
 function evAmerican(dec) {
   if (!dec || dec <= 1) return "—";
@@ -5967,10 +5991,17 @@ async function buildEV(games) {
       if (isGoblinStylePlay(pp.statKey, pp.line, side)) continue;
       const est = evPPSideFair(g.books, side);
       if (!est) continue;
-      const { pFair, baselineSrc } = est;
-      const ev = pFair * PP_EV_DEC - 1;
-      if (ev > 0) diag.ppNearEv++;
-      if (ev < 0.001) continue;
+      let { pFair, baselineSrc } = est;
+      let ev = pFair * PP_EV_DEC - 1;
+      const bestAm = bestSideAmerican(g.books, side);
+      const juiceEdge = bookJuiceBetterThanPP(bestAm);
+      if (juiceEdge && bestAm != null) {
+        const pJuice = bestAm >= 100 ? 100 / (bestAm + 100) : Math.abs(bestAm) / (Math.abs(bestAm) + 100);
+        const evJuice = pJuice * PP_EV_DEC - 1;
+        if (evJuice > ev) { pFair = pJuice; ev = evJuice; baselineSrc = "book juice"; }
+      }
+      if (ev > 0 || juiceEdge) diag.ppNearEv++;
+      if (ev < 0.001 && !juiceEdge) continue;
       const b = PP_EV_DEC - 1;
       const kelly = Math.max(0, (pFair * (b + 1) - 1) / b);
       pushEV({
@@ -5978,7 +6009,7 @@ async function buildEV(games) {
         player: pp.player, statKey: pp.statKey, statLabel: EV_STAT_LABELS[pp.statKey],
         line: pp.line, side, book: "PrizePicks", dec: PP_EV_DEC,
         matchup, pFair, fairDec: 1 / pFair, ev, kellyQ: kelly / 4,
-        baselineSrc, detailTxt: evBookPricesTxt(g.books, side),
+        baselineSrc, detailTxt: evBookPricesTxt(g.books, side) + (juiceEdge && ev < 0.001 ? " · book juice worse than PP −119" : ""),
       });
     }
   }
