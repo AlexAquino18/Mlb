@@ -1,5 +1,5 @@
 """
-MLB Edge — Python dev server + PrizePicks proxy
+PropPulse — Python dev server + PrizePicks proxy
 Uses curl_cffi to impersonate Chrome TLS fingerprint, bypassing Cloudflare bot detection.
 
 Install once:
@@ -192,6 +192,7 @@ def so_matchup_route():
         )
 
 
+@app.route("/api/pp")
 @app.route("/.netlify/functions/pp")
 def pp_proxy():
     if request.method == "OPTIONS":
@@ -249,8 +250,8 @@ def static_files(filename):
 
 
 if __name__ == "__main__":
-    print(f"MLB Edge -> http://localhost:{PORT}")
-    print("PrizePicks proxy: /.netlify/functions/pp  (Chrome TLS impersonation via curl_cffi)")
+    print(f"PropPulse -> http://localhost:{PORT}")
+    print("PrizePicks proxy: /api/pp  (Chrome TLS impersonation via curl_cffi)")
     app.run(host="0.0.0.0", port=PORT, debug=False)
 
 # Expose `app` for gunicorn: gunicorn server:app

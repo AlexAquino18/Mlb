@@ -154,6 +154,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`MLB Edge → http://localhost:${PORT}`);
+  console.log(`PropPulse → http://localhost:${PORT}`);
   console.log("PrizePicks proxy: /.netlify/functions/pp (same as Netlify)");
 });

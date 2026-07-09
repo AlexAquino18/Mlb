@@ -2,14 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>MLB Edge Model</title>
+  <title>PropPulse — Player Prop Intelligence</title>
+  <meta name="description" content="PropPulse delivers MLB player prop edges — NRFI, strikeouts, hitters, and +EV odds vs PrizePicks and sportsbooks. More sports coming soon." />
+  <meta property="og:title" content="PropPulse" />
+  <meta property="og:description" content="Smart player prop intelligence for MLB. Model-driven edges and +EV odds." />
+  <meta property="og:type" content="website" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <!-- iOS home screen / PWA -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="MLB Edge" />
+  <meta name="apple-mobile-web-app-title" content="PropPulse" />
   <meta name="theme-color" content="#070b14" />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
@@ -78,6 +82,24 @@
       color: var(--accent);
       line-height: 1;
       text-shadow: 0 0 40px rgba(34, 211, 238, 0.35);
+    }
+    .brand-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .sport-pill {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: rgba(52, 211, 153, 0.12);
+      border: 1px solid rgba(52, 211, 153, 0.35);
+      color: var(--good);
+      line-height: 1;
+    }
+    .sport-pill.soon {
+      background: rgba(139, 156, 179, 0.1);
+      border-color: rgba(139, 156, 179, 0.25);
+      color: var(--muted);
     }
     #subtitle { color: var(--muted); font-size: 12px; margin-top: 5px; font-weight: 500; letter-spacing: 0.02em; }
     #header-right { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -277,7 +299,82 @@
     .batter-row:hover { background: rgba(0,212,255,.03); border-radius: 6px; }
     .batter-gl { display: none; padding: 6px 0 2px; }
     .batter-gl.open { display: block; }
-    #disclaimer { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-top: 24px; color: var(--muted); font-size: 11px; line-height: 1.65; backdrop-filter: blur(8px); }
+    #disclaimer { display: none; }
+
+    /* ── +EV TABLE ───────────────────────────────────────────────────────── */
+    .ev-intro { margin-bottom: 16px; }
+    .ev-intro-hd { font-size: 14px; font-weight: 700; color: var(--accent); margin-bottom: 8px; letter-spacing: 0.02em; }
+    .ev-intro-body { font-size: 12px; color: var(--muted); line-height: 1.65; }
+    .ev-intro-meta { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 11px; color: #64748b; font-family: var(--font-mono); }
+    .ev-table-wrap { overflow: hidden; }
+    .ev-thead, .ev-row {
+      display: grid;
+      grid-template-columns: minmax(140px, 1.5fr) minmax(72px, 0.65fr) minmax(100px, 0.85fr) minmax(88px, 0.75fr) minmax(64px, 0.55fr);
+      gap: 10px;
+      align-items: center;
+      padding: 12px 18px;
+    }
+    .ev-thead {
+      background: rgba(7, 11, 20, 0.55);
+      border-bottom: 1px solid var(--border);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #64748b;
+    }
+    .ev-row {
+      border-bottom: 1px solid rgba(30, 45, 69, 0.55);
+      transition: background 0.15s;
+    }
+    .ev-row:last-child { border-bottom: none; }
+    .ev-row:hover { background: rgba(34, 211, 238, 0.03); }
+    .ev-row.pp { border-left: 3px solid #a78bfa; }
+    .ev-row.book { border-left: 3px solid rgba(34, 211, 238, 0.35); }
+    .ev-player { font-weight: 700; font-size: 13px; color: var(--text); }
+    .ev-matchup { font-size: 10px; color: #64748b; margin-top: 3px; }
+    .ev-stat-chip { margin-top: 4px; }
+    .ev-pick { font-size: 13px; font-weight: 800; letter-spacing: 0.02em; }
+    .ev-pick.over { color: var(--good); }
+    .ev-pick.under { color: var(--bad); }
+    .ev-book-chip {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      padding: 3px 8px;
+      border-radius: 6px;
+      margin-bottom: 4px;
+    }
+    .ev-book-chip.pp { background: rgba(167, 139, 250, 0.14); border: 1px solid rgba(167, 139, 250, 0.4); color: #c4b5fd; }
+    .ev-book-chip.book { background: rgba(34, 211, 238, 0.1); border: 1px solid rgba(34, 211, 238, 0.3); color: var(--accent); }
+    .ev-detail { font-size: 10px; color: #64748b; line-height: 1.45; }
+    .ev-fair { font-size: 12px; color: #94a3b8; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    .ev-kelly { font-size: 10px; color: #64748b; margin-top: 2px; }
+    .ev-pct { font-size: 15px; font-weight: 800; font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+    .ev-empty { text-align: center; padding: 48px 20px; color: #64748b; }
+    .ev-empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.85; }
+    .ev-empty p { font-size: 13px; line-height: 1.6; max-width: 420px; margin: 0 auto; }
+
+    /* ── FOOTER ──────────────────────────────────────────────────────────── */
+    #site-footer {
+      border-top: 1px solid var(--border);
+      background: rgba(7, 11, 20, 0.75);
+      padding: 28px 18px;
+      padding-bottom: max(28px, env(safe-area-inset-bottom));
+      margin-top: 8px;
+    }
+    .footer-inner { max-width: 1040px; margin: 0 auto; text-align: center; }
+    .footer-brand {
+      font-family: var(--font-display);
+      font-size: 22px;
+      letter-spacing: 0.12em;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+    .footer-tag { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+    .footer-disclaimer { color: #64748b; font-size: 11px; line-height: 1.65; max-width: 720px; margin: 0 auto 12px; }
+    .footer-meta { color: #475569; font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.04em; }
 
     /* ── GAME LOG TABLE ──────────────────────────────────────────────────── */
     .game-log-table { width:100%; border-collapse:collapse; font-size:11px; margin-top:8px; }
@@ -309,6 +406,8 @@
     @media (max-width: 600px) {
       #header { padding: 12px 14px; }
       h1 { font-size: 24px; }
+      .brand-row { gap: 6px; }
+      .sport-pill { font-size: 9px; padding: 3px 7px; }
       #subtitle { font-size: 10px; }
       #header-right { gap: 6px; }
       #header-right input[type=date] { font-size: 10px; padding: 5px 7px; }
@@ -335,6 +434,13 @@
       .lineup-batter { font-size: 11px; }
       #filters { gap: 5px; }
       .filter-btn { font-size: 10px; padding: 3px 9px; }
+      .ev-thead { display: none; }
+      .ev-row {
+        grid-template-columns: 1fr;
+        gap: 6px;
+        padding: 14px 16px;
+      }
+      .ev-pct { text-align: left; }
     }
   </style>
 </head>
@@ -343,14 +449,17 @@
 <div id="header">
   <div id="header-inner">
     <div>
-      <h1>MLB EDGE MODEL</h1>
+      <div class="brand-row">
+        <h1>PROPPULSE</h1>
+        <span class="sport-pill">MLB</span>
+        <span class="sport-pill soon" title="Coming later">NBA · NFL</span>
+      </div>
       <div id="subtitle">Initializing…</div>
     </div>
     <div id="header-right">
       <input type="date" id="date-picker" />
       <span id="updated"></span>
       <button class="btn btn-accent" id="pp-debug-btn" style="display:none" onclick="document.getElementById('pp-debug').style.display='block'">📊 Book lines</button>
-      <button class="btn btn-accent" id="refresh-btn">↻ REFRESH</button>
     </div>
   </div>
 </div>
@@ -381,16 +490,26 @@
     </div>
     <div id="pp-debug-body" style="font-size:11px;line-height:1.8;color:#94a3b8;font-family:monospace"></div>
   </div>
-
-  <div id="disclaimer" style="display:none">
-    ⚠ <strong style="color:#fbbf24">DISCLAIMER:</strong> For informational purposes only.
-    Stats from MLB Stats API. Weather from Open-Meteo. Park factors from Statcast (2026 3-yr rolling). Umpire data from Umpire Scorecards (multi-year averages).
-    Odds from FanDuel / DraftKings; +EV grades PrizePicks standard lines (assumed −119 per leg, goblin/demon lines ignored) against de-vigged book prices. Verify lineups/props with official sources before wagering. Bet responsibly.
-  </div>
 </div>
+
+<footer id="site-footer">
+  <div class="footer-inner">
+    <div class="footer-brand">PROPPULSE</div>
+    <p class="footer-tag">Player prop intelligence · MLB live · NBA &amp; NFL coming</p>
+    <p class="footer-disclaimer">
+      For informational purposes only — not betting advice. Stats from MLB Stats API; weather from Open-Meteo;
+      park factors from Statcast; umpire data from Umpire Scorecards. Odds from FanDuel / DraftKings.
+      +EV grades PrizePicks standard lines at −119 vs de-vigged book prices (goblin/demon lines excluded).
+      Verify lineups and props before wagering. Bet responsibly.
+    </p>
+    <p class="footer-meta">Auto-refreshes every 30 minutes · Data cached to limit API usage</p>
+  </div>
+</footer>
 
 <script>
 "use strict";
+const APP_NAME = "PropPulse";
+const AUTO_REFRESH_MS = 30 * 60 * 1000;
 const MLB    = "https://statsapi.mlb.com/api/v1";
 const PROXY  = "https://corsproxy.io/?url=";
 const PROXY2 = "https://api.allorigins.win/raw?url=";
@@ -868,7 +987,7 @@ function exportStrikeoutTracking() {
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `mlb-edge-so-tracking-${dateStr}.csv`;
+  a.download = `proppulse-so-tracking-${dateStr}.csv`;
   a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
@@ -1739,15 +1858,8 @@ function oddsIoFetchUrl(dateStr) {
   const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260707oddsv37" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
-  const isNetlify = host.includes("netlify.app") || host.includes("netlify.com");
-  const isVercel  = host.includes("vercel.app");
-  const isLocal   = host === "localhost" || host === "127.0.0.1";
-  if (isNetlify) return `${location.origin}/.netlify/functions/odds_io?${qs}`;
-  if (isVercel) return `${location.origin}/api/odds_io?${qs}`;
-  if (isLocal) {
-    if (location.port === "8888") return `${location.origin}/.netlify/functions/odds_io?${qs}`;
-    return `http://127.0.0.1:8080/api/odds_io?${qs}`;
-  }
+  const isLocal = host === "localhost" || host === "127.0.0.1";
+  if (isLocal) return `http://127.0.0.1:8080/api/odds_io?${qs}`;
   return `${location.origin}/api/odds_io?${qs}`;
 }
 
@@ -5776,7 +5888,6 @@ function focusBatter(gamePk, playerId) {
 function setStatus(msg) { document.getElementById("load-status").textContent = msg; }
 function setLoading(on) {
   document.getElementById("loader").style.display = on ? "flex" : "none";
-  document.getElementById("refresh-btn").disabled = on;
 }
 function setError(msg) {
   const b = document.getElementById("error-box");
@@ -5814,12 +5925,7 @@ function ppProxyUrl(path) {
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const qs = "path=" + encodeURIComponent(path);
   const host = location.hostname;
-  if (host.includes("netlify.app") || host.includes("netlify.com")) return `${location.origin}/.netlify/functions/pp?${qs}`;
-  if (host.includes("vercel.app")) return `${location.origin}/api/pp?${qs}`;
-  if (host === "localhost" || host === "127.0.0.1") {
-    if (location.port === "8888") return `${location.origin}/.netlify/functions/pp?${qs}`;
-    return `http://127.0.0.1:8080/.netlify/functions/pp?${qs}`;
-  }
+  if (host === "localhost" || host === "127.0.0.1") return `http://127.0.0.1:8080/api/pp?${qs}`;
   return `${location.origin}/api/pp?${qs}`;
 }
 
@@ -6047,7 +6153,11 @@ async function buildEV(games) {
   }
 
   lastPPBoardMeta = { ...board.meta, ...diag };
-  out.sort((a, b) => b.ev - a.ev);
+  out.sort((a, b) => {
+    if (a.isPP && !b.isPP) return -1;
+    if (!a.isPP && b.isPP) return 1;
+    return b.ev - a.ev;
+  });
   return out.slice(0, 150);
 }
 let lastPPBoardMeta = null;
@@ -6058,63 +6168,76 @@ function renderEVCards(rows) {
   const ppCount = rows.filter(r => r.isPP && r.ppOnBoard).length;
   const meta = lastPPBoardMeta || {};
   const matchTxt = meta.bookGroups != null
-    ? `${meta.standard || 0} PP standard lines · ${meta.ppExactMatches || 0} matched FD/DK at same number · ${meta.twoWayGroups || 0} book two-way props`
+    ? `${meta.standard || 0} PP standard · ${meta.ppExactMatches || 0} matched FD/DK · ${meta.twoWayGroups || 0} two-way props`
     : "";
-  const boardTxt = meta.error
-    ? `<span style="color:#fb7185">PrizePicks board unavailable (${meta.error}) — showing book-vs-book edges only.</span>`
-    : `${ppCount} +EV PrizePicks standard plays (goblin/demon alt lines excluded).${matchTxt ? `<br><span style="color:#64748b">${matchTxt}${meta.ppExactMatches === 0 && meta.standard ? " — no PP standard line shares the same number as FD/DK today." : meta.ppExactMatches > 0 && ppCount === 0 ? ` · ${meta.ppNearEv || 0} matched but none cleared +EV vs −119 (need fair prob &gt; ${(PP_EV_BREAKEVEN * 100).toFixed(1)}%).` : ""}</span>` : ""}`;
-  const header = `
-    <div class="card" style="margin-bottom:14px">
-      <div style="padding:14px 16px">
-        <div style="font-size:13px;font-weight:700;color:#22d3ee;margin-bottom:6px">💰 POSITIVE EV — PRIZEPICKS (−119) vs FANDUEL / DRAFTKINGS</div>
-        <div style="font-size:11px;color:#94a3b8;line-height:1.7">
-          Only <strong>PrizePicks standard board lines</strong> (goblin/demon alt lines excluded) are graded at the <strong style="color:#a78bfa">−119</strong> payout.
-          The PP line must match FanDuel/DraftKings on the <em>exact same number</em>.
-          Fair probability uses the best of each book's de-vig or juice on that side (e.g. FD −135 → ~57% vs PP −119 breakeven 54.3%).
-          Any side above <strong>${(PP_EV_BREAKEVEN * 100).toFixed(1)}%</strong> is +EV
-          (<strong style="color:#34d399">EV% = fair prob × 1.84 − 1</strong>).
-          Book-vs-book rows (FD vs DK de-vig) are listed separately. Stake column is quarter-Kelly.
-          <div style="margin-top:6px;color:#64748b">${boardTxt}</div>
+  let boardNote = "";
+  if (meta.error) {
+    boardNote = `<span style="color:#fb7185">PrizePicks unavailable (${meta.error}) — book-vs-book only.</span>`;
+  } else if (!rows.length && meta.ppExactMatches === 0 && meta.standard) {
+    boardNote = "No PP standard line shares the same number as FD/DK today.";
+  } else if (!ppCount && meta.ppExactMatches > 0) {
+    boardNote = `${meta.ppExactMatches} matched but none cleared +EV vs −119 (need &gt; ${(PP_EV_BREAKEVEN * 100).toFixed(1)}% fair prob).`;
+  } else if (ppCount) {
+    boardNote = `${ppCount} PrizePicks play${ppCount === 1 ? "" : "s"} · goblin/demon lines excluded`;
+  }
+
+  const intro = `
+    <div class="game-card ev-intro">
+      <div style="padding:16px 18px">
+        <div class="ev-intro-hd">+EV Odds Scanner</div>
+        <div class="ev-intro-body">
+          Grades <strong>PrizePicks standard board lines</strong> at −119 against FanDuel / DraftKings de-vig and juice.
+          PP must match books on the <em>exact same number</em>. Book-vs-book edges listed separately. Stake = ¼-Kelly.
         </div>
+        ${matchTxt || boardNote ? `<div class="ev-intro-meta">${boardNote || matchTxt}${boardNote && matchTxt ? `<br>${matchTxt}` : ""}</div>` : ""}
       </div>
     </div>`;
+
   if (!rows.length) {
-    return header + `
-      <div style="text-align:center;padding:40px 0;color:#64748b">
-        <div style="font-size:38px;margin-bottom:10px">💤</div>
-        <p style="font-size:13px">No +EV PrizePicks standard plays right now. Goblin/demon alt lines are excluded — only PP standard board lines that match FD/DK on the exact same number are graded. Try refreshing closer to first pitch.</p>
+    return intro + `
+      <div class="game-card ev-empty">
+        <div class="ev-empty-icon">💤</div>
+        <p>No +EV plays right now. Check back closer to first pitch — lines update throughout the day.</p>
       </div>`;
   }
+
   const rowsHtml = rows.map(r => {
     const c = evColor(r.ev);
     const evPct = (r.ev * 100).toFixed(1);
     const fairPct = (r.pFair * 100).toFixed(1);
     const stake = (r.kellyQ * 100).toFixed(1);
+    const sideCls = r.side === "Over" ? "over" : "under";
+    const rowCls = r.isPP ? "pp" : "book";
     const bookChip = r.isPP
-      ? `<span class="stat-chip" style="color:#a78bfa;font-weight:700;border-color:#a78bfa">PrizePicks −119</span>`
-      : `<span class="stat-chip" style="color:#e2e8f0;font-weight:700">${r.book} ${evAmerican(r.dec)}</span>`;
+      ? `<span class="ev-book-chip pp">PrizePicks −119</span>`
+      : `<span class="ev-book-chip book">${r.book} ${evAmerican(r.dec)}</span>`;
     return `
-      <div class="batter-row" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
-        <div style="min-width:210px">
-          <span class="pitcher-name">${r.player}</span>
-          <span class="stat-chip" style="margin-left:6px">${r.statLabel}</span>
-          <div style="font-size:10px;color:#64748b;margin-top:2px">${r.matchup || ""}</div>
+      <div class="ev-row ${rowCls}">
+        <div>
+          <div class="ev-player">${r.player}</div>
+          <div class="ev-matchup">${r.matchup || "—"}</div>
+          <span class="stat-chip ev-stat-chip">${r.statLabel}</span>
         </div>
-        <div style="font-size:12px;font-weight:700;color:${r.side === "Over" ? "#34d399" : "#fb7185"}">
-          ${r.side.toUpperCase()} ${r.line}
-        </div>
-        <div style="font-size:12px">
+        <div class="ev-pick ${sideCls}">${r.side.toUpperCase()} ${r.line}</div>
+        <div>
           ${bookChip}
-          <div style="font-size:10px;color:#64748b;margin-top:2px">${r.baselineSrc}${r.detailTxt ? ` · ${r.detailTxt}` : ""}</div>
+          <div class="ev-detail">${r.baselineSrc}${r.detailTxt ? ` · ${r.detailTxt}` : ""}</div>
         </div>
-        <div style="font-size:11px;color:#94a3b8;text-align:right">
-          Fair ${fairPct}% (${evAmerican(r.fairDec)})
-          <div style="font-size:10px;color:#64748b;margin-top:2px">¼-Kelly ${stake}% bankroll</div>
+        <div>
+          <div class="ev-fair">${fairPct}% fair</div>
+          <div class="ev-kelly">¼-Kelly ${stake}%</div>
         </div>
-        <div style="font-size:14px;font-weight:800;color:${c};min-width:64px;text-align:right">+${evPct}% EV</div>
+        <div class="ev-pct" style="color:${c}">+${evPct}%</div>
       </div>`;
   }).join("");
-  return header + `<div class="card"><div style="padding:6px 12px">${rowsHtml}</div></div>`;
+
+  return intro + `
+    <div class="game-card ev-table-wrap">
+      <div class="ev-thead">
+        <span>Player</span><span>Pick</span><span>Book</span><span>Fair / Stake</span><span>EV</span>
+      </div>
+      ${rowsHtml}
+    </div>`;
 }
 
 function renderFilters(tab) {
@@ -6201,7 +6324,6 @@ function renderCards(data, tab) {
     document.getElementById("cards").innerHTML = renderEVCards(filtered);
     const cntEv = document.getElementById("game-count");
     if (cntEv) cntEv.textContent = `${filtered.length} +EV bets`;
-    document.getElementById("disclaimer").style.display = "block";
     return;
   }
   const top10 = tab === "hitters" ? renderTop10Hitters(filtered) : "";
@@ -6220,7 +6342,47 @@ function renderCards(data, tab) {
       cnt.textContent = filtered.length + " games";
     }
   }
-  document.getElementById("disclaimer").style.display = "block";
+}
+
+// ─── AUTO REFRESH (30 min — saves API calls vs manual refresh) ────────────────
+let lastRefreshAt = Date.now();
+let _autoRefreshTimer = null;
+
+function clearAllCaches() {
+  clearOddsCacheForDate(selectedDate || today());
+  cache = { nrfi: null, strikeouts: null, hitters: null, ev: null };
+  ppLoaded = false;
+  _ppBoard = null;
+  ppLines = {}; lastOddsRows = []; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {};
+  clData = {}; clSeedLoaded = false;
+  ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
+  _umpData = {}; _weather = {};
+  [_lineup, _batterKPct, _pitcher, _teamSplit, _personBats].forEach(c => Object.keys(c).forEach(k => delete c[k]));
+}
+
+function updateRefreshLabel() {
+  const el = document.getElementById("updated");
+  if (!el) return;
+  const minsLeft = Math.max(0, Math.ceil((lastRefreshAt + AUTO_REFRESH_MS - Date.now()) / 60000));
+  const t = new Date(lastRefreshAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  el.textContent = `Updated ${t} · next ${minsLeft}m`;
+}
+
+function markRefreshDone() {
+  lastRefreshAt = Date.now();
+  updateRefreshLabel();
+  scheduleNextAutoRefresh();
+}
+
+function scheduleNextAutoRefresh() {
+  if (_autoRefreshTimer) clearTimeout(_autoRefreshTimer);
+  _autoRefreshTimer = setTimeout(autoRefreshAll, AUTO_REFRESH_MS);
+}
+
+async function autoRefreshAll() {
+  if (document.getElementById("loader").style.display === "flex") return;
+  clearAllCaches();
+  await loadTab(activeTab);
 }
 
 function setFilter(f) {
@@ -6236,7 +6398,6 @@ async function loadTab(tab) {
   setError("");
   document.getElementById("cards").innerHTML = "";
   document.getElementById("summary-grid").style.display = "none";
-  document.getElementById("disclaimer").style.display = "none";
   document.getElementById("filters").style.display = "none";
 
   const date    = selectedDate || today();
@@ -6255,6 +6416,7 @@ async function loadTab(tab) {
 
     if (!games.length) {
       setLoading(false);
+      markRefreshDone();
       document.getElementById("cards").innerHTML = `
         <div style="text-align:center;padding:50px 0">
           <div style="font-size:44px;margin-bottom:14px">⚾</div>
@@ -6290,7 +6452,7 @@ async function loadTab(tab) {
     renderFilters(tab);
     renderSummary(data, tab);
     renderCards(data, tab);
-    document.getElementById("updated").textContent = "Updated " + new Date().toLocaleTimeString();
+    markRefreshDone();
   } catch(e) {
     setError(e.message || "Failed to load. Check internet connection.");
   }
@@ -6306,6 +6468,8 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
     // Filters are tab-specific (over/under vs nrfi/yrfi). Stale activeFilter hides all rows
     // or applies the wrong slice after switching tabs.
     activeFilter = "all";
+    document.getElementById("pp-debug-btn").style.display =
+      activeTab === "strikeouts" && cache.strikeouts ? "inline-block" : "none";
     if (cache[activeTab]) {
       renderFilters(activeTab);
       renderSummary(cache[activeTab], activeTab);
@@ -6316,67 +6480,25 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
   });
 });
 
-document.getElementById("refresh-btn").addEventListener("click", () => {
-  clearOddsCacheForDate(selectedDate || today());
-  cache = { nrfi: null, strikeouts: null, hitters: null, ev: null };
-  ppLoaded = false; ppLines = {}; lastOddsRows = []; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
-  ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
-  _umpData = {}; _weather = {};
-  [_lineup, _batterKPct, _pitcher, _teamSplit, _personBats].forEach(c => Object.keys(c).forEach(k => delete c[k]));
-  loadTab(activeTab);
-});
 document.getElementById("retry-btn").addEventListener("click", () => {
-  clearOddsCacheForDate(selectedDate || today());
-  ppLoaded = false;
+  clearAllCaches();
   loadTab(activeTab);
 });
 document.getElementById("date-picker").addEventListener("change", e => {
   selectedDate = e.target.value;
-  clearOddsCacheForDate(selectedDate);
-  cache = { nrfi: null, strikeouts: null, hitters: null, ev: null };
-  ppLoaded = false; ppLines = {}; lastOddsRows = []; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
-  ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
-  _umpData = {}; _weather = {};
-  [_lineup, _batterKPct, _pitcher, _teamSplit, _personBats].forEach(c => Object.keys(c).forEach(k => delete c[k]));
+  clearAllCaches();
   loadTab(activeTab);
 });
 
-async function reloadStrikeoutsQuiet() {
-  if (activeTab !== "strikeouts") return;
-  const date = selectedDate || today();
-  try {
-    const games = await getSchedule(date);
-    if (!games.length) return;
-    clearOddsCacheForDate(date);
-    ppLoaded = false;
-    await loadPPLines(games, date);
-    const dateYear = parseInt(date.split("-")[0], 10);
-    const dateMon = parseInt(date.split("-")[1], 10);
-    const season = dateMon < 4 ? dateYear - 1 : dateYear;
-    const data = await buildSO(games, season);
-    cache.strikeouts = data;
-    recordStrikeoutOddsHistory(data, date);
-    renderSummary(data, "strikeouts");
-    renderCards(data, "strikeouts");
-    const el = document.getElementById("updated");
-    if (el) el.textContent = "Updated " + new Date().toLocaleTimeString() + " (hourly)";
-  } catch (e) {
-    console.warn("[strikeouts hourly]", e);
-  }
-}
-setInterval(() => {
-  if (document.hidden && activeTab === "strikeouts") reloadStrikeoutsQuiet();
-}, 3600000);
+setInterval(updateRefreshLabel, 60000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && Date.now() - lastRefreshAt >= AUTO_REFRESH_MS) autoRefreshAll();
+});
 
 function jumpTo(date) {
   selectedDate = date;
   document.getElementById("date-picker").value = date;
-  clearOddsCacheForDate(date);
-  cache = { nrfi: null, strikeouts: null, hitters: null, ev: null };
-  ppLoaded = false; ppLines = {}; lastOddsRows = []; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {}; clData = {}; clSeedLoaded = false;
-  ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
-  _umpData = {}; _weather = {};
-  [_lineup, _batterKPct, _pitcher, _teamSplit, _personBats].forEach(c => Object.keys(c).forEach(k => delete c[k]));
+  clearAllCaches();
   loadTab(activeTab);
 }
 
