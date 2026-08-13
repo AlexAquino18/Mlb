@@ -215,15 +215,27 @@ def odds_io_route():
         _apid = _os.path.join(_os.path.dirname(__file__), "api")
         if _apid not in _sys.path:
             _sys.path.insert(0, _apid)
-        from odds_io_impl import DEFAULT_BOOKMAKERS, fetch_mlb_odds_bundle
+        from odds_io_impl import DEFAULT_BOOKMAKERS, fetch_mlb_odds_bundle, fetch_nfl_odds_bundle
 
         api_key = _os.environ.get("ODDS_API_KEY") or _os.environ.get("ODDS_API_IO_KEY")
         raw_date = request.args.get("date")
+        date_from = request.args.get("from")
+        date_to = request.args.get("to")
+        sport = (request.args.get("sport") or "mlb").lower()
         bookmakers = request.args.get("bookmakers") or DEFAULT_BOOKMAKERS
         dbg = request.args.get("structure") or request.args.get("debug") or ""
         debug_structure = str(dbg).lower() in ("1", "true", "yes")
         if not api_key:
             body = {"ok": False, "error": "missing_ODDS_API_KEY"}
+        elif sport in ("nfl", "football"):
+            start = (date_from or raw_date or "")[:10]
+            end = (date_to or date_from or raw_date or "")[:10]
+            if len(start) != 10:
+                body = {"ok": False, "error": "missing_from"}
+            else:
+                body = fetch_nfl_odds_bundle(
+                    api_key, start, end, bookmakers, debug_structure=debug_structure
+                )
         elif not raw_date:
             body = {"ok": False, "error": "missing_date"}
         else:
@@ -246,7 +258,11 @@ def odds_io_route():
 @app.route("/", defaults={"filename": "index.html"})
 @app.route("/<path:filename>")
 def static_files(filename):
-    return send_from_directory(".", filename)
+    root = os.path.dirname(os.path.abspath(__file__))
+    full = os.path.join(root, filename)
+    if os.path.isdir(full):
+        filename = filename.rstrip("/\\") + "/index.html"
+    return send_from_directory(root, filename)
 
 
 if __name__ == "__main__":

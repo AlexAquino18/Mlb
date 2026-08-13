@@ -134,7 +134,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const filePath = path.join(__dirname, rel);
+  let filePath = path.join(__dirname, rel);
+  try {
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+      rel = path.join(rel, "index.html");
+      filePath = path.join(__dirname, rel);
+    }
+  } catch (_) {}
   if (!filePath.startsWith(__dirname)) {
     res.writeHead(403);
     res.end("Forbidden");

@@ -1,5 +1,6 @@
 """
 Vercel Python — GET /api/odds_io?date=YYYY-MM-DD&bookmakers=DraftKings,FanDuel
+NFL: /api/odds_io?sport=nfl&from=YYYY-MM-DD&to=YYYY-MM-DD
 Proxies Odds-API.io with ODDS_API_KEY / ODDS_API_IO_KEY from environment only.
 """
 import json
@@ -32,17 +33,33 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         out: dict = {"ok": False, "error": "bad_request"}
         try:
-            from odds_io_impl import DEFAULT_BOOKMAKERS, fetch_mlb_odds_bundle  # noqa: E402
+            from odds_io_impl import (  # noqa: E402
+                DEFAULT_BOOKMAKERS,
+                fetch_mlb_odds_bundle,
+                fetch_nfl_odds_bundle,
+            )
 
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
             raw_date = (qs.get("date") or [None])[0]
+            date_from = (qs.get("from") or [None])[0]
+            date_to = (qs.get("to") or [None])[0]
+            sport = ((qs.get("sport") or ["mlb"])[0] or "mlb").lower()
             bookmakers = (qs.get("bookmakers") or [DEFAULT_BOOKMAKERS])[0]
             dbg = (qs.get("structure") or qs.get("debug") or [""])[0]
             debug_structure = str(dbg).lower() in ("1", "true", "yes")
             api_key = os.environ.get("ODDS_API_KEY") or os.environ.get("ODDS_API_IO_KEY")
             if not api_key:
                 out = {"ok": False, "error": "missing_ODDS_API_KEY"}
+            elif sport in ("nfl", "football"):
+                start = (date_from or raw_date or "")[:10]
+                end = (date_to or date_from or raw_date or "")[:10]
+                if len(start) != 10:
+                    out = {"ok": False, "error": "missing_from"}
+                else:
+                    out = fetch_nfl_odds_bundle(
+                        api_key, start, end, bookmakers, debug_structure=debug_structure
+                    )
             elif not raw_date:
                 out = {"ok": False, "error": "missing_date"}
             else:

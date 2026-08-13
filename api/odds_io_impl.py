@@ -97,6 +97,22 @@ def _multi_list(raw: Any) -> List[dict]:
     return []
 
 
+def _is_nfl_event(ev: dict) -> bool:
+    lg = ev.get("league") if isinstance(ev.get("league"), dict) else {}
+    slug = (lg.get("slug") or "").lower()
+    name = (lg.get("name") or "").lower()
+    if "nfl" in slug or slug in ("usa-nfl", "us-nfl"):
+        return True
+    if "national football" in name or name.strip() == "nfl" or "nfl" in name:
+        return True
+    sp = ev.get("sport") if isinstance(ev.get("sport"), dict) else {}
+    sp_slug = (sp.get("slug") or "").lower()
+    sp_name = (sp.get("name") or "").lower()
+    if sp_slug == "nfl" or sp_name == "nfl":
+        return True
+    return False
+
+
 def _is_mlb_event(ev: dict) -> bool:
     lg = ev.get("league") if isinstance(ev.get("league"), dict) else {}
     slug = (lg.get("slug") or "").lower()
@@ -211,6 +227,54 @@ def _composite_market_name(m: dict, odd: dict) -> str:
     return merged if merged.strip() else "Player Props"
 
 
+def _stat_hint_nfl(raw: str) -> str:
+    """NFL player-prop labels — more specific phrases first."""
+    if not raw:
+        return ""
+    if "anytime" in raw and ("td" in raw or "touchdown" in raw):
+        return "anytime_td"
+    if ("pass" in raw and "rush" in raw and "yard" in raw) or "pass+rush" in raw or "pass + rush" in raw:
+        return "pass_rush_yds"
+    if (
+        ("rush" in raw and ("rec" in raw or "receiving" in raw) and "yard" in raw)
+        or "rush+rec" in raw
+        or "rec+rush" in raw
+        or "rush + rec" in raw
+    ):
+        return "rush_rec_yds"
+    if "passing yard" in raw or "pass yard" in raw or "pass yds" in raw:
+        return "pass_yds"
+    if ("passing" in raw or "pass " in raw) and ("td" in raw or "touchdown" in raw):
+        return "pass_td"
+    if "completion" in raw:
+        return "completions"
+    if ("pass" in raw or "passing" in raw) and "attempt" in raw:
+        return "pass_att"
+    if "interception" in raw or raw in ("int", "ints"):
+        return "ints"
+    if "rushing yard" in raw or "rush yard" in raw or "rush yds" in raw:
+        return "rush_yds"
+    if ("rush" in raw and "attempt" in raw) or "carries" in raw or "carry" in raw:
+        return "rush_att"
+    if ("rush" in raw) and ("td" in raw or "touchdown" in raw):
+        return "rush_td"
+    if "receiving yard" in raw or "rec yard" in raw or "rec yds" in raw:
+        return "rec_yds"
+    if "reception" in raw or raw in ("recs", "rec"):
+        return "receptions"
+    if ("receiv" in raw or "rec " in raw) and ("td" in raw or "touchdown" in raw):
+        return "rec_td"
+    if "fantasy" in raw:
+        return "fantasy"
+    if "longest rec" in raw or "long rec" in raw:
+        return "long_rec"
+    if "longest rush" in raw or "long rush" in raw:
+        return "long_rush"
+    if "longest pass" in raw or "long pass" in raw:
+        return "long_pass"
+    return ""
+
+
 def _stat_hint_from_market(m: dict) -> str:
     """
     Odds-API often sets market.name to only 'Player Props'. Scan other keys/values for stat text.
@@ -222,6 +286,9 @@ def _stat_hint_from_market(m: dict) -> str:
         blob = ""
     if not blob:
         return ""
+    nfl = _stat_hint_nfl(blob)
+    if nfl:
+        return nfl
     if ("nrfi" in blob or "yrfi" in blob) and (
         "1st" in blob or "first" in blob or "inning" in blob or "inn" in blob
     ):
@@ -253,6 +320,9 @@ def _stat_hint_from_text(text: str) -> str:
     raw = (text or "").strip().lower()
     if not raw:
         return ""
+    nfl = _stat_hint_nfl(raw)
+    if nfl:
+        return nfl
     if raw in ("k", "ks", "k's", "k’s"):
         return "strikeouts"
     if "strikeout" in raw or "strike out" in raw:
@@ -555,3 +625,161 @@ def fetch_mlb_odds_bundle(
         out["error"] = str(e)
 
     return out
+
+
+def _events_in_range(events: List[dict], date_from: str, date_to: str) -> List[dict]:
+    if date_from and date_to and date_from == date_to:
+        return [e for e in events if _event_date_key(e) == date_from]
+    out: List[dict] = []
+    for e in events:
+        dk = _event_date_key(e)
+        if not dk:
+            continue
+        if date_from and dk < date_from:
+            continue
+        if date_to and dk > date_to:
+            continue
+        out.append(e)
+    return out
+
+
+def fetch_nfl_odds_bundle(
+    api_key: str,
+    date_from: str,
+    date_to: str = "",
+    bookmakers: str = DEFAULT_BOOKMAKERS,
+    debug_structure: bool = False,
+) -> Dict[str, Any]:
+    """
+    NFL player props for a date range (typically Thu–Tue of a given week).
+    One events call + ceil(n/10) multi-odds calls. Cached 15 minutes.
+    """
+    start = (date_from or "")[:10]
+    end = (date_to or date_from or "")[:10]
+    cache_key = f"nfl|{start}|{end}|{bookmakers}|v1"
+    now = time.time()
+    if not debug_structure and cache_key in _CACHE:
+        ts, data = _CACHE[cache_key]
+        if now - ts < CACHE_TTL_SEC and data.get("ok"):
+            return data
+
+    out: Dict[str, Any] = {
+        "ok": False,
+        "error": None,
+        "rows": [],
+        "meta": {"apiCalls": 0, "eventCount": 0, "propRows": 0, "sport": "nfl"},
+    }
+    if len(start) != 10 or len(end) != 10:
+        out["error"] = "bad_date"
+        return out
+    if end < start:
+        start, end = end, start
+
+    try:
+        raw_all: List[dict] = []
+        events: List[dict] = []
+        for sport_slug in ("nfl", "american-football", "football"):
+            q_params: Dict[str, str] = {"sport": sport_slug, "apiKey": api_key}
+            q_params["from"] = f"{start}T00:00:00Z"
+            q_params["to"] = f"{end}T23:59:59Z"
+            events_url = f"{ODDS_BASE}/events?{urllib.parse.urlencode(q_params)}"
+            try:
+                raw_ev = _get_json(events_url)
+            except Exception:
+                continue
+            out["meta"]["apiCalls"] = out["meta"]["apiCalls"] + 1
+            raw_all = _events_list(raw_ev)
+            on_range = _events_in_range(raw_all, start, end)
+            nfl_events = [e for e in on_range if _is_nfl_event(e)]
+            if nfl_events:
+                events = nfl_events
+                out["meta"]["eventsSport"] = sport_slug
+                break
+            # sport=nfl feeds often omit league slug — keep the range if the slug itself is nfl
+            if sport_slug == "nfl" and on_range:
+                events = on_range
+                out["meta"]["eventsSport"] = sport_slug
+                break
+        out["meta"]["eventCount"] = len(events)
+
+        rows: List[dict] = []
+        if not events:
+            out["ok"] = True
+            out["meta"]["note"] = "no_nfl_events_for_range"
+            out["rows"] = []
+            if not debug_structure:
+                _CACHE[cache_key] = (now, out)
+            return out
+
+        event_teams: Dict[str, Tuple[str, str]] = {}
+        for e in events:
+            eid = e.get("id")
+            if eid is None:
+                continue
+            event_teams[_eid_key(eid)] = (_team_str(e.get("home")), _team_str(e.get("away")))
+
+        event_ids = [e["id"] for e in events if e.get("id") is not None]
+        first_multi_raw: Any = None
+        for i in range(0, len(event_ids), 10):
+            chunk = event_ids[i : i + 10]
+            ids_str = ",".join(str(x) for x in chunk)
+            q2 = urllib.parse.urlencode(
+                {
+                    "apiKey": api_key,
+                    "eventIds": ids_str,
+                    "bookmakers": bookmakers,
+                }
+            )
+            multi_url = f"{ODDS_BASE}/odds/multi?{q2}"
+            multi_raw = _get_json(multi_url)
+            if debug_structure and first_multi_raw is None:
+                first_multi_raw = multi_raw
+            out["meta"]["apiCalls"] = out["meta"]["apiCalls"] + 1
+            for ev in _multi_list(multi_raw):
+                _append_prop_rows(ev, rows, event_teams)
+
+        out["rows"] = rows
+        out["meta"]["propRows"] = len(rows)
+        out["meta"]["dateFrom"] = start
+        out["meta"]["dateTo"] = end
+        sample_markets: List[str] = []
+        seen_m: set = set()
+        for row in rows:
+            m = row.get("market") or ""
+            if m and m not in seen_m:
+                seen_m.add(m)
+                sample_markets.append(m[:160])
+                if len(sample_markets) >= 24:
+                    break
+        out["meta"]["sampleMarkets"] = sample_markets
+        sample_teams: List[Dict[str, str]] = []
+        seen_t: set = set()
+        for row in rows:
+            key = (row.get("home"), row.get("away"))
+            if key[0] and key not in seen_t:
+                seen_t.add(key)
+                sample_teams.append({"home": str(key[0]), "away": str(key[1])})
+                if len(sample_teams) >= 8:
+                    break
+        out["meta"]["sampleEventTeams"] = sample_teams
+        if debug_structure and first_multi_raw is not None:
+            lst = _multi_list(first_multi_raw)
+            if lst:
+                sj = json.dumps(_debug_trim_event(lst[0]), indent=2, default=str)
+                if len(sj) > 36000:
+                    sj = sj[:36000] + "\n… (truncated)"
+                out["meta"]["oddsStructureSample"] = sj
+        out["ok"] = True
+        if not debug_structure:
+            _CACHE[cache_key] = (now, out)
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = str(e)
+        out["error"] = f"http_{e.code}: {body[:300]}"
+    except Exception as e:
+        out["error"] = str(e)
+
+    return out
+

@@ -465,8 +465,8 @@
         <nav class="sport-nav" aria-label="Sports">
           <a href="/" class="sport-pill">Home</a>
           <a href="/mlb/" class="sport-pill active">MLB</a>
+          <a href="/nfl/" class="sport-pill live">NFL</a>
           <a href="/nba/" class="sport-pill soon">NBA</a>
-          <a href="/nfl/" class="sport-pill soon">NFL</a>
         </nav>
       </div>
       <div id="subtitle">Initializing…</div>
@@ -480,10 +480,10 @@
 
 <div id="main">
   <div id="tabs">
-    <button class="tab-btn active" data-tab="nrfi">⚾ NRFI / YRFI</button>
-    <button class="tab-btn" data-tab="strikeouts">🔥 STRIKEOUT PROPS</button>
-    <button class="tab-btn" data-tab="hitters">🏏 HITTER PROPS</button>
-    <button class="tab-btn" data-tab="ev">💰 +EV ODDS</button>
+    <button class="tab-btn active" data-tab="nrfi">NRFI / YRFI</button>
+    <button class="tab-btn" data-tab="strikeouts">Strikeouts</button>
+    <button class="tab-btn" data-tab="hitters">Hitters</button>
+    <button class="tab-btn" data-tab="ev">+EV Odds</button>
   </div>
   <div id="filters" style="display:none"></div>
   <div id="loader" style="display:none">
@@ -501,7 +501,7 @@
 <footer id="site-footer">
   <div class="footer-inner">
     <div class="footer-brand">PROPPULSE</div>
-    <p class="footer-tag">Player prop intelligence · MLB live · NBA &amp; NFL coming</p>
+    <p class="footer-tag">Player prop intelligence · MLB &amp; NFL live · NBA coming</p>
     <p class="footer-disclaimer">
       For informational purposes only — not betting advice. Stats from MLB Stats API; weather from Open-Meteo;
       park factors from Statcast; umpire data from Umpire Scorecards. Odds from FanDuel / DraftKings.
@@ -6200,7 +6200,7 @@ function renderSummary(data, tab) {
     ? [
         { l:"NRFI Plays",    v:data.filter(g=>g.confidence>=50).length, c:"#34d399" },
         { l:"Strong (70%+)", v:data.filter(g=>g.confidence>=70).length, c:"#22d3ee" },
-        { l:"📊 Book lines",   v:data.filter(g=>g.ppNRFILine!=null).length, c:"#a78bfa" },
+        { l:"Book lines",      v:data.filter(g=>g.ppNRFILine!=null).length, c:"#a78bfa" },
       ]
     : tab === "ev"
     ? [
@@ -6210,12 +6210,12 @@ function renderSummary(data, tab) {
       ]
     : tab === "hitters"
     ? [
-        { l:"📊 Book props",   v:data.reduce((s,g)=>s+g.ppLineCount,0),  c:"#22d3ee" },
+        { l:"Book props",     v:data.reduce((s,g)=>s+g.ppLineCount,0),  c:"#22d3ee" },
         { l:"Overs",         v:data.reduce((s,g)=>s+[...g.awayBatters,...g.homeBatters].filter(b=>b.bestProp&&b.bestProp.edge>0).length,0), c:"#34d399" },
         { l:"Unders",        v:data.reduce((s,g)=>s+[...g.awayBatters,...g.homeBatters].filter(b=>b.bestProp&&b.bestProp.edge<0).length,0), c:"#fb7185" },
       ]
     : [
-        { l:"📊 Book lines",  v:ppCount,                         c:"#22d3ee" },
+        { l:"Book lines",   v:ppCount,                         c:"#22d3ee" },
         { l:"Over Plays",   v:data.filter(g=>g.edge>0).length, c:"#34d399" },
         { l:"Under Plays",  v:data.filter(g=>g.edge<=0).length,c:"#fb7185" },
       ];
@@ -6329,7 +6329,6 @@ async function loadTab(tab) {
       markRefreshDone();
       document.getElementById("cards").innerHTML = `
         <div style="text-align:center;padding:50px 0">
-          <div style="font-size:44px;margin-bottom:14px">⚾</div>
           <p style="color:#e2e8f0;font-size:15px;font-weight:700;margin-bottom:8px">No games found for ${date}</p>
           <p style="color:#64748b;font-size:12px;margin-bottom:22px">Try a date during the MLB season (Apr–Oct):</p>
           <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">

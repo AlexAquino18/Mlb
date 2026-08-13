@@ -39,6 +39,19 @@ function multiList(raw) {
   return [];
 }
 
+function isNflEvent(ev) {
+  const lg = ev.league || {};
+  const slug = String(lg.slug || "").toLowerCase();
+  const name = String(lg.name || "").toLowerCase();
+  if (slug.includes("nfl") || ["usa-nfl", "us-nfl"].includes(slug)) return true;
+  if (name.includes("national football") || name.includes("nfl")) return true;
+  const sp = ev.sport || {};
+  const spSlug = String(sp.slug || "").toLowerCase();
+  const spName = String(sp.name || "").toLowerCase();
+  if (spSlug === "nfl" || spName === "nfl") return true;
+  return false;
+}
+
 function isMlbEvent(ev) {
   const lg = ev.league || {};
   const slug = String(lg.slug || "").toLowerCase();
@@ -136,6 +149,35 @@ function compositeMarketName(m, odd) {
   return out.length ? out.join(" · ") : "Player Props";
 }
 
+function nflStatHint(raw) {
+  if (!raw) return "";
+  if (raw.includes("anytime") && (raw.includes("td") || raw.includes("touchdown"))) return "anytime_td";
+  if ((raw.includes("pass") && raw.includes("rush") && raw.includes("yard")) || raw.includes("pass+rush") || raw.includes("pass + rush"))
+    return "pass_rush_yds";
+  if (
+    (raw.includes("rush") && (raw.includes("rec") || raw.includes("receiving")) && raw.includes("yard")) ||
+    raw.includes("rush+rec") ||
+    raw.includes("rec+rush")
+  )
+    return "rush_rec_yds";
+  if (raw.includes("passing yard") || raw.includes("pass yard") || raw.includes("pass yds")) return "pass_yds";
+  if ((raw.includes("passing") || raw.includes("pass ")) && (raw.includes("td") || raw.includes("touchdown"))) return "pass_td";
+  if (raw.includes("completion")) return "completions";
+  if ((raw.includes("pass") || raw.includes("passing")) && raw.includes("attempt")) return "pass_att";
+  if (raw.includes("interception") || raw === "int" || raw === "ints") return "ints";
+  if (raw.includes("rushing yard") || raw.includes("rush yard") || raw.includes("rush yds")) return "rush_yds";
+  if ((raw.includes("rush") && raw.includes("attempt")) || raw.includes("carries") || raw.includes("carry")) return "rush_att";
+  if (raw.includes("rush") && (raw.includes("td") || raw.includes("touchdown"))) return "rush_td";
+  if (raw.includes("receiving yard") || raw.includes("rec yard") || raw.includes("rec yds")) return "rec_yds";
+  if (raw.includes("reception") || raw === "recs" || raw === "rec") return "receptions";
+  if ((raw.includes("receiv") || raw.includes("rec ")) && (raw.includes("td") || raw.includes("touchdown"))) return "rec_td";
+  if (raw.includes("fantasy")) return "fantasy";
+  if (raw.includes("longest rec") || raw.includes("long rec")) return "long_rec";
+  if (raw.includes("longest rush") || raw.includes("long rush")) return "long_rush";
+  if (raw.includes("longest pass") || raw.includes("long pass")) return "long_pass";
+  return "";
+}
+
 function statHintFromMarket(m) {
   let blob = "";
   try {
@@ -146,6 +188,8 @@ function statHintFromMarket(m) {
     return "";
   }
   if (!blob) return "";
+  const nfl = nflStatHint(blob);
+  if (nfl) return nfl;
   if (blob.includes("strikeout") || blob.includes("strike out")) return "strikeouts";
   if (blob.includes("pitcher") && (blob.includes(" k ") || blob.includes("k's") || blob.includes(" ks ")))
     return "strikeouts";
@@ -164,6 +208,8 @@ function statHintFromMarket(m) {
 function statHintFromText(text) {
   const raw = String(text || "").trim().toLowerCase();
   if (!raw) return "";
+  const nfl = nflStatHint(raw);
+  if (nfl) return nfl;
   if (raw.includes("strikeout") || raw.includes("strike out")) return "strikeouts";
   if (raw.includes("total base")) return "tb";
   if (raw.includes("home run")) return "hr";
@@ -317,6 +363,9 @@ export default async (request) => {
 
   const url = new URL(request.url);
   const date = url.searchParams.get("date");
+  const dateFrom = url.searchParams.get("from");
+  const dateTo = url.searchParams.get("to");
+  const sport = String(url.searchParams.get("sport") || "mlb").toLowerCase();
   // API plan allows max 2 bookmakers (FanDuel, DraftKings).
   const bookmakers = url.searchParams.get("bookmakers") || "DraftKings,FanDuel";
   const dbg = url.searchParams.get("structure") || url.searchParams.get("debug");
@@ -324,31 +373,70 @@ export default async (request) => {
   const apiKey = Deno.env.get("ODDS_API_KEY") || Deno.env.get("ODDS_API_IO_KEY");
 
   if (!apiKey) return json({ ok: false, error: "missing_ODDS_API_KEY" });
-  if (!date || date.length < 10) return json({ ok: false, error: "missing_date" });
 
-  const dateKey = date.slice(0, 10);
-  const out = { ok: false, error: null, rows: [], meta: { apiCalls: 0, eventCount: 0, propRows: 0 } };
+  const isNfl = sport === "nfl" || sport === "football";
+  const start = ((isNfl ? dateFrom || date : date) || "").slice(0, 10);
+  const end = ((isNfl ? dateTo || dateFrom || date : date) || "").slice(0, 10);
+  if (!start || start.length < 10) return json({ ok: false, error: isNfl ? "missing_from" : "missing_date" });
+
+  const out = { ok: false, error: null, rows: [], meta: { apiCalls: 0, eventCount: 0, propRows: 0, sport: isNfl ? "nfl" : "mlb" } };
 
   try {
-    const evUrl = `${BASE}/events?${new URLSearchParams({ sport: "baseball", apiKey }).toString()}`;
-    const evRes = await fetch(evUrl, { headers: { Accept: "application/json" } });
-    const rawEv = await evRes.json();
-    out.meta.apiCalls = 1;
-
-    if (rawEv && rawEv.error) {
-      out.error = String(rawEv.error);
-      return json(out, 200);
+    const sportSlugs = isNfl ? ["nfl", "american-football", "football"] : ["baseball"];
+    let rawAll = [];
+    let events = [];
+    for (const slug of sportSlugs) {
+      const params = { sport: slug, apiKey };
+      if (isNfl) {
+        params.from = `${start}T00:00:00Z`;
+        params.to = `${end || start}T23:59:59Z`;
+      }
+      const evUrl = `${BASE}/events?${new URLSearchParams(params).toString()}`;
+      let rawEv;
+      try {
+        const evRes = await fetch(evUrl, { headers: { Accept: "application/json" } });
+        rawEv = await evRes.json();
+      } catch (_) {
+        continue;
+      }
+      out.meta.apiCalls += 1;
+      if (rawEv && rawEv.error) {
+        if (!isNfl) {
+          out.error = String(rawEv.error);
+          return json(out, 200);
+        }
+        continue;
+      }
+      rawAll = eventsList(rawEv);
+      const inRange = rawAll.filter((e) => {
+        const dk = eventDateKey(e);
+        if (!dk) return false;
+        if (!isNfl) return dk === start;
+        if (start && dk < start) return false;
+        if (end && dk > end) return false;
+        return true;
+      });
+      const filtered = inRange.filter(isNfl ? isNflEvent : isMlbEvent);
+      if (filtered.length) {
+        events = filtered;
+        out.meta.eventsSport = slug;
+        break;
+      }
+      if (isNfl && slug === "nfl" && inRange.length) {
+        events = inRange;
+        out.meta.eventsSport = slug;
+        break;
+      }
+      if (!isNfl && inRange.length) {
+        events = inRange;
+        break;
+      }
     }
-
-    const rawAll = eventsList(rawEv);
-    const onDate = rawAll.filter((e) => eventDateKey(e) === dateKey);
-    let events = onDate.filter(isMlbEvent);
-    if (!events.length && onDate.length) events = onDate;
 
     out.meta.eventCount = events.length;
     if (!events.length) {
       out.ok = true;
-      out.meta.note = "no_mlb_events_for_date";
+      out.meta.note = isNfl ? "no_nfl_events_for_range" : "no_mlb_events_for_date";
       return json(out, 200);
     }
 
