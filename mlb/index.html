@@ -533,30 +533,35 @@ let ppTeamMap    = {};
 let ppNRFI       = {};
 const _mlbSearch = {};
 
-// ── LINE MOVEMENT TRACKING ─────────────────────────────────────────────────
+// ── LINE / ODDS MOVEMENT TRACKING ──────────────────────────────────────────
 let ppLinesSnapshot = {};
 let lineMovements   = {};
+let _snapDay        = "";
 
-function captureLineSnapshot() {
+function snapStorageKey(dateStr) {
+  return `ppSnap_v2_${(dateStr || selectedDate || today()).slice(0, 10)}`;
+}
+function captureLineSnapshot(dateStr) {
   if (!Object.keys(ppLines).length) return;
-  if (Object.keys(ppLinesSnapshot).length > 0) return; // already loaded
-  const snapKey = `ppSnap_${today()}`;
+  const day = (dateStr || selectedDate || today()).slice(0, 10);
+  const snapKey = snapStorageKey(day);
+  if (_snapDay === day && Object.keys(ppLinesSnapshot).length > 0) {
+    return;
+  }
   try {
     const saved = localStorage.getItem(snapKey);
     if (saved) {
-      // Returning visitor today: compare current lines against the first-load snapshot
       ppLinesSnapshot = JSON.parse(saved);
+      _snapDay = day;
       return;
     }
   } catch {}
-  // First load of the day: save current lines as the baseline snapshot
   ppLinesSnapshot = JSON.parse(JSON.stringify(ppLines));
+  _snapDay = day;
   try { localStorage.setItem(snapKey, JSON.stringify(ppLinesSnapshot)); } catch {}
-  // Clean up snapshots older than 2 days
   try {
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    const twoDaysAgo = new Date(Date.now() - 172800000).toISOString().slice(0, 10);
-    [`ppSnap_${yesterday}`, `ppSnap_${twoDaysAgo}`].forEach(k => {
+    [-1, -2, -3].forEach((off) => {
+      const k = snapStorageKey(addCalendarDaysYMD(day, off));
       if (localStorage.getItem(k)) localStorage.removeItem(k);
     });
   } catch {}
@@ -565,11 +570,15 @@ function detectLineMovements() {
   lineMovements = {};
   if (!Object.keys(ppLinesSnapshot).length) return;
   for (const [key, cur] of Object.entries(ppLines)) {
+    if (key.includes(":")) continue;
     const snap = ppLinesSnapshot[key];
-    if (!snap || cur.line === snap.line) continue;
-    lineMovements[key] = { from: snap.line, to: cur.line,
-      dir: cur.line > snap.line ? "up" : "down", name: cur.rawName,
-      ts: Date.now() };
+    if (!snap || snap.line == null || cur.line == null) continue;
+    if (Number(cur.line) === Number(snap.line)) continue;
+    lineMovements[key] = {
+      from: snap.line, to: cur.line,
+      dir: Number(cur.line) > Number(snap.line) ? "up" : "down",
+      name: cur.rawName, ts: Date.now(),
+    };
   }
 }
 
@@ -627,18 +636,23 @@ function detectOddsMovements() {
     if (key.includes(":")) continue;
     const snap = ppLinesSnapshot[key];
     if (!snap?.books || !cur.books) continue;
-    const out = { fd: null, dk: null };
+    const out = { fd: null, dk: null, fdU: null, dkU: null };
     for (const [lbl, bk] of [["fd", "FanDuel"], ["dk", "DraftKings"]]) {
       const c = cur.books[bk];
       const s = snap.books[bk];
       if (!c || !s) continue;
-      const cO = toAmericanOdds(c.over);
-      const sO = toAmericanOdds(s.over);
+      const cO = c.overAm ?? toAmericanOdds(c.over);
+      const sO = s.overAm ?? toAmericanOdds(s.over);
       if (cO != null && sO != null && cO !== sO) {
         out[lbl] = { from: sO, to: cO, dir: cO < sO ? "down" : "up" };
       }
+      const cU = c.underAm ?? toAmericanOdds(c.under);
+      const sU = s.underAm ?? toAmericanOdds(s.under);
+      if (cU != null && sU != null && cU !== sU) {
+        out[lbl + "U"] = { from: sU, to: cU, dir: cU < sU ? "down" : "up" };
+      }
     }
-    if (out.fd || out.dk) oddsMovements[key] = out;
+    if (out.fd || out.dk || out.fdU || out.dkU) oddsMovements[key] = out;
   }
 }
 function getOddsMovement(pitcherName) {
@@ -686,7 +700,7 @@ function buildBooksFromRows(bookRows, targetLine) {
   return out;
 }
 
-const SO_ODDS_HIST_VER = "v2";
+const SO_ODDS_HIST_VER = "v3";
 function soOddsHistKey(dateStr, pitcherNorm) {
   return `soOddsHist_${SO_ODDS_HIST_VER}:${dateStr}:${pitcherNorm}`;
 }
@@ -700,56 +714,94 @@ function getSoOddsHistory(dateStr, pitcherNorm) {
     return [];
   }
 }
+function oddsPointEqual(a, b) {
+  if (!a || !b) return false;
+  return Number(a.line) === Number(b.line)
+    && a.fdOver === b.fdOver && a.dkOver === b.dkOver
+    && a.fdUnder === b.fdUnder && a.dkUnder === b.dkUnder;
+}
 function appendSoOddsHistory(dateStr, pitcherNorm, pt) {
-  if (!pitcherNorm || (pt.fdOver == null && pt.dkOver == null)) return;
+  if (!pitcherNorm || !dateStr) return;
+  if (pt.line == null && pt.fdOver == null && pt.dkOver == null) return;
   const key = soOddsHistKey(dateStr, pitcherNorm);
   let hist = getSoOddsHistory(dateStr, pitcherNorm);
   const now = Date.now();
+  const row = {
+    t: now,
+    line: pt.line ?? null,
+    fdOver: pt.fdOver ?? null,
+    dkOver: pt.dkOver ?? null,
+    fdUnder: pt.fdUnder ?? null,
+    dkUnder: pt.dkUnder ?? null,
+  };
   const last = hist[hist.length - 1];
-  const mergeWindow = 3 * 60 * 1000;
-  const row = { t: now, line: pt.line, fdOver: pt.fdOver, dkOver: pt.dkOver };
-  if (last && now - last.t < mergeWindow) {
-    hist[hist.length - 1] = row;
-  } else {
-    hist.push(row);
+  if (last && oddsPointEqual(last, row)) {
+    // Unchanged: keep the open print; only heartbeat after 25 minutes so the chart has time span
+    if (now - last.t < 25 * 60 * 1000) return;
   }
-  if (hist.length > 96) hist = hist.slice(-96);
+  hist.push(row);
+  if (hist.length > 120) hist = hist.slice(-120);
   try {
     localStorage.setItem(key, JSON.stringify(hist));
   } catch (_) {}
 }
-
-/** Merge saved snapshots with current card odds so the chart always draws (flat until more history). */
-function buildOddsDisplayHistory(hist, g) {
-  if (!g || g.lineSrc !== "sportsbook") return Array.isArray(hist) ? hist : [];
-  const cur = { t: Date.now(), line: g.line, fdOver: g.fdOverAm, dkOver: g.dkOverAm };
-  if (cur.fdOver == null && cur.dkOver == null) return Array.isArray(hist) ? hist : [];
-  const h = Array.isArray(hist) ? hist.slice() : [];
-  if (h.length === 0) {
-    const t0 = Date.now() - 60 * 60 * 1000;
-    return [
-      { t: t0, line: cur.line, fdOver: cur.fdOver, dkOver: cur.dkOver },
-      { ...cur },
-    ];
+function logStrikeoutOddsFromPpLines(dateStr) {
+  const day = (dateStr || selectedDate || today()).slice(0, 10);
+  for (const [key, rec] of Object.entries(ppLines)) {
+    if (!key || key.includes(":") || !rec) continue;
+    const fd = rec.books?.FanDuel;
+    const dk = rec.books?.DraftKings;
+    appendSoOddsHistory(day, key, {
+      line: rec.line,
+      fdOver: fd?.overAm ?? toAmericanOdds(fd?.over),
+      fdUnder: fd?.underAm ?? toAmericanOdds(fd?.under),
+      dkOver: dk?.overAm ?? toAmericanOdds(dk?.over),
+      dkUnder: dk?.underAm ?? toAmericanOdds(dk?.under),
+    });
   }
-  if (h.length === 1) {
-    const a = h[0];
-    const right = { ...cur };
-    if (right.t <= a.t) right.t = a.t + 60 * 1000;
-    return [a, right];
+}
+function movementFromHistory(hist) {
+  if (!hist || hist.length < 2) return { lineMov: null, oddsMov: null };
+  const a = hist[0];
+  const b = hist[hist.length - 1];
+  const lineMov = a.line != null && b.line != null && Number(a.line) !== Number(b.line)
+    ? { from: a.line, to: b.line, dir: Number(b.line) > Number(a.line) ? "up" : "down" }
+    : null;
+  const oddsMov = { fd: null, dk: null, fdU: null, dkU: null };
+  const side = (from, to) => (from === to || from == null || to == null) ? null
+    : { from, to, dir: to < from ? "down" : "up" };
+  oddsMov.fd = side(a.fdOver, b.fdOver);
+  oddsMov.dk = side(a.dkOver, b.dkOver);
+  oddsMov.fdU = side(a.fdUnder, b.fdUnder);
+  oddsMov.dkU = side(a.dkUnder, b.dkUnder);
+  if (!oddsMov.fd && !oddsMov.dk && !oddsMov.fdU && !oddsMov.dkU) {
+    return { lineMov, oddsMov: null };
   }
-  return h;
+  return { lineMov, oddsMov };
+}
+function pitcherTrackState(g) {
+  const d = selectedDate || today();
+  const hist = getSoOddsHistory(d, normName(g.pitcher));
+  const fromHist = movementFromHistory(hist);
+  return {
+    hist,
+    lineMov: fromHist.lineMov || g.lineMov || getLineMovement(g.pitcher),
+    oddsMov: fromHist.oddsMov || g.oddsMov || getOddsMovement(g.pitcher),
+  };
 }
 
 function renderOddsSparkChart(hist, opts = {}) {
   const W = opts.width || 380;
   const H = opts.height || 168;
   const pad = { l: 40, r: 14, t: 14, b: 34 };
-  const rawHist = hist;
-  const rows = buildOddsDisplayHistory(hist, opts.game);
-  const paddedFromCurrent = !rawHist || rawHist.length < 2;
-  if (!rows || rows.length < 2) {
-    return `<div style="color:#64748b;font-size:12px;padding:12px">No FanDuel / DraftKings Over prices for this prop yet.</div>`;
+  const rows = Array.isArray(hist) ? hist.filter(p => p && (p.fdOver != null || p.dkOver != null)) : [];
+  if (rows.length < 2) {
+    const n = Array.isArray(hist) ? hist.length : 0;
+    return `<div style="color:#94a3b8;font-size:12px;padding:4px 0 8px;line-height:1.5">${
+      n < 1
+        ? "No samples logged yet. Lines are stored when FanDuel / DraftKings K odds load."
+        : "Opened this print — the next refresh that changes the line or price will add a movement point."
+    }</div>`;
   }
   const fdC = "#2B8AEB";
   const dkC = "#43A047";
@@ -848,11 +900,6 @@ function renderOddsSparkChart(hist, opts = {}) {
 
   return `
   <div style="margin-top:6px">
-    ${
-      paddedFromCurrent
-        ? `<div style="font-size:11px;color:#94a3b8;margin-bottom:8px;line-height:1.4">Showing <strong style="color:#cbd5e1">current</strong> Over odds on the chart. After another <strong style="color:#cbd5e1">refresh</strong> or an <strong style="color:#cbd5e1">hourly</strong> update, movement will appear when prices change.</div>`
-        : ""
-    }
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;font-size:12px;color:#cbd5e1">
       <span><span style="color:${fdC};font-weight:800">●</span> FanDuel Over</span>
       <span><span style="color:${dkC};font-weight:800">●</span> DraftKings Over</span>
@@ -883,7 +930,7 @@ function renderOddsSparkChart(hist, opts = {}) {
       ${pathDk ? `<path d="${pathDk}" fill="none" stroke="${dkC}" stroke-width="2.5" stroke-linejoin="round"/>` : ""}
       ${timeLabels.join("")}
     </svg>
-    <div style="font-size:11px;color:#64748b;margin-top:6px;line-height:1.45">American odds on <strong style="color:#e2e8f0">Over ${rows[rows.length - 1].line != null ? rows[rows.length - 1].line : ""}</strong> — step chart; snapshots merge within ~3 min, then hourly when the tab is hidden.</div>
+    <div style="font-size:11px;color:#64748b;margin-top:6px;line-height:1.45">American Over odds vs <strong style="color:#e2e8f0">${rows[rows.length - 1].line != null ? rows[rows.length - 1].line + " K" : "the book line"}</strong> · ${rows.length} logged prints · new point when the line or price changes</div>
   </div>`;
 }
 
@@ -894,11 +941,14 @@ function renderBookOddsBadges(g) {
   const side = g.pickOver ? "Over" : "Under";
   const fdPick = g.pickOver ? fdO : fdU;
   const dkPick = g.pickOver ? dkO : dkU;
-  const om = g.oddsMov;
+  const om = pitcherTrackState(g).oddsMov || g.oddsMov;
   const fdM = om?.fd, dkM = om?.dk;
   const pillO = "border-radius:8px;padding:8px 14px;font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:.02em";
   const pillU = "border-radius:7px;padding:5px 11px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums";
   const pickChips = formatBookSideOddsChips(fdPick, dkPick, side);
+  const shiftBit = (m, color, label) => m
+    ? `<span style="color:${color}">${label} ${formatAmerican(m.from)}→${formatAmerican(m.to)} ${m.dir === "up" ? "▲" : "▼"}</span>`
+    : "";
   return `
     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px">
       ${fdO != null ? `<span style="background:rgba(43,138,235,.14);border:1px solid rgba(43,138,235,.5);color:#7EC8FF;${pillO}" title="FanDuel Over">FD O ${formatAmerican(fdO)}</span>` : ""}
@@ -906,7 +956,7 @@ function renderBookOddsBadges(g) {
       ${fdU != null ? `<span style="background:rgba(43,138,235,.08);border:1px solid rgba(43,138,235,.28);color:#9EC5FF;${pillU}" title="FanDuel Under">FD U ${formatAmerican(fdU)}</span>` : ""}
       ${dkU != null ? `<span style="background:rgba(67,160,71,.08);border:1px solid rgba(67,160,71,.28);color:#A5D9A0;${pillU}" title="DraftKings Under">DK U ${formatAmerican(dkU)}</span>` : ""}
     </div>
-    ${fdM || dkM ? `<div style="margin-top:6px;font-size:12px;color:#94a3b8">vs first load today — Over price: ${fdM ? `<span style="color:#7EC8FF">FD ${formatAmerican(fdM.from)}→${formatAmerican(fdM.to)} ${fdM.dir === "up" ? "▲" : "▼"}</span>` : ""}${fdM && dkM ? " · " : ""}${dkM ? `<span style="color:#7FD67A">DK ${formatAmerican(dkM.from)}→${formatAmerican(dkM.to)} ${dkM.dir === "up" ? "▲" : "▼"}</span>` : ""}</div>` : ""}
+    ${fdM || dkM ? `<div style="margin-top:6px;font-size:12px;color:#94a3b8">vs open print — Over: ${shiftBit(fdM, "#7EC8FF", "FD")}${fdM && dkM ? " · " : ""}${shiftBit(dkM, "#7FD67A", "DK")}</div>` : ""}
     ${pickChips ? `<div style="margin-top:4px;font-size:12px;color:#94a3b8">Pick side (${side}): ${pickChips}</div>` : ""}
   `;
 }
@@ -919,6 +969,8 @@ function recordStrikeoutOddsHistory(data, dateStr) {
       line: row.line,
       fdOver: row.fdOverAm,
       dkOver: row.dkOverAm,
+      fdUnder: row.fdUnderAm,
+      dkUnder: row.dkUnderAm,
     });
   }
 }
@@ -1001,14 +1053,57 @@ function exportStrikeoutTracking() {
   URL.revokeObjectURL(a.href);
 }
 
+function renderOddsLogTable(hist) {
+  const rows = Array.isArray(hist) ? hist.slice() : [];
+  if (!rows.length) {
+    return `<div style="font-size:12px;color:#94a3b8;padding:6px 0">No prints logged yet for this pitcher today.</div>`;
+  }
+  const shown = rows.slice().reverse().slice(0, 24);
+  const fmtT = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const cell = (v) => v == null ? "—" : formatAmerican(v);
+  return `
+    <table class="game-log-table" style="margin-top:10px">
+      <thead><tr>
+        <th>TIME</th><th>LINE</th><th>FD O</th><th>FD U</th><th>DK O</th><th>DK U</th>
+      </tr></thead>
+      <tbody>
+        ${shown.map((p, i) => {
+          const prev = i < shown.length - 1 ? shown[i + 1] : null;
+          const moved = prev && !oddsPointEqual(prev, p);
+          return `<tr${moved ? ` style="color:#e2e8f0"` : ""}>
+            <td>${fmtT(p.t)}</td>
+            <td style="font-weight:700;color:#e2e8f0">${p.line != null ? p.line : "—"}</td>
+            <td style="color:#7EC8FF">${cell(p.fdOver)}</td>
+            <td>${cell(p.fdUnder)}</td>
+            <td style="color:#7FD67A">${cell(p.dkOver)}</td>
+            <td>${cell(p.dkUnder)}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>`;
+}
+
 function renderOddsMovementSection(g) {
-  const d = selectedDate || today();
-  const hist = getSoOddsHistory(d, normName(g.pitcher));
+  const track = pitcherTrackState(g);
+  const hist = track.hist;
+  const open = hist[0];
+  const last = hist[hist.length - 1];
+  const openTxt = open
+    ? `Open ${new Date(open.t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · ${open.line != null ? open.line + " K" : "line n/a"} · FD ${formatAmerican(open.fdOver)} / DK ${formatAmerican(open.dkOver)}`
+    : "";
+  const nowTxt = last && hist.length > 1
+    ? `Now ${last.line != null ? last.line + " K" : ""} · FD ${formatAmerican(last.fdOver)} / DK ${formatAmerican(last.dkOver)}`
+    : "";
   return `
   <details style="margin-top:12px;padding:12px 14px;background:rgba(0,0,0,.28);border:1px solid rgba(148,163,184,.18);border-radius:10px" open>
-    <summary style="cursor:pointer;font-size:13px;font-weight:800;color:#cbd5e1;letter-spacing:.05em;list-style:none;outline:none">📈 Strikeouts odds movement <span style="font-weight:600;color:#64748b;font-size:12px">(FanDuel & DraftKings · Over)</span></summary>
+    <summary style="cursor:pointer;font-size:13px;font-weight:800;color:#cbd5e1;letter-spacing:.05em;list-style:none;outline:none">Strikeouts odds log <span style="font-weight:600;color:#64748b;font-size:12px">(FanDuel &amp; DraftKings)</span></summary>
+    <div style="margin-top:10px;font-size:12px;color:#94a3b8;line-height:1.5">
+      ${openTxt}${nowTxt ? `<br>${nowTxt}` : ""}
+      ${hist.length < 2 ? `<br>This is the open print. A new row is added when the K line or FD/DK price changes (or after ~25 min if unchanged).` : ""}
+    </div>
     <div style="margin-top:12px">
       ${renderOddsSparkChart(hist, { game: g })}
+      ${renderOddsLogTable(hist)}
     </div>
   </details>`;
 }
@@ -1911,9 +2006,10 @@ async function loadPPLines(games, dateStr) {
       setStatus("No book K lines matched — calculated lines");
     }
 
-    captureLineSnapshot();
+    captureLineSnapshot(dateStr);
     detectLineMovements();
     detectOddsMovements();
+    logStrikeoutOddsFromPpLines(dateStr);
     buildPPTeamMap();
     ppLoaded = true;
   } catch (e) {
@@ -5605,6 +5701,9 @@ function renderSOCard(g) {
   const idSafe = `${g.gamePk}-${g.isHome ? "h" : "a"}-${String(g.team || "").replace(/[^a-zA-Z0-9]/g, "")}-${(g.pitcher || "x").replace(/\s/g, "")}`;
   const id    = `c${idSafe}`;
   const dir   = g.pickOver != null ? (g.pickOver ? "OVER" : "UNDER") : (g.edge >= 0 ? "OVER" : "UNDER");
+  const track = pitcherTrackState(g);
+  const lineMov = track.lineMov;
+  const oddsMov = track.oddsMov;
   const placeholderBanner = g.unresolvedPitcher
     ? `<div style="padding:10px 14px;background:rgba(251,191,36,.1);border-bottom:1px solid rgba(251,191,36,.28);font-size:12px;color:#fcd34d;line-height:1.45">
         <strong style="color:#fbbf24">Starter not loaded</strong> — MLB hasn’t named a probable yet (or books/IDs didn’t match). Stats shown are <strong>league-average placeholders</strong>; the CALC line is a rough benchmark only. Use <strong>Refresh</strong> closer to first pitch.
@@ -5617,11 +5716,11 @@ function renderSOCard(g) {
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px">
             ${g.lineSrc==="sportsbook"
-              ? `<span style="background:#22d3ee22;border:1px solid #22d3eeaa;color:#22d3ee;border-radius:6px;padding:5px 12px;font-size:14px;font-weight:800;letter-spacing:.04em;font-variant-numeric:tabular-nums">📊 Book: ${g.line} K</span>`
+              ? `<span style="background:#22d3ee22;border:1px solid #22d3eeaa;color:#22d3ee;border-radius:6px;padding:5px 12px;font-size:14px;font-weight:800;letter-spacing:.04em;font-variant-numeric:tabular-nums">Book: ${g.line} K</span>`
               : `<span style="background:rgba(100,116,139,.18);border:1px solid rgba(100,116,139,.35);color:#64748b;border-radius:6px;padding:5px 12px;font-size:13px;font-weight:700">CALC: ${g.line} K</span>`}
-            ${g.lineMov ? renderLineMovement(g.lineMov) : ""}
+            ${lineMov ? renderLineMovement(lineMov) : ""}
             ${g.lineSrc === "sportsbook" && (g.fdOverAm != null || g.dkOverAm != null || g.fdUnderAm != null || g.dkUnderAm != null)
-              ? `<span style="display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:14px;font-weight:800;font-variant-numeric:tabular-nums" title="Sportsbook odds on ${g.pickOver ? "Over" : "Under"} ${g.line}">${formatBookSideOddsChips(g.pickOver ? g.fdOverAm : g.fdUnderAm, g.pickOver ? g.dkOverAm : g.dkUnderAm, g.pickOver ? "Over" : "Under")}${g.oddsMov?.fd || g.oddsMov?.dk ? `<span style="color:#fbbf24;font-size:11px;font-weight:800;margin-left:4px" title="Over price changed vs first load today">odds shift</span>` : ""}</span>`
+              ? `<span style="display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:14px;font-weight:800;font-variant-numeric:tabular-nums" title="Sportsbook odds on ${g.pickOver ? "Over" : "Under"} ${g.line}">${formatBookSideOddsChips(g.pickOver ? g.fdOverAm : g.fdUnderAm, g.pickOver ? g.dkOverAm : g.dkUnderAm, g.pickOver ? "Over" : "Under")}${oddsMov?.fd || oddsMov?.dk ? `<span style="color:#fbbf24;font-size:11px;font-weight:800;margin-left:4px" title="Over price changed vs open print">${oddsMov.fd ? `FD ${formatAmerican(oddsMov.fd.from)}→${formatAmerican(oddsMov.fd.to)}` : ""}${oddsMov.fd && oddsMov.dk ? " · " : ""}${oddsMov.dk ? `DK ${formatAmerican(oddsMov.dk.from)}→${formatAmerican(oddsMov.dk.to)}` : ""}</span>` : ""}</span>`
               : ""}
             ${g.fanGraphsInModel ? (g.fgSource === "statcast"
               ? `<span style="font-size:10px;font-weight:700;color:#c4b5fd;border:1px solid rgba(196,181,253,.4);border-radius:4px;padding:2px 8px;letter-spacing:.04em" title="Savant Statcast rates (K%, whiff%)">Statcast</span>`
@@ -6265,7 +6364,7 @@ function clearAllCaches() {
   _ppBoard = null;
   ppLines = {}; lastOddsRows = []; ppHitterLines = {}; ppTeamMap = {}; ppNRFI = {};
   clData = {}; clSeedLoaded = false;
-  ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {};
+  ppLinesSnapshot = {}; lineMovements = {}; oddsMovements = {}; _snapDay = "";
   _umpData = {}; _weather = {};
   [_lineup, _batterKPct, _pitcher, _teamSplit, _personBats].forEach(c => Object.keys(c).forEach(k => delete c[k]));
 }
