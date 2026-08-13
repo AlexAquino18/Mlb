@@ -97,6 +97,19 @@ def _multi_list(raw: Any) -> List[dict]:
     return []
 
 
+def _looks_like_college_football(ev: dict) -> bool:
+    lg = ev.get("league") if isinstance(ev.get("league"), dict) else {}
+    blob = " ".join(
+        [
+            str(lg.get("slug") or ""),
+            str(lg.get("name") or ""),
+            _team_str(ev.get("home")),
+            _team_str(ev.get("away")),
+        ]
+    ).lower()
+    return any(x in blob for x in ("ncaaf", "ncaa", "college", "cfb"))
+
+
 def _is_nfl_event(ev: dict) -> bool:
     lg = ev.get("league") if isinstance(ev.get("league"), dict) else {}
     slug = (lg.get("slug") or "").lower()
@@ -109,6 +122,8 @@ def _is_nfl_event(ev: dict) -> bool:
     sp_slug = (sp.get("slug") or "").lower()
     sp_name = (sp.get("name") or "").lower()
     if sp_slug == "nfl" or sp_name == "nfl":
+        return True
+    if sp_slug == "american-football" and not _looks_like_college_football(ev):
         return True
     return False
 
@@ -242,25 +257,29 @@ def _stat_hint_nfl(raw: str) -> str:
         or "rush + rec" in raw
     ):
         return "rush_rec_yds"
-    if "passing yard" in raw or "pass yard" in raw or "pass yds" in raw:
+    if "passing yard" in raw or "pass yard" in raw or "pass yds" in raw or "pass yd" in raw:
         return "pass_yds"
-    if ("passing" in raw or "pass " in raw) and ("td" in raw or "touchdown" in raw):
+    if "pyards" in raw or raw in ("pass yds", "pass yd", "pyds", "pyd"):
+        return "pass_yds"
+    if ("passing" in raw or "pass " in raw or raw.startswith("pass")) and (
+        "td" in raw or "touchdown" in raw
+    ):
         return "pass_td"
-    if "completion" in raw:
+    if "completion" in raw or "comp" == raw or "completions" in raw:
         return "completions"
     if ("pass" in raw or "passing" in raw) and "attempt" in raw:
         return "pass_att"
-    if "interception" in raw or raw in ("int", "ints"):
+    if "interception" in raw or raw in ("int", "ints", "ints thrown"):
         return "ints"
-    if "rushing yard" in raw or "rush yard" in raw or "rush yds" in raw:
+    if "rushing yard" in raw or "rush yard" in raw or "rush yds" in raw or "rush yd" in raw:
         return "rush_yds"
     if ("rush" in raw and "attempt" in raw) or "carries" in raw or "carry" in raw:
         return "rush_att"
     if ("rush" in raw) and ("td" in raw or "touchdown" in raw):
         return "rush_td"
-    if "receiving yard" in raw or "rec yard" in raw or "rec yds" in raw:
+    if "receiving yard" in raw or "rec yard" in raw or "rec yds" in raw or "rec yd" in raw:
         return "rec_yds"
-    if "reception" in raw or raw in ("recs", "rec"):
+    if "reception" in raw or raw in ("recs", "rec", "receptions"):
         return "receptions"
     if ("receiv" in raw or "rec " in raw) and ("td" in raw or "touchdown" in raw):
         return "rec_td"
@@ -652,11 +671,11 @@ def fetch_nfl_odds_bundle(
 ) -> Dict[str, Any]:
     """
     NFL player props for a date range (typically Thu–Tue of a given week).
-    One events call + ceil(n/10) multi-odds calls. Cached 15 minutes.
+    Odds-API.io sport slug is american-football (nfl is not a valid sport).
     """
     start = (date_from or "")[:10]
     end = (date_to or date_from or "")[:10]
-    cache_key = f"nfl|{start}|{end}|{bookmakers}|v1"
+    cache_key = f"nfl|{start}|{end}|{bookmakers}|v3"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]
@@ -676,12 +695,17 @@ def fetch_nfl_odds_bundle(
         start, end = end, start
 
     try:
-        raw_all: List[dict] = []
         events: List[dict] = []
-        for sport_slug in ("nfl", "american-football", "football"):
-            q_params: Dict[str, str] = {"sport": sport_slug, "apiKey": api_key}
-            q_params["from"] = f"{start}T00:00:00Z"
-            q_params["to"] = f"{end}T23:59:59Z"
+        attempts = (
+            {"sport": "american-football", "from": start, "to": end},
+            {"sport": "american-football"},  # next ~14 days if the week window is empty
+        )
+        for attempt in attempts:
+            q_params: Dict[str, str] = {"sport": attempt["sport"], "apiKey": api_key}
+            if attempt.get("from"):
+                q_params["from"] = f"{attempt['from']}T00:00:00Z"
+            if attempt.get("to"):
+                q_params["to"] = f"{attempt['to']}T23:59:59Z"
             events_url = f"{ODDS_BASE}/events?{urllib.parse.urlencode(q_params)}"
             try:
                 raw_ev = _get_json(events_url)
@@ -689,16 +713,24 @@ def fetch_nfl_odds_bundle(
                 continue
             out["meta"]["apiCalls"] = out["meta"]["apiCalls"] + 1
             raw_all = _events_list(raw_ev)
-            on_range = _events_in_range(raw_all, start, end)
+            on_range = (
+                _events_in_range(raw_all, start, end)
+                if attempt.get("from")
+                else raw_all
+            )
             nfl_events = [e for e in on_range if _is_nfl_event(e)]
+            if not nfl_events and on_range:
+                nfl_events = [
+                    e
+                    for e in on_range
+                    if not _looks_like_college_football(e)
+                ]
             if nfl_events:
                 events = nfl_events
-                out["meta"]["eventsSport"] = sport_slug
-                break
-            # sport=nfl feeds often omit league slug — keep the range if the slug itself is nfl
-            if sport_slug == "nfl" and on_range:
-                events = on_range
-                out["meta"]["eventsSport"] = sport_slug
+                out["meta"]["eventsSport"] = attempt["sport"]
+                out["meta"]["eventsQuery"] = (
+                    "ranged" if attempt.get("from") else "next_14d"
+                )
                 break
         out["meta"]["eventCount"] = len(events)
 

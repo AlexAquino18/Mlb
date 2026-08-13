@@ -343,8 +343,8 @@
 
 <div id="main">
   <div id="tabs">
-    <button class="tab-btn active" data-tab="slate">Slate</button>
-    <button class="tab-btn" data-tab="props">Player Props</button>
+    <button class="tab-btn" data-tab="slate">Slate</button>
+    <button class="tab-btn active" data-tab="props">Player Props</button>
     <button class="tab-btn" data-tab="ev">+EV Odds</button>
   </div>
   <div id="filters" style="display:none"></div>
@@ -402,14 +402,16 @@ const STAT_META = {
   long_rec:      { label: "Long Rec",      group: "rec" },
   long_rush:     { label: "Long Rush",     group: "rush" },
   long_pass:     { label: "Long Pass",     group: "pass" },
+  other:         { label: "Other",         group: "other" },
 };
 
-let activeTab = "slate";
+let activeTab = "props";
 let activeFilter = "all";
 let searchQ = "";
-let selected = { seasontype: 2, week: 1, year: 2026 };
+let selected = { seasontype: 1, week: 2, year: 2026 };
 let cache = { slate: null, props: null, ev: null };
 let lastOddsRows = [];
+let lastOddsMeta = null;
 let lastPPBoardMeta = null;
 let lastRefreshAt = 0;
 let _autoRefreshTimer = null;
@@ -439,10 +441,21 @@ function formatKick(iso) {
     day: d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }),
   };
 }
+function espnSeasonType(season) {
+  const t = season && season.type;
+  if (t && typeof t === "object") {
+    const n = Number(t.type ?? t.id);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  const n = Number(t);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
 function seasonLabel(type, week) {
-  if (Number(type) === 1) return `Preseason Week ${week}`;
-  if (Number(type) === 3) return `Playoffs · Round ${week}`;
-  return `Week ${week}`;
+  const t = Number(type);
+  const w = Number(week);
+  if (t === 1) return w === 1 ? "Hall of Fame" : `Preseason Week ${w - 1}`;
+  if (t === 3) return `Playoffs · Round ${w}`;
+  return `Week ${w}`;
 }
 function setStatus(msg) {
   const el = document.getElementById("load-status");
@@ -489,10 +502,13 @@ async function fetchJson(url, timeout = 14000) {
 function fillWeekPicker() {
   const sel = document.getElementById("week-picker");
   const year = selected.year;
-  let html = `<optgroup label="${year} Regular Season">`;
+  let html = `<optgroup label="${year} Preseason">`;
+  html += `<option value="1-1">Hall of Fame</option>`;
+  html += `<option value="1-2">Preseason Week 1</option>`;
+  html += `<option value="1-3">Preseason Week 2</option>`;
+  html += `<option value="1-4">Preseason Week 3</option>`;
+  html += `</optgroup><optgroup label="${year} Regular Season">`;
   for (let w = 1; w <= 18; w++) html += `<option value="2-${w}">Week ${w}</option>`;
-  html += `</optgroup><optgroup label="${year} Preseason">`;
-  for (let w = 1; w <= 4; w++) html += `<option value="1-${w}">Preseason ${w}</option>`;
   html += `</optgroup>`;
   sel.innerHTML = html;
   sel.value = `${selected.seasontype}-${selected.week}`;
@@ -554,13 +570,13 @@ function weekWindow(games) {
 
 function oddsIoUrl(from, to) {
   if (typeof location === "undefined" || location.protocol === "file:") return "";
-  const qs = new URLSearchParams({ sport: "nfl", from, to, rev: "20260813nflv1" });
+  const qs = new URLSearchParams({ sport: "nfl", from, to, rev: "20260813nflv2" });
   const host = location.hostname;
   const isLocal = host === "localhost" || host === "127.0.0.1";
   if (isLocal) return `http://127.0.0.1:8080/api/odds_io?${qs}`;
   return `${location.origin}/api/odds_io?${qs}`;
 }
-function oddsCacheKey(from, to) { return `nfl_odds_v1:${from}:${to}`; }
+function oddsCacheKey(from, to) { return `nfl_odds_v2:${from}:${to}`; }
 function oddsCacheGet(from, to) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(from, to));
@@ -629,10 +645,16 @@ function nflStatHint(raw) {
   if (t.includes("reception") || t === "recs") return "receptions";
   if ((t.includes("receiv") || t.includes("rec ")) && (t.includes("td") || t.includes("touchdown"))) return "rec_td";
   if (t.includes("fantasy")) return "fantasy";
+  if (t.includes("longest rec") || t.includes("long rec")) return "long_rec";
+  if (t.includes("longest rush") || t.includes("long rush")) return "long_rush";
+  if (t.includes("longest pass") || t.includes("long pass")) return "long_pass";
   return "";
 }
 function rowStatKey(row) {
-  return (row.statHint || nflStatHint(row.market) || nflStatHint(row.player) || "").toLowerCase();
+  const k = (row.statHint || nflStatHint(row.market) || nflStatHint(row.player) || "").toLowerCase();
+  if (k && STAT_META[k]) return k;
+  if (row.player && Number.isFinite(Number(row.hdp))) return "other";
+  return "";
 }
 function normBookmakerLabel(name) {
   const n = (name || "").toLowerCase();
@@ -666,16 +688,24 @@ function evAmerican(dec) {
 
 async function loadOdds(games) {
   lastOddsRows = [];
+  lastOddsMeta = null;
   const { from, to } = weekWindow(games);
   let payload = oddsCacheGet(from, to);
   if (!payload) {
     const url = oddsIoUrl(from, to);
-    if (!url) return { ok: false, error: "file_host" };
+    if (!url) {
+      lastOddsMeta = { error: "file_host" };
+      return { ok: false, error: "file_host" };
+    }
     const r = await fetchTimeout(url, 28000, { headers: { Accept: "application/json" } });
     payload = await r.json();
     if (payload?.ok) oddsCacheSet(from, to, payload);
   }
   lastOddsRows = Array.isArray(payload?.rows) ? payload.rows.slice() : [];
+  lastOddsMeta = { ...(payload?.meta || {}) };
+  if (payload?.error) lastOddsMeta.error = payload.error;
+  lastOddsMeta.dateFrom = lastOddsMeta.dateFrom || from;
+  lastOddsMeta.dateTo = lastOddsMeta.dateTo || to;
   return payload || { ok: false };
 }
 
@@ -983,7 +1013,7 @@ function renderFilters(tab) {
     f.style.display = "flex";
     return;
   }
-  const opts = [["all", "All"], ["pass", "Passing"], ["rush", "Rushing"], ["rec", "Receiving"], ["td", "TDs"], ["combo", "Combo"]];
+  const opts = [["all", "All"], ["pass", "Passing"], ["rush", "Rushing"], ["rec", "Receiving"], ["td", "TDs"], ["combo", "Combo"], ["other", "Other"]];
   f.innerHTML =
     opts.map(([id, label]) => `<button class="filter-btn${id === activeFilter ? " active" : ""}" data-filter="${id}">${label}</button>`).join("") +
     `<input type="search" id="prop-search" placeholder="Search player…" value="${searchQ.replace(/"/g, "&quot;")}" />` +
@@ -1038,18 +1068,21 @@ function renderSlate(games) {
   if (!games.length) {
     return `<div class="game-card empty">
       <h3>No games on this week yet</h3>
-      <p>ESPN has not published this slate. Week 1 odds usually appear the week before kickoff — try Regular Season Week 1 or a nearby preseason week.</p>
+      <p>ESPN has not published this slate. Right now the league is in preseason — pick Preseason Week 1 in the week menu, or Regular Season Week 1 once that slate is posted.</p>
     </div>`;
   }
+  const propById = new Map((cache.props || []).map(g => [g.id, g.propCount || 0]));
   return games.map((g, i) => {
     const kick = formatKick(g.date);
     const recA = g.away.record ? `(${g.away.record})` : "";
     const recH = g.home.record ? `(${g.home.record})` : "";
+    const nProps = propById.get(g.id) || 0;
+    const propChip = nProps ? `<span class="stat-chip">${nProps} prop${nProps === 1 ? "" : "s"}</span>` : "";
     return `<div class="game-card">
       <div class="card-hd" data-open="${i}">
         <div>
           <div class="card-teams">${g.away.abbr} ${recA} @ ${g.home.abbr} ${recH}</div>
-          <div class="card-meta">${g.away.nick} at ${g.home.nick}${g.venue ? " · " + g.venue : ""} · ${oddsChips(g)}</div>
+          <div class="card-meta">${g.away.nick} at ${g.home.nick}${g.venue ? " · " + g.venue : ""} · ${oddsChips(g)}${propChip}</div>
         </div>
         <div class="card-right">
           <div class="kick-time">${kick.time}</div>
@@ -1073,6 +1106,24 @@ function bookOddsLine(books) {
   return parts.join(" · ");
 }
 
+function oddsEmptyCopy() {
+  const m = lastOddsMeta || {};
+  const err = String(m.error || "");
+  if (err === "missing_ODDS_API_KEY" || err.includes("missing_ODDS")) {
+    return "Odds API key is not configured on the server, so FanDuel / DraftKings props cannot load.";
+  }
+  if (err === "file_host") {
+    return "Open the site over http://localhost:8080 (not a file:// page) so the odds proxy can run.";
+  }
+  if (err) return `Odds feed error: ${err}`;
+  if (m.note === "no_nfl_events_for_range") {
+    return `No NFL events in the odds feed for ${m.dateFrom || "this window"} to ${m.dateTo || ""}. Books post preseason props under the current preseason week.`;
+  }
+  if ((m.eventCount || 0) > 0 && !(m.propRows || lastOddsRows.length)) {
+    return `Found ${m.eventCount} NFL event${m.eventCount === 1 ? "" : "s"} but FanDuel / DraftKings have not posted player props yet.`;
+  }
+  return `FanDuel / DraftKings player props typically go up the week of the game. ${seasonLabel(selected.seasontype, selected.week)} is loaded — check back as lines drop.`;
+}
 function renderProps(games) {
   const shown = games.map(filterPropsGame).filter(g => g.players.length);
   if (!games.length) {
@@ -1081,11 +1132,11 @@ function renderProps(games) {
   if (!lastOddsRows.length) {
     return `<div class="game-card empty">
       <h3>No book props posted yet</h3>
-      <p>FanDuel / DraftKings player props typically go up the week before kickoff. The ${seasonLabel(selected.seasontype, selected.week)} schedule is ready — check this tab again as lines drop.</p>
+      <p>${oddsEmptyCopy()}</p>
     </div>`;
   }
   if (!shown.length) {
-    return `<div class="game-card empty"><h3>No matching props</h3><p>Try another filter or clear the search.</p></div>`;
+    return `<div class="game-card empty"><h3>No matching props</h3><p>Try All / Other, or clear the search. ${lastOddsRows.length} book row${lastOddsRows.length === 1 ? "" : "s"} loaded.</p></div>`;
   }
   return shown.map((g, i) => {
     const kick = formatKick(g.date);
@@ -1180,6 +1231,7 @@ function renderCards(data, tab) {
 function clearCaches() {
   cache = { slate: null, props: null, ev: null };
   lastOddsRows = [];
+  lastOddsMeta = null;
   _ppBoard = null;
 }
 
@@ -1226,26 +1278,19 @@ async function bootDefaultWeek() {
   try {
     const json = await fetchJson(ESPN, 12000);
     const season = json?.leagues?.[0]?.season || json?.season || {};
-    const week = json?.week?.number;
+    const week = Number(json?.week?.number);
     if (season.year) selected.year = Number(season.year);
-    const type = Number(season.type) || 2;
-    const month = new Date().getMonth() + 1;
-    if (type === 2 && week) {
-      selected.seasontype = 2;
-      selected.week = Number(week);
-    } else if (type === 3 && week) {
-      selected.seasontype = 3;
-      selected.week = Number(week);
-    } else if (month >= 8 && month <= 9) {
-      selected.seasontype = 2;
-      selected.week = 1;
-    } else if (week) {
+    const type = espnSeasonType(season);
+    if (type && week) {
       selected.seasontype = type;
-      selected.week = Number(week);
+      selected.week = week;
+    } else if (week) {
+      selected.seasontype = type || 1;
+      selected.week = week;
     }
   } catch (_) {
-    selected.seasontype = 2;
-    selected.week = 1;
+    selected.seasontype = 1;
+    selected.week = 2;
   }
   fillWeekPicker();
 }
@@ -1297,7 +1342,7 @@ document.addEventListener("visibilitychange", () => {
 
 (async function start() {
   await bootDefaultWeek();
-  await loadTab("slate");
+  await loadTab("props");
 })();
 </script>
 </body>

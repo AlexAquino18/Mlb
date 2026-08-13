@@ -49,7 +49,14 @@ function isNflEvent(ev) {
   const spSlug = String(sp.slug || "").toLowerCase();
   const spName = String(sp.name || "").toLowerCase();
   if (spSlug === "nfl" || spName === "nfl") return true;
+  if (spSlug === "american-football" && !looksLikeCollegeFootball(ev)) return true;
   return false;
+}
+
+function looksLikeCollegeFootball(ev) {
+  const lg = ev.league || {};
+  const blob = [lg.slug, lg.name, teamStr(ev.home), teamStr(ev.away)].join(" ").toLowerCase();
+  return ["ncaaf", "ncaa", "college", "cfb"].some((x) => blob.includes(x));
 }
 
 function isMlbEvent(ev) {
@@ -382,12 +389,16 @@ export default async (request) => {
   const out = { ok: false, error: null, rows: [], meta: { apiCalls: 0, eventCount: 0, propRows: 0, sport: isNfl ? "nfl" : "mlb" } };
 
   try {
-    const sportSlugs = isNfl ? ["nfl", "american-football", "football"] : ["baseball"];
-    let rawAll = [];
+    const eventAttempts = isNfl
+      ? [
+          { sport: "american-football", ranged: true },
+          { sport: "american-football", ranged: false },
+        ]
+      : [{ sport: "baseball", ranged: false }];
     let events = [];
-    for (const slug of sportSlugs) {
-      const params = { sport: slug, apiKey };
-      if (isNfl) {
+    for (const attempt of eventAttempts) {
+      const params = { sport: attempt.sport, apiKey };
+      if (isNfl && attempt.ranged) {
         params.from = `${start}T00:00:00Z`;
         params.to = `${end || start}T23:59:59Z`;
       }
@@ -407,24 +418,24 @@ export default async (request) => {
         }
         continue;
       }
-      rawAll = eventsList(rawEv);
+      const rawAll = eventsList(rawEv);
       const inRange = rawAll.filter((e) => {
         const dk = eventDateKey(e);
         if (!dk) return false;
         if (!isNfl) return dk === start;
+        if (!attempt.ranged) return true;
         if (start && dk < start) return false;
         if (end && dk > end) return false;
         return true;
       });
-      const filtered = inRange.filter(isNfl ? isNflEvent : isMlbEvent);
+      let filtered = inRange.filter(isNfl ? isNflEvent : isMlbEvent);
+      if (isNfl && !filtered.length && inRange.length) {
+        filtered = inRange.filter((e) => !looksLikeCollegeFootball(e));
+      }
       if (filtered.length) {
         events = filtered;
-        out.meta.eventsSport = slug;
-        break;
-      }
-      if (isNfl && slug === "nfl" && inRange.length) {
-        events = inRange;
-        out.meta.eventsSport = slug;
+        out.meta.eventsSport = attempt.sport;
+        out.meta.eventsQuery = isNfl && attempt.ranged ? "ranged" : isNfl ? "next_14d" : "date";
         break;
       }
       if (!isNfl && inRange.length) {
