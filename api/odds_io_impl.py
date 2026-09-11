@@ -244,10 +244,17 @@ def _composite_market_name(m: dict, odd: dict) -> str:
 
 def _stat_hint_nfl(raw: str) -> str:
     """NFL player-prop labels — more specific phrases first."""
+    raw = (raw or "").lower()
     if not raw:
         return ""
     if "anytime" in raw and ("td" in raw or "touchdown" in raw):
         return "anytime_td"
+    if (
+        ("pass" in raw and "rush" in raw and ("rec" in raw or "receiving" in raw) and "yard" in raw)
+        or "pass+rush+rec" in raw
+        or "pass + rush + rec" in raw
+    ):
+        return "pass_rush_rec_yds"
     if ("pass" in raw and "rush" in raw and "yard" in raw) or "pass+rush" in raw or "pass + rush" in raw:
         return "pass_rush_yds"
     if (
@@ -257,6 +264,14 @@ def _stat_hint_nfl(raw: str) -> str:
         or "rush + rec" in raw
     ):
         return "rush_rec_yds"
+    if ("pass" in raw and "rush" in raw) and ("td" in raw or "touchdown" in raw) and "yard" not in raw:
+        return "pass_rush_td"
+    if (
+        ("rush" in raw and ("rec" in raw or "receiving" in raw))
+        and ("td" in raw or "touchdown" in raw)
+        and "yard" not in raw
+    ):
+        return "rush_rec_td"
     if "passing yard" in raw or "pass yard" in raw or "pass yds" in raw or "pass yd" in raw:
         return "pass_yds"
     if "pyards" in raw or raw in ("pass yds", "pass yd", "pyds", "pyd"):
@@ -269,6 +284,8 @@ def _stat_hint_nfl(raw: str) -> str:
         return "completions"
     if ("pass" in raw or "passing" in raw) and "attempt" in raw:
         return "pass_att"
+    if "defensive interception" in raw or "def int" in raw:
+        return "def_ints"
     if "interception" in raw or raw in ("int", "ints", "ints thrown"):
         return "ints"
     if "rushing yard" in raw or "rush yard" in raw or "rush yds" in raw or "rush yd" in raw:
@@ -283,14 +300,34 @@ def _stat_hint_nfl(raw: str) -> str:
         return "receptions"
     if ("receiv" in raw or "rec " in raw) and ("td" in raw or "touchdown" in raw):
         return "rec_td"
+    if "target" in raw:
+        return "targets"
+    if "first down" in raw or "1st down" in raw or "1st downs" in raw:
+        return "first_downs"
     if "fantasy" in raw:
         return "fantasy"
     if "longest rec" in raw or "long rec" in raw:
         return "long_rec"
     if "longest rush" in raw or "long rush" in raw:
         return "long_rush"
-    if "longest pass" in raw or "long pass" in raw:
+    if "longest pass" in raw or "long pass" in raw or "longest completion" in raw:
         return "long_pass"
+    if "sack" in raw:
+        return "sacks"
+    if "solo tackle" in raw:
+        return "solo_tackles"
+    if "tackle" in raw and ("assist" in raw or "+" in raw or "combined" in raw):
+        return "tackles_ast"
+    if "tackle" in raw:
+        return "tackles"
+    if "longest field" in raw or "long fg" in raw or "fg long" in raw:
+        return "fg_long"
+    if "field goal" in raw or raw in ("fg", "fgs", "fg made"):
+        return "fg_made"
+    if "extra point" in raw or "pat made" in raw or raw in ("pat", "xp", "xps"):
+        return "pat"
+    if "kicking point" in raw or "kicker point" in raw:
+        return "kicking_pts"
     return ""
 
 
@@ -675,7 +712,7 @@ def fetch_nfl_odds_bundle(
     """
     start = (date_from or "")[:10]
     end = (date_to or date_from or "")[:10]
-    cache_key = f"nfl|{start}|{end}|{bookmakers}|v3"
+    cache_key = f"nfl|{start}|{end}|{bookmakers}|v4"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]

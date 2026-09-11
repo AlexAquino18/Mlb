@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <title>PropPulse — NFL Props</title>
-  <meta name="description" content="PropPulse NFL player prop intelligence — passing, rushing, receiving, and +EV vs PrizePicks, FanDuel, and DraftKings." />
+  <meta name="description" content="PropPulse NFL Week 1 player props — pass, rush, rec, TDs, defense, kicking, line movement, and +EV vs PrizePicks, FanDuel, and DraftKings." />
   <meta property="og:title" content="PropPulse — NFL" />
-  <meta property="og:description" content="Week-by-week NFL player props and +EV odds." />
+  <meta property="og:description" content="Week 1 NFL player props, line movement, and +EV odds." />
   <meta property="og:type" content="website" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
@@ -16,7 +16,7 @@
   <style>
     :root {
       --bg-deep: #070b14;
-      --bg-card: rgba(17, 24, 39, 0.72);
+      --bg-card: rgba(17, 24, 39, 0.9);
       --border: rgba(56, 189, 248, 0.12);
       --border-strong: rgba(56, 189, 248, 0.28);
       --text: #e8edf5;
@@ -225,6 +225,40 @@
     .card-right { text-align: right; flex-shrink: 0; }
     .kick-time { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--accent); }
     .kick-day { font-size: 11px; color: var(--muted); margin-top: 3px; }
+    .score-now { font-family: var(--font-mono); font-size: 18px; font-weight: 800; color: var(--text); letter-spacing: 0.02em; }
+    .live-dot {
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: #fb7185; margin-right: 5px; box-shadow: 0 0 8px #fb7185;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse { 50% { opacity: 0.35; transform: scale(0.85); } }
+    .matchup-row { display: flex; align-items: center; gap: 10px; }
+    .team-logo { width: 28px; height: 28px; object-fit: contain; }
+    .day-head {
+      font-size: 11px; font-weight: 700; color: var(--muted);
+      letter-spacing: 0.1em; text-transform: uppercase;
+      margin: 18px 0 8px; padding-left: 2px;
+    }
+    .day-head:first-child { margin-top: 0; }
+    .btn-export {
+      background: rgba(17, 24, 39, 0.9); border: 1px solid var(--border-strong);
+      color: var(--muted); padding: 8px 12px; border-radius: 10px;
+      cursor: pointer; font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    }
+    .btn-export:hover { border-color: rgba(34, 211, 238, 0.45); color: var(--text); }
+    .prop-pill { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+    .prop-pill:hover, .prop-pill.active { border-color: rgba(34, 211, 238, 0.5); background: rgba(34, 211, 238, 0.06); }
+    .prop-pill-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+    .mov-chip { font-size: 9px; font-weight: 700; font-family: var(--font-mono); padding: 1px 5px; border-radius: 4px; }
+    .mov-chip.up { color: #fda4af; background: rgba(251, 113, 133, 0.12); }
+    .mov-chip.down { color: #6ee7b7; background: rgba(52, 211, 153, 0.12); }
+    .pp-chip { font-size: 9px; font-weight: 700; font-family: var(--font-mono); padding: 1px 5px; border-radius: 4px; color: #c4b5fd; background: rgba(167, 139, 250, 0.14); border: 1px solid rgba(167, 139, 250, 0.35); }
+    .inj-chip { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 4px; background: rgba(251, 113, 133, 0.14); color: #fda4af; border: 1px solid rgba(251, 113, 133, 0.35); }
+    .prop-track { margin-top: 10px; padding: 10px 12px; background: rgba(0,0,0,.28); border: 1px solid rgba(148,163,184,.18); border-radius: 10px; }
+    .game-log-table { width: 100%; border-collapse: collapse; font-size: 11px; font-family: var(--font-mono); margin-top: 8px; }
+    .game-log-table th { color: #64748b; text-align: left; padding: 4px 6px; font-size: 9px; letter-spacing: 0.06em; }
+    .game-log-table td { padding: 4px 6px; color: #94a3b8; }
+    .toolbar-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
     .card-bd { padding: 0 20px 20px; border-top: 1px solid var(--border); display: none; }
     .card-bd.open { display: block; }
 
@@ -336,6 +370,7 @@
     </div>
     <div id="header-right">
       <select id="week-picker" aria-label="NFL week"></select>
+      <button type="button" class="btn-export" id="export-btn" title="Download this week's props as CSV">Export CSV</button>
       <span id="updated"></span>
     </div>
   </div>
@@ -367,16 +402,18 @@
     <p class="footer-disclaimer">
       For informational purposes only — not betting advice. NFL schedule from ESPN.
       Odds from FanDuel / DraftKings. +EV grades PrizePicks standard lines at −119 vs de-vigged book prices.
-      Verify inactives and props before wagering. Bet responsibly.
+      Line movement is logged locally in your browser. Verify inactives and props before wagering. Bet responsibly.
     </p>
-    <p class="footer-meta">Auto-refreshes every 30 minutes · Data cached to limit API usage</p>
+    <p class="footer-meta">Auto-refreshes every 30 minutes · every 8 minutes while games are live · Data cached to limit API usage</p>
   </div>
 </footer>
 
 <script>
 "use strict";
 const AUTO_REFRESH_MS = 30 * 60 * 1000;
+const LIVE_REFRESH_MS = 8 * 60 * 1000;
 const ESPN = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
+const ESPN_INJ = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries";
 const PROXY  = "https://corsproxy.io/?url=";
 const PROXY2 = "https://api.allorigins.win/raw?url=";
 const EV_BOOKS = ["FanDuel", "DraftKings"];
@@ -397,18 +434,32 @@ const STAT_META = {
   rec_td:        { label: "Rec TDs",       group: "rec" },
   anytime_td:    { label: "Anytime TD",    group: "td" },
   pass_rush_yds: { label: "Pass+Rush Yds", group: "combo" },
-  rush_rec_yds:  { label: "Rush+Rec Yds",  group: "combo" },
+  pass_rush_rec_yds: { label: "P+R+Rec Yds", group: "combo" },
+  rush_rec_yds:  { label: "Rush+Rec Yds", group: "combo" },
+  pass_rush_td:  { label: "Pass+Rush TDs", group: "td" },
+  rush_rec_td:   { label: "Rush+Rec TDs", group: "td" },
   fantasy:       { label: "Fantasy",       group: "combo" },
+  targets:       { label: "Targets",       group: "rec" },
+  first_downs:   { label: "1st Downs",     group: "combo" },
   long_rec:      { label: "Long Rec",      group: "rec" },
   long_rush:     { label: "Long Rush",     group: "rush" },
   long_pass:     { label: "Long Pass",     group: "pass" },
+  sacks:         { label: "Sacks",         group: "def" },
+  tackles:       { label: "Tackles",       group: "def" },
+  tackles_ast:   { label: "Tackles+Ast",   group: "def" },
+  solo_tackles:  { label: "Solo Tackles",  group: "def" },
+  def_ints:      { label: "Def INTs",      group: "def" },
+  fg_made:       { label: "FG Made",       group: "kick" },
+  fg_long:       { label: "Long FG",       group: "kick" },
+  pat:           { label: "PATs",          group: "kick" },
+  kicking_pts:   { label: "Kicking Pts",   group: "kick" },
   other:         { label: "Other",         group: "other" },
 };
 
 let activeTab = "props";
 let activeFilter = "all";
 let searchQ = "";
-let selected = { seasontype: 1, week: 2, year: 2026 };
+let selected = { seasontype: 2, week: 1, year: 2026 };
 let cache = { slate: null, props: null, ev: null };
 let lastOddsRows = [];
 let lastOddsMeta = null;
@@ -416,7 +467,9 @@ let lastPPBoardMeta = null;
 let lastRefreshAt = 0;
 let _autoRefreshTimer = null;
 let _ppBoard = null;
+let _injuries = { ts: 0, byName: {} };
 let gamesState = [];
+let expandedTrack = null;
 
 function pad(n) { return String(n).padStart(2, "0"); }
 function ymd(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
@@ -454,8 +507,19 @@ function seasonLabel(type, week) {
   const t = Number(type);
   const w = Number(week);
   if (t === 1) return w === 1 ? "Hall of Fame" : `Preseason Week ${w - 1}`;
-  if (t === 3) return `Playoffs · Round ${w}`;
+  if (t === 3) {
+    return ["", "Wild Card", "Divisional", "Conference", "Super Bowl"][w] || `Playoffs · Round ${w}`;
+  }
   return `Week ${w}`;
+}
+function weekKey() {
+  return `${selected.year}-${selected.seasontype}-${selected.week}`;
+}
+function regularSeasonFallback() {
+  const now = new Date();
+  selected.year = now.getFullYear();
+  selected.seasontype = 2;
+  selected.week = 1;
 }
 function setStatus(msg) {
   const el = document.getElementById("load-status");
@@ -502,13 +566,18 @@ async function fetchJson(url, timeout = 14000) {
 function fillWeekPicker() {
   const sel = document.getElementById("week-picker");
   const year = selected.year;
-  let html = `<optgroup label="${year} Preseason">`;
+  let html = `<optgroup label="${year} Regular Season">`;
+  for (let w = 1; w <= 18; w++) html += `<option value="2-${w}">Week ${w}</option>`;
+  html += `</optgroup><optgroup label="${year} Playoffs">`;
+  html += `<option value="3-1">Wild Card</option>`;
+  html += `<option value="3-2">Divisional</option>`;
+  html += `<option value="3-3">Conference</option>`;
+  html += `<option value="3-4">Super Bowl</option>`;
+  html += `</optgroup><optgroup label="${year} Preseason">`;
   html += `<option value="1-1">Hall of Fame</option>`;
   html += `<option value="1-2">Preseason Week 1</option>`;
   html += `<option value="1-3">Preseason Week 2</option>`;
   html += `<option value="1-4">Preseason Week 3</option>`;
-  html += `</optgroup><optgroup label="${year} Regular Season">`;
-  for (let w = 1; w <= 18; w++) html += `<option value="2-${w}">Week ${w}</option>`;
   html += `</optgroup>`;
   sel.innerHTML = html;
   sel.value = `${selected.seasontype}-${selected.week}`;
@@ -522,25 +591,34 @@ function parseEspnGame(ev) {
     abbr: c.team?.abbreviation || "",
     name: c.team?.displayName || "",
     nick: c.team?.name || c.team?.shortDisplayName || "",
-    record: c.records?.[0]?.summary || "",
+    record: (c.records || []).find(r => r.type === "total")?.summary || c.records?.[0]?.summary || "",
     score: c.score || "",
+    logo: c.team?.logo || "",
   });
   const odds = (comp.odds && comp.odds[0]) || {};
   const status = comp.status || ev.status || {};
+  const venue = comp.venue || {};
   return {
     id: ev.id,
     date: ev.date,
     name: ev.name || ev.shortName || "",
     home: team(homeC),
     away: team(awayC),
-    venue: comp.venue?.fullName || "",
+    venue: venue.fullName || "",
+    venueCity: [venue.address?.city, venue.address?.state].filter(Boolean).join(", "),
+    indoor: !!venue.indoor,
+    neutral: !!comp.neutralSite,
     status: status.type?.state || "",
     statusText: status.type?.shortDetail || status.type?.detail || "",
     completed: !!status.type?.completed,
+    period: status.period || 0,
+    clock: status.displayClock || "",
     spread: odds.spread,
     overUnder: odds.overUnder,
     oddsDetails: odds.details || "",
-    broadcast: (comp.broadcasts || []).flatMap(b => b.names || []).filter(Boolean).join(", "),
+    mlHome: odds.moneyline?.home?.close?.odds || "",
+    mlAway: odds.moneyline?.away?.close?.odds || "",
+    broadcast: (comp.broadcasts || []).flatMap(b => b.names || []).filter(Boolean).join(", ") || comp.broadcast || "",
   };
 }
 
@@ -570,13 +648,13 @@ function weekWindow(games) {
 
 function oddsIoUrl(from, to) {
   if (typeof location === "undefined" || location.protocol === "file:") return "";
-  const qs = new URLSearchParams({ sport: "nfl", from, to, rev: "20260813nflv2" });
+  const qs = new URLSearchParams({ sport: "nfl", from, to, rev: "20260911nflv1" });
   const host = location.hostname;
   const isLocal = host === "localhost" || host === "127.0.0.1";
   if (isLocal) return `http://127.0.0.1:8080/api/odds_io?${qs}`;
   return `${location.origin}/api/odds_io?${qs}`;
 }
-function oddsCacheKey(from, to) { return `nfl_odds_v2:${from}:${to}`; }
+function oddsCacheKey(from, to) { return `nfl_odds_v3:${from}:${to}`; }
 function oddsCacheGet(from, to) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(from, to));
@@ -631,12 +709,16 @@ function nflStatHint(raw) {
   const t = String(raw || "").toLowerCase();
   if (!t) return "";
   if (t.includes("anytime") && (t.includes("td") || t.includes("touchdown"))) return "anytime_td";
+  if ((t.includes("pass") && t.includes("rush") && (t.includes("rec") || t.includes("receiving")) && t.includes("yard")) || t.includes("pass+rush+rec")) return "pass_rush_rec_yds";
   if ((t.includes("pass") && t.includes("rush") && t.includes("yard")) || t.includes("pass+rush")) return "pass_rush_yds";
   if ((t.includes("rush") && (t.includes("rec") || t.includes("receiving")) && t.includes("yard")) || t.includes("rush+rec") || t.includes("rec+rush")) return "rush_rec_yds";
+  if (t.includes("pass") && t.includes("rush") && (t.includes("td") || t.includes("touchdown")) && !t.includes("yard")) return "pass_rush_td";
+  if (t.includes("rush") && (t.includes("rec") || t.includes("receiving")) && (t.includes("td") || t.includes("touchdown")) && !t.includes("yard")) return "rush_rec_td";
   if (t.includes("passing yard") || t.includes("pass yard") || t.includes("pass yds")) return "pass_yds";
   if ((t.includes("passing") || t.includes("pass ")) && (t.includes("td") || t.includes("touchdown"))) return "pass_td";
   if (t.includes("completion")) return "completions";
   if ((t.includes("pass") || t.includes("passing")) && t.includes("attempt")) return "pass_att";
+  if (t.includes("defensive interception") || t.includes("def int")) return "def_ints";
   if (t.includes("interception") || t === "int" || t === "ints") return "ints";
   if (t.includes("rushing yard") || t.includes("rush yard") || t.includes("rush yds")) return "rush_yds";
   if ((t.includes("rush") && t.includes("attempt")) || t.includes("carries")) return "rush_att";
@@ -644,17 +726,42 @@ function nflStatHint(raw) {
   if (t.includes("receiving yard") || t.includes("rec yard") || t.includes("rec yds")) return "rec_yds";
   if (t.includes("reception") || t === "recs") return "receptions";
   if ((t.includes("receiv") || t.includes("rec ")) && (t.includes("td") || t.includes("touchdown"))) return "rec_td";
+  if (t.includes("target")) return "targets";
+  if (t.includes("first down") || t.includes("1st down")) return "first_downs";
   if (t.includes("fantasy")) return "fantasy";
   if (t.includes("longest rec") || t.includes("long rec")) return "long_rec";
   if (t.includes("longest rush") || t.includes("long rush")) return "long_rush";
-  if (t.includes("longest pass") || t.includes("long pass")) return "long_pass";
+  if (t.includes("longest pass") || t.includes("long pass") || t.includes("longest completion")) return "long_pass";
+  if (t.includes("sack")) return "sacks";
+  if (t.includes("solo tackle")) return "solo_tackles";
+  if (t.includes("tackle") && (t.includes("assist") || t.includes("+") || t.includes("combined"))) return "tackles_ast";
+  if (t.includes("tackle")) return "tackles";
+  if (t.includes("longest field") || t.includes("long fg") || t.includes("fg long")) return "fg_long";
+  if (t.includes("field goal") || t === "fg" || t === "fgs") return "fg_made";
+  if (t.includes("extra point") || t === "pat" || t === "xp") return "pat";
+  if (t.includes("kicking point") || t.includes("kicker point")) return "kicking_pts";
   return "";
+}
+function rowLine(row, statKey) {
+  const line = Number(row.hdp);
+  if (Number.isFinite(line)) return line;
+  if (statKey === "anytime_td") return 0.5;
+  return NaN;
 }
 function rowStatKey(row) {
   const k = (row.statHint || nflStatHint(row.market) || nflStatHint(row.player) || "").toLowerCase();
   if (k && STAT_META[k]) return k;
   if (row.player && Number.isFinite(Number(row.hdp))) return "other";
   return "";
+}
+function decToAm(dec) {
+  if (!dec || dec <= 1) return null;
+  return dec >= 2 ? Math.round((dec - 1) * 100) : Math.round(-100 / (dec - 1));
+}
+function formatAmerican(am) {
+  if (am == null || Number.isNaN(Number(am))) return "—";
+  const n = Number(am);
+  return n > 0 ? `+${n}` : `${n}`;
 }
 function normBookmakerLabel(name) {
   const n = (name || "").toLowerCase();
@@ -709,6 +816,194 @@ async function loadOdds(games) {
   return payload || { ok: false };
 }
 
+const NFL_ODDS_HIST_VER = "v1";
+function nflOddsHistKey(wk, playerNorm, statKey) {
+  return `nflOddsHist_${NFL_ODDS_HIST_VER}:${wk}:${playerNorm}|${statKey}`;
+}
+function getNflOddsHistory(wk, playerNorm, statKey) {
+  try {
+    const raw = localStorage.getItem(nflOddsHistKey(wk, playerNorm, statKey));
+    if (!raw) return [];
+    const h = JSON.parse(raw);
+    return Array.isArray(h) ? h : [];
+  } catch (_) { return []; }
+}
+function oddsPointEqual(a, b) {
+  if (!a || !b) return false;
+  return Number(a.line) === Number(b.line)
+    && a.fdOver === b.fdOver && a.dkOver === b.dkOver
+    && a.fdUnder === b.fdUnder && a.dkUnder === b.dkUnder;
+}
+function appendNflOddsHistory(wk, playerNorm, statKey, pt) {
+  if (!wk || !playerNorm || !statKey) return;
+  if (pt.line == null && pt.fdOver == null && pt.dkOver == null) return;
+  const key = nflOddsHistKey(wk, playerNorm, statKey);
+  let hist = getNflOddsHistory(wk, playerNorm, statKey);
+  const now = Date.now();
+  const row = {
+    t: now,
+    line: pt.line ?? null,
+    fdOver: pt.fdOver ?? null,
+    dkOver: pt.dkOver ?? null,
+    fdUnder: pt.fdUnder ?? null,
+    dkUnder: pt.dkUnder ?? null,
+  };
+  const last = hist[hist.length - 1];
+  if (last && oddsPointEqual(last, row)) {
+    if (now - last.t < 25 * 60 * 1000) return;
+  }
+  hist.push(row);
+  if (hist.length > 120) hist = hist.slice(-120);
+  try { localStorage.setItem(key, JSON.stringify(hist)); } catch (_) {}
+}
+function movementFromHistory(hist) {
+  if (!hist || hist.length < 2) return { lineMov: null, oddsMov: null };
+  const a = hist[0];
+  const b = hist[hist.length - 1];
+  const lineMov = a.line != null && b.line != null && Number(a.line) !== Number(b.line)
+    ? { from: a.line, to: b.line, dir: Number(b.line) > Number(a.line) ? "up" : "down" }
+    : null;
+  const side = (from, to) => (from === to || from == null || to == null) ? null
+    : { from, to, dir: to < from ? "down" : "up" };
+  const oddsMov = {
+    fd: side(a.fdOver, b.fdOver),
+    dk: side(a.dkOver, b.dkOver),
+    fdU: side(a.fdUnder, b.fdUnder),
+    dkU: side(a.dkUnder, b.dkUnder),
+  };
+  if (!oddsMov.fd && !oddsMov.dk && !oddsMov.fdU && !oddsMov.dkU) {
+    return { lineMov, oddsMov: null };
+  }
+  return { lineMov, oddsMov };
+}
+function logNflOddsHistory(games) {
+  const wk = weekKey();
+  for (const g of games || []) {
+    for (const p of g.players || []) {
+      for (const l of p.lineList || []) {
+        const fd = l.books.FanDuel || {};
+        const dk = l.books.DraftKings || {};
+        appendNflOddsHistory(wk, p.nk, l.statKey, {
+          line: l.line,
+          fdOver: decToAm(fd.over),
+          fdUnder: decToAm(fd.under),
+          dkOver: decToAm(dk.over),
+          dkUnder: decToAm(dk.under),
+        });
+        l.hist = getNflOddsHistory(wk, p.nk, l.statKey);
+        const mov = movementFromHistory(l.hist);
+        l.lineMov = mov.lineMov;
+        l.oddsMov = mov.oddsMov;
+      }
+    }
+  }
+}
+function renderOddsSparkChart(hist) {
+  const rows = Array.isArray(hist) ? hist.filter(p => p && (p.fdOver != null || p.dkOver != null)) : [];
+  if (rows.length < 2) {
+    return `<div style="color:#94a3b8;font-size:11px;padding:4px 0;line-height:1.5">${
+      (hist || []).length < 1
+        ? "No samples yet — FD/DK prices are logged whenever this week loads."
+        : "Opened this print. The next change (or ~25 min) adds a movement point."
+    }</div>`;
+  }
+  const W = 360, H = 110, padL = 40, padR = 8, padT = 8, padB = 22;
+  const vals = [];
+  rows.forEach(p => { if (p.fdOver != null) vals.push(p.fdOver); if (p.dkOver != null) vals.push(p.dkOver); });
+  if (!vals.length) return "";
+  let minV = Math.min(...vals), maxV = Math.max(...vals);
+  if (minV === maxV) { minV -= 10; maxV += 10; }
+  const padY = Math.max(8, (maxV - minV) * 0.2);
+  minV -= padY; maxV += padY;
+  const xw = W - padL - padR, yh = H - padT - padB, n = rows.length;
+  const xAt = i => padL + (n <= 1 ? 0 : (i / (n - 1)) * xw);
+  const yAt = v => padT + yh - ((Number(v) - minV) / (maxV - minV || 1)) * yh;
+  function stepPath(getter) {
+    let d = "", prev = null;
+    for (let i = 0; i < n; i++) {
+      const v = getter(rows[i]);
+      if (v == null) continue;
+      const x = xAt(i), y = yAt(v);
+      if (!prev) { d = `M ${x} ${y}`; prev = { x, y }; continue; }
+      d += ` L ${x} ${prev.y} L ${x} ${y}`;
+      prev = { x, y };
+    }
+    return d;
+  }
+  const fmt = d => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return `<div style="margin-top:6px">
+    <div style="display:flex;gap:12px;font-size:11px;color:#cbd5e1;margin-bottom:4px">
+      <span><span style="color:#2B8AEB">●</span> FD Over</span>
+      <span><span style="color:#43A047">●</span> DK Over</span>
+    </div>
+    <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;max-width:100%;height:auto">
+      <path d="${stepPath(p => p.fdOver)}" fill="none" stroke="#2B8AEB" stroke-width="2"/>
+      <path d="${stepPath(p => p.dkOver)}" fill="none" stroke="#43A047" stroke-width="2"/>
+      <text x="${padL}" y="${H - 4}" fill="#94a3b8" font-size="9">${fmt(new Date(rows[0].t))}</text>
+      <text x="${W - padR}" y="${H - 4}" fill="#94a3b8" font-size="9" text-anchor="end">${fmt(new Date(rows[n - 1].t))}</text>
+    </svg>
+    <div style="font-size:10px;color:#64748b;margin-top:4px">${rows.length} prints · open ${rows[0].line ?? "—"} → now ${rows[n - 1].line ?? "—"}</div>
+  </div>`;
+}
+function renderOddsLogTable(hist) {
+  const rows = Array.isArray(hist) ? hist.slice() : [];
+  if (!rows.length) return "";
+  const shown = rows.slice().reverse().slice(0, 16);
+  const fmtT = t => new Date(t).toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const cell = v => v == null ? "—" : formatAmerican(v);
+  return `<table class="game-log-table"><thead><tr>
+    <th>TIME</th><th>LINE</th><th>FD O</th><th>FD U</th><th>DK O</th><th>DK U</th>
+  </tr></thead><tbody>${shown.map(p => `<tr>
+    <td>${fmtT(p.t)}</td>
+    <td style="color:#e2e8f0;font-weight:700">${p.line != null ? p.line : "—"}</td>
+    <td style="color:#7EC8FF">${cell(p.fdOver)}</td>
+    <td>${cell(p.fdUnder)}</td>
+    <td style="color:#7FD67A">${cell(p.dkOver)}</td>
+    <td>${cell(p.dkUnder)}</td>
+  </tr>`).join("")}</tbody></table>`;
+}
+
+async function fetchInjuries() {
+  if (_injuries.ts && Date.now() - _injuries.ts < 20 * 60 * 1000) return _injuries;
+  const byName = {};
+  try {
+    const json = await fetchJson(ESPN_INJ, 12000);
+    const teams = Array.isArray(json?.injuries) ? json.injuries : (Array.isArray(json) ? json : []);
+    for (const team of teams) {
+      for (const inj of team.injuries || team.injuries?.items || []) {
+        const ath = inj.athlete || inj;
+        const name = ath.displayName || ath.fullName || inj.athlete?.displayName || "";
+        const status = inj.status || inj.details?.type || inj.details?.fantasyStatus?.description || inj.type || "";
+        if (!name) continue;
+        byName[normName(name)] = {
+          status: String(status),
+          comment: inj.comment || inj.details || "",
+          team: team.displayName || team.team?.abbreviation || "",
+        };
+      }
+    }
+    // ESPN often nests as { injuries: [ { injuries: [...], team } ] }
+    if (!Object.keys(byName).length && json?.injuries) {
+      for (const block of json.injuries) {
+        const tname = block.displayName || "";
+        for (const inj of block.injuries || []) {
+          const name = inj.athlete?.displayName || "";
+          if (!name) continue;
+          byName[normName(name)] = { status: inj.status || "", comment: inj.comment || "", team: tname };
+        }
+      }
+    }
+  } catch (_) {}
+  _injuries = { ts: Date.now(), byName };
+  return _injuries;
+}
+function injuryFor(name) {
+  return _injuries.byName[normName(name)] || null;
+}
+function ppMatchFor(nk, statKey, line) {
+  return _ppBoard?.mapByLine?.[`${nk}|${statKey}|${line}`] || null;
+}
+
 function addPropRow(bucket, row, statKey, book, line) {
   const nk = normName(row.player);
   if (!bucket.players.has(nk)) {
@@ -728,7 +1023,7 @@ function playersFromBucket(bucket) {
   return [...(bucket?.players.values() || [])]
     .map(p => ({ ...p, lineList: Object.values(p.lines).sort((a, b) => a.statKey.localeCompare(b.statKey) || a.line - b.line) }))
     .filter(p => p.lineList.length)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => b.lineList.length - a.lineList.length || a.name.localeCompare(b.name));
 }
 function groupPlayerProps(games) {
   const byGame = new Map(games.map(g => [g.id, { game: g, players: new Map() }]));
@@ -738,7 +1033,7 @@ function groupPlayerProps(games) {
     if (!statKey || !STAT_META[statKey]) continue;
     const book = normBookmakerLabel(row.bookmaker || row.book || "");
     if (!EV_BOOKS.includes(book)) continue;
-    const line = Number(row.hdp);
+    const line = rowLine(row, statKey);
     if (!Number.isFinite(line)) continue;
     const g = findGameForRow(row, games);
     const bucket = g ? byGame.get(g.id) : leftover;
@@ -753,8 +1048,8 @@ function groupPlayerProps(games) {
     out.push({
       id: "unmatched",
       date: "",
-      home: { abbr: "NFL", name: "Other", nick: "Other" },
-      away: { abbr: "Props", name: "Unlisted", nick: "Unlisted" },
+      home: { abbr: "NFL", name: "Other", nick: "Other", logo: "", score: "", record: "" },
+      away: { abbr: "Props", name: "Unlisted", nick: "Unlisted", logo: "", score: "", record: "" },
       venue: "",
       status: "",
       statusText: "",
@@ -763,6 +1058,7 @@ function groupPlayerProps(games) {
       propCount: extraPlayers.reduce((n, p) => n + p.lineList.length, 0),
     });
   }
+  logNflOddsHistory(out);
   return out;
 }
 
@@ -790,7 +1086,14 @@ function ppEvStatKey(statType) {
     "anytime td": "anytime_td", "anytime touchdown": "anytime_td",
     "pass+rush yds": "pass_rush_yds", "passing + rushing yards": "pass_rush_yds", "pass + rush yds": "pass_rush_yds",
     "rush+rec yds": "rush_rec_yds", "rush + rec yds": "rush_rec_yds", "rec+rush yds": "rush_rec_yds",
+    "pass+rush+rec yds": "pass_rush_rec_yds", "passing + rushing + receiving yards": "pass_rush_rec_yds",
     "fantasy score": "fantasy", "fantasy points": "fantasy",
+    "targets": "targets", "target": "targets",
+    "rush + rec tds": "rush_rec_td", "rush+rec tds": "rush_rec_td",
+    "sacks": "sacks", "sack": "sacks",
+    "tackles": "tackles", "solo tackles": "solo_tackles", "tackles+ast": "tackles_ast", "tackles + assists": "tackles_ast",
+    "fg made": "fg_made", "field goals": "fg_made", "kicking points": "kicking_pts",
+    "longest reception": "long_rec", "longest rush": "long_rush", "longest pass": "long_pass",
   };
   return map[st] || nflStatHint(st) || null;
 }
@@ -893,7 +1196,7 @@ async function buildEV(games) {
     if (!statKey || !STAT_META[statKey]) continue;
     const book = normBookmakerLabel(row.bookmaker || row.book || "");
     if (!EV_BOOKS.includes(book)) continue;
-    const line = Number(row.hdp);
+    const line = rowLine(row, statKey);
     if (!Number.isFinite(line)) continue;
     const oDec = oddsToDecimal(row.over);
     const uDec = oddsToDecimal(row.under);
@@ -986,7 +1289,17 @@ async function buildEV(games) {
 function filterPropsGame(g) {
   const q = searchQ.trim().toLowerCase();
   let players = g.players || [];
-  if (activeFilter !== "all") {
+  if (activeFilter === "moved") {
+    players = players.map(p => ({
+      ...p,
+      lineList: p.lineList.filter(l => l.lineMov || l.oddsMov),
+    })).filter(p => p.lineList.length);
+  } else if (activeFilter === "pp") {
+    players = players.map(p => ({
+      ...p,
+      lineList: p.lineList.filter(l => ppMatchFor(p.nk, l.statKey, l.line)),
+    })).filter(p => p.lineList.length);
+  } else if (activeFilter !== "all") {
     players = players.map(p => ({
       ...p,
       lineList: p.lineList.filter(l => (STAT_META[l.statKey]?.group || "") === activeFilter),
@@ -998,10 +1311,46 @@ function filterPropsGame(g) {
   return { ...g, players, propCount: players.reduce((n, p) => n + p.lineList.length, 0) };
 }
 
+function gameSlot(g) {
+  if (g.status === "in") return "live";
+  const d = new Date(g.date);
+  if (Number.isNaN(d.getTime())) return "other";
+  const dow = d.getDay();
+  const hour = d.getHours();
+  if (dow === 4 || (dow === 3 && hour >= 19)) return "thu";
+  if (dow === 1) return "mon";
+  if (dow === 0) return hour >= 19 ? "snf" : "sun";
+  if (dow === 5) return "fri";
+  if (dow === 6) return "sat";
+  return "other";
+}
+function isTodayGame(g) {
+  return isoToYmd(g.date) === ymd(new Date());
+}
+function filterSlateGames(games) {
+  if (activeFilter === "today") return games.filter(isTodayGame);
+  if (activeFilter === "live") return games.filter(g => g.status === "in");
+  if (activeFilter === "final") return games.filter(g => g.completed);
+  if (["thu", "sun", "snf", "mon"].includes(activeFilter)) return games.filter(g => gameSlot(g) === activeFilter || (activeFilter === "sun" && gameSlot(g) === "snf"));
+  return games;
+}
+function dayHeadLabel(g) {
+  if (g.status === "in") return "Live now";
+  if (g.completed) {
+    const kick = formatKick(g.date);
+    return `Final · ${kick.day}`;
+  }
+  const kick = formatKick(g.date);
+  const slot = gameSlot(g);
+  const tag = slot === "thu" ? "Thursday Night" : slot === "mon" ? "Monday Night" : slot === "snf" ? "Sunday Night" : slot === "sun" ? "Sunday" : kick.day;
+  return tag || kick.day;
+}
+
 function renderFilters(tab) {
   const f = document.getElementById("filters");
   if (tab === "slate") {
-    f.innerHTML = `<span id="game-count"></span>`;
+    const opts = [["all", "All"], ["today", "Today"], ["live", "Live"], ["thu", "TNF"], ["sun", "Sunday"], ["mon", "MNF"], ["final", "Final"]];
+    f.innerHTML = opts.map(([id, label]) => `<button class="filter-btn${id === activeFilter ? " active" : ""}" data-filter="${id}">${label}</button>`).join("") + `<span id="game-count"></span>`;
     f.style.display = "flex";
     return;
   }
@@ -1013,10 +1362,10 @@ function renderFilters(tab) {
     f.style.display = "flex";
     return;
   }
-  const opts = [["all", "All"], ["pass", "Passing"], ["rush", "Rushing"], ["rec", "Receiving"], ["td", "TDs"], ["combo", "Combo"], ["other", "Other"]];
+  const opts = [["all", "All"], ["pass", "Passing"], ["rush", "Rushing"], ["rec", "Receiving"], ["td", "TDs"], ["combo", "Combo"], ["def", "Defense"], ["kick", "Kicking"], ["moved", "Moved"], ["pp", "On PP"], ["other", "Other"]];
   f.innerHTML =
     opts.map(([id, label]) => `<button class="filter-btn${id === activeFilter ? " active" : ""}" data-filter="${id}">${label}</button>`).join("") +
-    `<input type="search" id="prop-search" placeholder="Search player…" value="${searchQ.replace(/"/g, "&quot;")}" />` +
+    `<input type="search" id="prop-search" placeholder="Search player or team…" value="${searchQ.replace(/"/g, "&quot;")}" />` +
     `<span id="game-count"></span>`;
   f.style.display = "flex";
   const search = document.getElementById("prop-search");
@@ -1028,19 +1377,33 @@ function renderFilters(tab) {
   }
 }
 
+function movedCount(games) {
+  let n = 0;
+  for (const g of games || []) {
+    for (const p of g.players || []) {
+      for (const l of p.lineList || []) {
+        if (l.lineMov || l.oddsMov) n++;
+      }
+    }
+  }
+  return n;
+}
+
 function renderSummary(data, tab) {
   const grid = document.getElementById("summary-grid");
+  const slate = tab === "slate" ? filterSlateGames(data || []) : (data || []);
+  const live = slate.filter(g => g.status === "in").length;
   const stats = tab === "slate"
     ? [
-        { l: "Games", v: data.length, c: "#34d399" },
-        { l: "With odds", v: data.filter(g => g.spread != null || g.overUnder != null).length, c: "#22d3ee" },
-        { l: "Kickoffs set", v: data.filter(g => g.date).length, c: "#a78bfa" },
+        { l: "Games", v: slate.length, c: "#34d399" },
+        { l: live ? "Live" : "Final", v: live || slate.filter(g => g.completed).length, c: live ? "#fb7185" : "#22d3ee" },
+        { l: "Kickoffs set", v: slate.filter(g => g.date).length, c: "#a78bfa" },
       ]
     : tab === "props"
     ? [
-        { l: "Games", v: data.length, c: "#34d399" },
+        { l: "Prop lines", v: data.reduce((n, g) => n + (g.propCount || 0), 0), c: "#34d399" },
         { l: "Players", v: data.reduce((n, g) => n + (g.players?.length || 0), 0), c: "#22d3ee" },
-        { l: "Prop lines", v: data.reduce((n, g) => n + (g.propCount || 0), 0), c: "#a78bfa" },
+        { l: "Moved", v: movedCount(data), c: "#fbbf24" },
       ]
     : [
         { l: "+EV plays", v: data.length, c: "#34d399" },
@@ -1058,36 +1421,53 @@ function oddsChips(g) {
   if (g.oddsDetails) chips.push(`<span class="stat-chip">${g.oddsDetails}</span>`);
   else if (g.spread != null) chips.push(`<span class="stat-chip">Spread ${g.spread}</span>`);
   if (g.overUnder != null) chips.push(`<span class="stat-chip">O/U ${g.overUnder}</span>`);
+  if (g.mlAway && g.mlHome) chips.push(`<span class="stat-chip">ML ${g.mlAway} / ${g.mlHome}</span>`);
   if (g.broadcast) chips.push(`<span class="stat-chip">${g.broadcast}</span>`);
-  if (g.status === "in") chips.push(`<span class="stat-chip warn">${g.statusText || "LIVE"}</span>`);
+  if (g.indoor) chips.push(`<span class="stat-chip">Dome</span>`);
+  if (g.status === "in") chips.push(`<span class="stat-chip warn"><span class="live-dot"></span>${g.statusText || "LIVE"}</span>`);
   else if (g.completed) chips.push(`<span class="stat-chip">${g.away.score || 0}–${g.home.score || 0} F</span>`);
   return chips.join("");
 }
 
+function teamLogos(g) {
+  const a = g.away.logo ? `<img class="team-logo" src="${g.away.logo}" alt="${g.away.abbr}" />` : "";
+  const h = g.home.logo ? `<img class="team-logo" src="${g.home.logo}" alt="${g.home.abbr}" />` : "";
+  return `<div class="matchup-row">${a}${h}</div>`;
+}
+
 function renderSlate(games) {
+  const list = filterSlateGames(games);
   if (!games.length) {
     return `<div class="game-card empty">
       <h3>No games on this week yet</h3>
-      <p>ESPN has not published this slate. Right now the league is in preseason — pick Preseason Week 1 in the week menu, or Regular Season Week 1 once that slate is posted.</p>
+      <p>ESPN has not published this slate. Regular season Week 1 is live — pick it from the week menu if you are on a different week.</p>
     </div>`;
   }
+  if (!list.length) {
+    return `<div class="game-card empty"><h3>No games in this filter</h3><p>Try All, Sunday, or Final.</p></div>`;
+  }
   const propById = new Map((cache.props || []).map(g => [g.id, g.propCount || 0]));
-  return games.map((g, i) => {
+  let lastHead = "";
+  return list.map((g, i) => {
     const kick = formatKick(g.date);
     const recA = g.away.record ? `(${g.away.record})` : "";
     const recH = g.home.record ? `(${g.home.record})` : "";
     const nProps = propById.get(g.id) || 0;
-    const propChip = nProps ? `<span class="stat-chip">${nProps} prop${nProps === 1 ? "" : "s"}</span>` : "";
-    return `<div class="game-card">
+    const propChip = nProps ? `<span class="stat-chip good">${nProps} prop${nProps === 1 ? "" : "s"}</span>` : "";
+    const head = dayHeadLabel(g);
+    const headHtml = head !== lastHead ? `<div class="day-head">${head}</div>` : "";
+    lastHead = head;
+    const score = (g.status === "in" || g.completed)
+      ? `<div class="score-now">${g.away.score || 0}–${g.home.score || 0}</div><div class="kick-day">${g.status === "in" ? (g.clock ? `Q${g.period || ""} ${g.clock}` : "LIVE") : "Final"}</div>`
+      : `<div class="kick-time">${kick.time}</div><div class="kick-day">${kick.day}</div>`;
+    return `${headHtml}<div class="game-card${g.status === "in" ? " open" : ""}">
       <div class="card-hd" data-open="${i}">
-        <div>
+        ${teamLogos(g)}
+        <div style="flex:1;min-width:0">
           <div class="card-teams">${g.away.abbr} ${recA} @ ${g.home.abbr} ${recH}</div>
-          <div class="card-meta">${g.away.nick} at ${g.home.nick}${g.venue ? " · " + g.venue : ""} · ${oddsChips(g)}${propChip}</div>
+          <div class="card-meta">${g.away.nick} at ${g.home.nick}${g.venue ? " · " + g.venue : ""}${g.venueCity ? " · " + g.venueCity : ""} · ${oddsChips(g)}${propChip}</div>
         </div>
-        <div class="card-right">
-          <div class="kick-time">${kick.time}</div>
-          <div class="kick-day">${kick.day}</div>
-        </div>
+        <div class="card-right">${score}</div>
       </div>
     </div>`;
   }).join("");
@@ -1117,12 +1497,34 @@ function oddsEmptyCopy() {
   }
   if (err) return `Odds feed error: ${err}`;
   if (m.note === "no_nfl_events_for_range") {
-    return `No NFL events in the odds feed for ${m.dateFrom || "this window"} to ${m.dateTo || ""}. Books post preseason props under the current preseason week.`;
+    return `No NFL events in the odds feed for ${m.dateFrom || "this window"} to ${m.dateTo || ""}. Week 1 books usually post Thursday–Sunday — retry closer to kickoff.`;
   }
   if ((m.eventCount || 0) > 0 && !(m.propRows || lastOddsRows.length)) {
     return `Found ${m.eventCount} NFL event${m.eventCount === 1 ? "" : "s"} but FanDuel / DraftKings have not posted player props yet.`;
   }
   return `FanDuel / DraftKings player props typically go up the week of the game. ${seasonLabel(selected.seasontype, selected.week)} is loaded — check back as lines drop.`;
+}
+function trackId(p, l) {
+  return `${p.nk}|${l.statKey}|${l.line}`;
+}
+function renderTrackPanel(p, l) {
+  const hist = l.hist || [];
+  const open = hist[0];
+  const last = hist[hist.length - 1];
+  const openTxt = open
+    ? `Open ${new Date(open.t).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })} · ${open.line ?? "—"} · FD ${formatAmerican(open.fdOver)} / DK ${formatAmerican(open.dkOver)}`
+    : "";
+  const nowTxt = last && hist.length > 1
+    ? `Now ${last.line ?? "—"} · FD ${formatAmerican(last.fdOver)} / DK ${formatAmerican(last.dkOver)}`
+    : "";
+  return `<div class="prop-track">
+    <div style="font-size:11px;color:#94a3b8;line-height:1.5">${STAT_META[l.statKey]?.label || l.statKey} ${l.line}
+      ${openTxt ? `<br>${openTxt}` : ""}
+      ${nowTxt ? `<br>${nowTxt}` : ""}
+    </div>
+    ${renderOddsSparkChart(hist)}
+    ${renderOddsLogTable(hist)}
+  </div>`;
 }
 function renderProps(games) {
   const shown = games.map(filterPropsGame).filter(g => g.players.length);
@@ -1136,28 +1538,55 @@ function renderProps(games) {
     </div>`;
   }
   if (!shown.length) {
-    return `<div class="game-card empty"><h3>No matching props</h3><p>Try All / Other, or clear the search. ${lastOddsRows.length} book row${lastOddsRows.length === 1 ? "" : "s"} loaded.</p></div>`;
+    return `<div class="game-card empty"><h3>No matching props</h3><p>Try All / Other / Moved, or clear the search. ${lastOddsRows.length} book row${lastOddsRows.length === 1 ? "" : "s"} loaded.</p></div>`;
   }
-  return shown.map((g, i) => {
+  const sorted = shown.slice().sort((a, b) => {
+    if (a.status === "in" && b.status !== "in") return -1;
+    if (b.status === "in" && a.status !== "in") return 1;
+    if (a.completed !== b.completed) return a.completed ? 1 : -1;
+    return String(a.date).localeCompare(String(b.date));
+  });
+  return sorted.map((g, i) => {
     const kick = formatKick(g.date);
     const body = g.players.map(p => {
-      const pills = p.lineList.map(l => `
-        <div class="prop-pill">
-          <div class="prop-pill-stat">${STAT_META[l.statKey]?.label || l.statKey}</div>
+      const inj = injuryFor(p.name);
+      const injChip = inj && /out|doubt|quest|ir\b|inactive|pup/i.test(inj.status)
+        ? `<span class="inj-chip">${inj.status || "INJ"}</span>` : "";
+      const pills = p.lineList.map(l => {
+        const tid = trackId(p, l);
+        const active = expandedTrack === tid;
+        const mov = l.lineMov;
+        const movChip = mov ? `<span class="mov-chip ${mov.dir}">${mov.from}→${mov.to}</span>` : "";
+        const pp = ppMatchFor(p.nk, l.statKey, l.line);
+        const ppChip = pp ? `<span class="pp-chip">PP</span>` : "";
+        return `<div class="prop-pill${active ? " active" : ""}" data-track="${tid}">
+          <div class="prop-pill-top">
+            <div class="prop-pill-stat">${STAT_META[l.statKey]?.label || l.statKey}</div>
+            <div>${ppChip}${movChip}</div>
+          </div>
           <div class="prop-pill-line">${l.line}</div>
           <div class="prop-pill-odds">${bookOddsLine(l.books) || "line only"}</div>
-        </div>`).join("");
-      return `<div class="prop-player"><div class="prop-name">${p.name}</div><div class="prop-lines">${pills}</div></div>`;
+        </div>`;
+      }).join("");
+      const openLine = p.lineList.find(l => trackId(p, l) === expandedTrack);
+      return `<div class="prop-player">
+        <div class="prop-name">${p.name} ${injChip}</div>
+        <div class="prop-lines">${pills}</div>
+        ${openLine ? renderTrackPanel(p, openLine) : ""}
+      </div>`;
     }).join("");
-    return `<div class="game-card" data-card="${i}">
+    const nProps = g.propCount;
+    const live = g.status === "in";
+    return `<div class="game-card${i < 2 || live ? " open" : ""}" data-card="${i}">
       <div class="card-hd" data-toggle="${i}">
-        <div>
-          <div class="card-teams">${g.away.abbr} @ ${g.home.abbr}</div>
-          <div class="card-meta">${g.propCount} prop${g.propCount === 1 ? "" : "s"} · ${g.players.length} player${g.players.length === 1 ? "" : "s"} · ${kick.day}</div>
+        ${teamLogos(g)}
+        <div style="flex:1;min-width:0">
+          <div class="card-teams">${g.away.abbr} @ ${g.home.abbr}${live ? ' <span class="stat-chip warn"><span class="live-dot"></span>LIVE</span>' : ""}</div>
+          <div class="card-meta">${nProps} prop${nProps === 1 ? "" : "s"} · ${g.players.length} player${g.players.length === 1 ? "" : "s"}${g.oddsDetails ? " · " + g.oddsDetails : ""}${g.overUnder != null ? " · O/U " + g.overUnder : ""} · ${kick.day}</div>
         </div>
-        <div class="card-right"><div class="kick-time">${kick.time}</div></div>
+        <div class="card-right"><div class="kick-time">${live || g.completed ? `${g.away.score || 0}–${g.home.score || 0}` : kick.time}</div></div>
       </div>
-      <div class="card-bd" id="bd-${i}">${body}</div>
+      <div class="card-bd${i < 2 || live ? " open" : ""}" id="bd-${i}">${body}</div>
     </div>`;
   }).join("");
 }
@@ -1175,7 +1604,7 @@ function renderEV(rows) {
   const meta = lastPPBoardMeta || {};
   const intro = `<div class="game-card ev-intro"><div style="padding:16px 18px">
     <div class="ev-intro-hd">+EV Odds Scanner</div>
-    <div class="ev-intro-body">Grades PrizePicks NFL standard lines at −119 against FanDuel / DraftKings de-vig. Exact line match required. Book-vs-book edges listed separately. Stake = ¼-Kelly.</div>
+    <div class="ev-intro-body">Grades PrizePicks NFL standard lines at −119 against FanDuel / DraftKings de-vig for ${seasonLabel(selected.seasontype, selected.week)}. Exact line match required. Book-vs-book edges listed separately. Stake = ¼-Kelly.</div>
     <div class="ev-intro-meta">${meta.error ? `PrizePicks unavailable (${meta.error}) — book-vs-book only.` : `${meta.standard || 0} PP standard · ${meta.ppExactMatches || 0} matched FD/DK · ${meta.twoWayGroups || 0} two-way props`}</div>
   </div></div>`;
   if (!filtered.length) {
@@ -1214,7 +1643,7 @@ function renderCards(data, tab) {
   if (count) {
     if (tab === "ev") count.textContent = `${(data || []).length} plays`;
     else if (tab === "props") count.textContent = `${(data || []).reduce((n, g) => n + (g.propCount || 0), 0)} lines`;
-    else count.textContent = `${(data || []).length} games`;
+    else count.textContent = `${filterSlateGames(data || []).length} games`;
   }
 
   el.querySelectorAll("[data-toggle]").forEach(hd => {
@@ -1226,6 +1655,48 @@ function renderCards(data, tab) {
       card.classList.toggle("open", open);
     });
   });
+  el.querySelectorAll("[data-track]").forEach(pill => {
+    pill.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = pill.getAttribute("data-track");
+      expandedTrack = expandedTrack === id ? null : id;
+      renderCards(cache.props, "props");
+    });
+  });
+}
+
+function refreshDelay(games) {
+  return (games || gamesState || []).some(g => g.status === "in") ? LIVE_REFRESH_MS : AUTO_REFRESH_MS;
+}
+
+function downloadCsv() {
+  const games = cache.props || [];
+  const rows = [["Player", "Away", "Home", "Stat", "Line", "FD Over", "FD Under", "DK Over", "DK Under", "Open Line", "Moved", "PrizePicks"]];
+  for (const g of games) {
+    for (const p of g.players || []) {
+      for (const l of p.lineList || []) {
+        const fd = l.books.FanDuel || {};
+        const dk = l.books.DraftKings || {};
+        const open = (l.hist && l.hist[0] && l.hist[0].line) || "";
+        rows.push([
+          p.name, g.away.abbr, g.home.abbr,
+          STAT_META[l.statKey]?.label || l.statKey, l.line,
+          evAmerican(fd.over), evAmerican(fd.under), evAmerican(dk.over), evAmerican(dk.under),
+          open, l.lineMov ? `${l.lineMov.from}->${l.lineMov.to}` : "",
+          ppMatchFor(p.nk, l.statKey, l.line) ? "Y" : "",
+        ]);
+      }
+    }
+  }
+  const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `proppulse-nfl-${weekKey()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
 }
 
 function clearCaches() {
@@ -1233,6 +1704,7 @@ function clearCaches() {
   lastOddsRows = [];
   lastOddsMeta = null;
   _ppBoard = null;
+  expandedTrack = null;
 }
 
 async function loadTab(tab) {
@@ -1251,7 +1723,7 @@ async function loadTab(tab) {
     gamesState = games;
 
     setStatus("Fetching FanDuel / DraftKings props…");
-    await loadOdds(games);
+    await Promise.all([loadOdds(games), fetchInjuries(), fetchPrizePicksStandardLines()]);
 
     cache.slate = games;
     cache.props = groupPlayerProps(games);
@@ -1266,7 +1738,7 @@ async function loadTab(tab) {
     lastRefreshAt = Date.now();
     updateRefreshLabel();
     if (_autoRefreshTimer) clearTimeout(_autoRefreshTimer);
-    _autoRefreshTimer = setTimeout(() => { clearCaches(); loadTab(activeTab); }, AUTO_REFRESH_MS);
+    _autoRefreshTimer = setTimeout(() => { clearCaches(); loadTab(activeTab); }, refreshDelay(games));
   } catch (e) {
     setError(e.message || "Failed to load NFL slate.");
   }
@@ -1278,19 +1750,17 @@ async function bootDefaultWeek() {
   try {
     const json = await fetchJson(ESPN, 12000);
     const season = json?.leagues?.[0]?.season || json?.season || {};
-    const week = Number(json?.week?.number);
+    const week = Number(json?.week?.number || json?.leagues?.[0]?.week?.number);
     if (season.year) selected.year = Number(season.year);
     const type = espnSeasonType(season);
     if (type && week) {
       selected.seasontype = type;
       selected.week = week;
-    } else if (week) {
-      selected.seasontype = type || 1;
-      selected.week = week;
+    } else {
+      regularSeasonFallback();
     }
   } catch (_) {
-    selected.seasontype = 1;
-    selected.week = 2;
+    regularSeasonFallback();
   }
   fillWeekPicker();
 }
@@ -1332,9 +1802,10 @@ document.getElementById("week-picker").addEventListener("change", (e) => {
   clearCaches();
   loadTab(activeTab);
 });
+document.getElementById("export-btn").addEventListener("click", downloadCsv);
 setInterval(updateRefreshLabel, 60000);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && lastRefreshAt && Date.now() - lastRefreshAt >= AUTO_REFRESH_MS) {
+  if (!document.hidden && lastRefreshAt && Date.now() - lastRefreshAt >= refreshDelay()) {
     clearCaches();
     loadTab(activeTab);
   }

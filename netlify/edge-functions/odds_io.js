@@ -157,8 +157,11 @@ function compositeMarketName(m, odd) {
 }
 
 function nflStatHint(raw) {
+  raw = String(raw || "").toLowerCase();
   if (!raw) return "";
   if (raw.includes("anytime") && (raw.includes("td") || raw.includes("touchdown"))) return "anytime_td";
+  if ((raw.includes("pass") && raw.includes("rush") && (raw.includes("rec") || raw.includes("receiving")) && raw.includes("yard")) || raw.includes("pass+rush+rec"))
+    return "pass_rush_rec_yds";
   if ((raw.includes("pass") && raw.includes("rush") && raw.includes("yard")) || raw.includes("pass+rush") || raw.includes("pass + rush"))
     return "pass_rush_yds";
   if (
@@ -167,10 +170,15 @@ function nflStatHint(raw) {
     raw.includes("rec+rush")
   )
     return "rush_rec_yds";
+  if (raw.includes("pass") && raw.includes("rush") && (raw.includes("td") || raw.includes("touchdown")) && !raw.includes("yard"))
+    return "pass_rush_td";
+  if (raw.includes("rush") && (raw.includes("rec") || raw.includes("receiving")) && (raw.includes("td") || raw.includes("touchdown")) && !raw.includes("yard"))
+    return "rush_rec_td";
   if (raw.includes("passing yard") || raw.includes("pass yard") || raw.includes("pass yds")) return "pass_yds";
   if ((raw.includes("passing") || raw.includes("pass ")) && (raw.includes("td") || raw.includes("touchdown"))) return "pass_td";
   if (raw.includes("completion")) return "completions";
   if ((raw.includes("pass") || raw.includes("passing")) && raw.includes("attempt")) return "pass_att";
+  if (raw.includes("defensive interception") || raw.includes("def int")) return "def_ints";
   if (raw.includes("interception") || raw === "int" || raw === "ints") return "ints";
   if (raw.includes("rushing yard") || raw.includes("rush yard") || raw.includes("rush yds")) return "rush_yds";
   if ((raw.includes("rush") && raw.includes("attempt")) || raw.includes("carries") || raw.includes("carry")) return "rush_att";
@@ -178,10 +186,20 @@ function nflStatHint(raw) {
   if (raw.includes("receiving yard") || raw.includes("rec yard") || raw.includes("rec yds")) return "rec_yds";
   if (raw.includes("reception") || raw === "recs" || raw === "rec") return "receptions";
   if ((raw.includes("receiv") || raw.includes("rec ")) && (raw.includes("td") || raw.includes("touchdown"))) return "rec_td";
+  if (raw.includes("target")) return "targets";
+  if (raw.includes("first down") || raw.includes("1st down")) return "first_downs";
   if (raw.includes("fantasy")) return "fantasy";
   if (raw.includes("longest rec") || raw.includes("long rec")) return "long_rec";
   if (raw.includes("longest rush") || raw.includes("long rush")) return "long_rush";
-  if (raw.includes("longest pass") || raw.includes("long pass")) return "long_pass";
+  if (raw.includes("longest pass") || raw.includes("long pass") || raw.includes("longest completion")) return "long_pass";
+  if (raw.includes("sack")) return "sacks";
+  if (raw.includes("solo tackle")) return "solo_tackles";
+  if (raw.includes("tackle") && (raw.includes("assist") || raw.includes("+") || raw.includes("combined"))) return "tackles_ast";
+  if (raw.includes("tackle")) return "tackles";
+  if (raw.includes("longest field") || raw.includes("long fg") || raw.includes("fg long")) return "fg_long";
+  if (raw.includes("field goal") || raw === "fg" || raw === "fgs") return "fg_made";
+  if (raw.includes("extra point") || raw === "pat" || raw === "xp") return "pat";
+  if (raw.includes("kicking point") || raw.includes("kicker point")) return "kicking_pts";
   return "";
 }
 
