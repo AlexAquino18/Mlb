@@ -648,13 +648,13 @@ function weekWindow(games) {
 
 function oddsIoUrl(from, to) {
   if (typeof location === "undefined" || location.protocol === "file:") return "";
-  const qs = new URLSearchParams({ sport: "nfl", from, to, rev: "20260911nflv1" });
+  const qs = new URLSearchParams({ sport: "nfl", from, to, rev: "20260911nflv2" });
   const host = location.hostname;
   const isLocal = host === "localhost" || host === "127.0.0.1";
   if (isLocal) return `http://127.0.0.1:8080/api/odds_io?${qs}`;
   return `${location.origin}/api/odds_io?${qs}`;
 }
-function oddsCacheKey(from, to) { return `nfl_odds_v3:${from}:${to}`; }
+function oddsCacheKey(from, to) { return `nfl_odds_v4:${from}:${to}`; }
 function oddsCacheGet(from, to) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(from, to));
@@ -682,14 +682,25 @@ function normTeamStr(s) {
 function teamBlob(t) {
   return normTeamStr([t.abbr, t.name, t.nick].filter(Boolean).join(" "));
 }
+function looksLikeCflText(s) {
+  const n = String(s || "").toLowerCase();
+  return /cfl|roughrider|stampeder|\belks\b|blue bomber|tiger-?cat|argonaut|alouette|redblack|bc lions|b\.c\. lions|british columbia|saskatchewan|winnipeg|calgary stamp|edmonton elk|hamilton tiger|ottawa red|montreal alou|toronto argonaut/.test(n);
+}
+function looksLikeCflRow(row) {
+  return looksLikeCflText(`${row.home || ""} ${row.away || ""} ${row.league || ""} ${row.player || ""}`);
+}
 function looseTeamMatch(oddsStr, team) {
   const o = normTeamStr(oddsStr);
   const blob = teamBlob(team);
   if (!o || !blob) return false;
+  if (looksLikeCflText(o)) return false;
   if (blob.includes(o) || o.includes(blob)) return true;
   const nick = normTeamStr(team.nick);
   const abbr = normTeamStr(team.abbr);
   if (abbr && (o === abbr || o.split(/\s+/).includes(abbr))) return true;
+  if (nick === "lions") {
+    return o.includes("detroit") || o === "lions" || o.includes("det");
+  }
   if (nick && nick.length > 3 && o.includes(nick)) return true;
   const last = (team.name || "").split(/\s+/).pop() || "";
   const lastN = normTeamStr(last);
@@ -1029,6 +1040,7 @@ function groupPlayerProps(games) {
   const byGame = new Map(games.map(g => [g.id, { game: g, players: new Map() }]));
   const leftover = { players: new Map() };
   for (const row of lastOddsRows) {
+    if (looksLikeCflRow(row)) continue;
     const statKey = rowStatKey(row);
     if (!statKey || !STAT_META[statKey]) continue;
     const book = normBookmakerLabel(row.bookmaker || row.book || "");
@@ -1043,7 +1055,7 @@ function groupPlayerProps(games) {
     const players = playersFromBucket(byGame.get(g.id));
     return { ...g, players, propCount: players.reduce((n, p) => n + p.lineList.length, 0) };
   });
-  const extraPlayers = playersFromBucket(leftover);
+    const extraPlayers = playersFromBucket(leftover).filter(p => !looksLikeCflText(p.name));
   if (extraPlayers.length) {
     out.push({
       id: "unmatched",
@@ -1192,6 +1204,7 @@ function bestSideAmerican(books, side) {
 async function buildEV(games) {
   const groups = {};
   for (const row of lastOddsRows || []) {
+    if (looksLikeCflRow(row)) continue;
     const statKey = rowStatKey(row);
     if (!statKey || !STAT_META[statKey]) continue;
     const book = normBookmakerLabel(row.bookmaker || row.book || "");
@@ -1418,10 +1431,23 @@ function renderSummary(data, tab) {
 
 function oddsChips(g) {
   const chips = [];
-  if (g.oddsDetails) chips.push(`<span class="stat-chip">${g.oddsDetails}</span>`);
-  else if (g.spread != null) chips.push(`<span class="stat-chip">Spread ${g.spread}</span>`);
+  const hs = Number(g.spread);
+  if (Number.isFinite(hs) && hs !== 0) {
+    const mag = Math.abs(hs);
+    const homeFav = hs < 0;
+    const fav = homeFav ? g.home : g.away;
+    const dog = homeFav ? g.away : g.home;
+    chips.push(`<span class="stat-chip">${fav.abbr} −${mag}</span>`);
+    chips.push(`<span class="stat-chip good">${dog.abbr} +${mag}</span>`);
+  } else if (g.oddsDetails) {
+    chips.push(`<span class="stat-chip">${g.oddsDetails}</span>`);
+  }
   if (g.overUnder != null) chips.push(`<span class="stat-chip">O/U ${g.overUnder}</span>`);
-  if (g.mlAway && g.mlHome) chips.push(`<span class="stat-chip">ML ${g.mlAway} / ${g.mlHome}</span>`);
+  if (g.mlAway && g.mlHome) {
+    const dogIsAway = String(g.mlAway).includes("+") || Number(String(g.mlAway).replace("+", "")) > 0;
+    chips.push(`<span class="stat-chip${dogIsAway ? " good" : ""}">${g.away.abbr} ${g.mlAway}</span>`);
+    chips.push(`<span class="stat-chip${!dogIsAway ? " good" : ""}">${g.home.abbr} ${g.mlHome}</span>`);
+  }
   if (g.broadcast) chips.push(`<span class="stat-chip">${g.broadcast}</span>`);
   if (g.indoor) chips.push(`<span class="stat-chip">Dome</span>`);
   if (g.status === "in") chips.push(`<span class="stat-chip warn"><span class="live-dot"></span>${g.statusText || "LIVE"}</span>`);

@@ -39,24 +39,69 @@ function multiList(raw) {
   return [];
 }
 
-function isNflEvent(ev) {
+const NFL_TEAM_TOKENS = [
+  "cardinals", "arizona", "falcons", "atlanta", "ravens", "baltimore",
+  "bills", "buffalo", "panthers", "carolina", "bears", "chicago",
+  "bengals", "cincinnati", "browns", "cleveland", "cowboys", "dallas",
+  "broncos", "denver", "detroit", "packers", "green bay",
+  "texans", "houston texans", "colts", "indianapolis", "jaguars", "jacksonville",
+  "chiefs", "kansas city", "raiders", "las vegas", "chargers",
+  "rams", "dolphins", "miami", "vikings", "minnesota", "patriots", "new england",
+  "saints", "new orleans", "giants", "jets", "eagles", "philadelphia",
+  "steelers", "pittsburgh", "49ers", "niners", "san francisco",
+  "seahawks", "seattle", "buccaneers", "bucs", "tampa", "titans", "tennessee",
+  "commanders", "washington",
+];
+const NON_NFL_FOOTBALL_MARKERS = [
+  "ncaaf", "ncaa", "college", "cfb",
+  "cfl", "canadian football", "canada-cfl",
+  "roughrider", "stampeder", "elks", "blue bomber", "tiger-cat", "tigercat",
+  "argonaut", "alouette", "redblack", "red black", "bc lions", "b.c. lions",
+  "b c lions", "british columbia", "saskatchewan", "winnipeg",
+  "calgary stamp", "edmonton elk", "hamilton tiger", "ottawa red",
+  "montreal alou", "toronto argonaut",
+  "ufl", "xfl", "usfl", "aaf", "arena football",
+  "roughneck", "battlehawk", "brahma", "showboat", "stallion",
+];
+
+function footballBlob(ev) {
   const lg = ev.league || {};
-  const slug = String(lg.slug || "").toLowerCase();
-  const name = String(lg.name || "").toLowerCase();
-  if (slug.includes("nfl") || ["usa-nfl", "us-nfl"].includes(slug)) return true;
-  if (name.includes("national football") || name.includes("nfl")) return true;
-  const sp = ev.sport || {};
-  const spSlug = String(sp.slug || "").toLowerCase();
-  const spName = String(sp.name || "").toLowerCase();
-  if (spSlug === "nfl" || spName === "nfl") return true;
-  if (spSlug === "american-football" && !looksLikeCollegeFootball(ev)) return true;
+  return [lg.slug, lg.name, teamStr(ev.home), teamStr(ev.away)].join(" ").toLowerCase();
+}
+
+function looksLikeNonNflFootball(ev) {
+  const blob = footballBlob(ev);
+  if (NON_NFL_FOOTBALL_MARKERS.some((x) => blob.includes(x))) return true;
+  if (blob.includes("lions") && (blob.includes("bc ") || blob.includes("b.c") || blob.includes("vancouver"))) return true;
   return false;
 }
 
 function looksLikeCollegeFootball(ev) {
-  const lg = ev.league || {};
-  const blob = [lg.slug, lg.name, teamStr(ev.home), teamStr(ev.away)].join(" ").toLowerCase();
+  const blob = footballBlob(ev);
   return ["ncaaf", "ncaa", "college", "cfb"].some((x) => blob.includes(x));
+}
+
+function teamLooksNfl(name) {
+  const n = String(name || "").toLowerCase();
+  if (!n) return false;
+  if (NON_NFL_FOOTBALL_MARKERS.some((x) => n.includes(x))) return false;
+  if (n.includes("lions")) return n.includes("detroit") || n.trim() === "lions";
+  return NFL_TEAM_TOKENS.some((tok) => n.includes(tok));
+}
+
+function isNflEvent(ev) {
+  if (looksLikeNonNflFootball(ev)) return false;
+  const lg = ev.league || {};
+  const slug = String(lg.slug || "").toLowerCase();
+  const name = String(lg.name || "").toLowerCase();
+  if (slug.includes("cfl") || name.includes("cfl")) return false;
+  if (slug.startsWith("nfl") || slug.includes("nfl") || ["usa-nfl", "us-nfl"].includes(slug)) return true;
+  if (name.includes("national football") || name.trim() === "nfl" || (name.includes("nfl") && !name.includes("cfl"))) return true;
+  const sp = ev.sport || {};
+  const spSlug = String(sp.slug || "").toLowerCase();
+  const spName = String(sp.name || "").toLowerCase();
+  if (spSlug === "nfl" || spName === "nfl") return true;
+  return teamLooksNfl(teamStr(ev.home)) && teamLooksNfl(teamStr(ev.away));
 }
 
 function isMlbEvent(ev) {
@@ -409,13 +454,17 @@ export default async (request) => {
   try {
     const eventAttempts = isNfl
       ? [
+          { sport: "nfl", ranged: true },
+          { sport: "american-football", league: "nfl-regular-season", ranged: true },
           { sport: "american-football", ranged: true },
-          { sport: "american-football", ranged: false },
+          { sport: "nfl", ranged: false },
+          { sport: "american-football", league: "nfl-regular-season", ranged: false },
         ]
       : [{ sport: "baseball", ranged: false }];
     let events = [];
     for (const attempt of eventAttempts) {
       const params = { sport: attempt.sport, apiKey };
+      if (attempt.league) params.league = attempt.league;
       if (isNfl && attempt.ranged) {
         params.from = `${start}T00:00:00Z`;
         params.to = `${end || start}T23:59:59Z`;
@@ -447,12 +496,10 @@ export default async (request) => {
         return true;
       });
       let filtered = inRange.filter(isNfl ? isNflEvent : isMlbEvent);
-      if (isNfl && !filtered.length && inRange.length) {
-        filtered = inRange.filter((e) => !looksLikeCollegeFootball(e));
-      }
       if (filtered.length) {
         events = filtered;
         out.meta.eventsSport = attempt.sport;
+        if (attempt.league) out.meta.eventsLeague = attempt.league;
         out.meta.eventsQuery = isNfl && attempt.ranged ? "ranged" : isNfl ? "next_14d" : "date";
         break;
       }

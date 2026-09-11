@@ -97,9 +97,35 @@ def _multi_list(raw: Any) -> List[dict]:
     return []
 
 
-def _looks_like_college_football(ev: dict) -> bool:
+_NFL_TEAM_TOKENS = (
+    "cardinals", "arizona", "falcons", "atlanta", "ravens", "baltimore",
+    "bills", "buffalo", "panthers", "carolina", "bears", "chicago",
+    "bengals", "cincinnati", "browns", "cleveland", "cowboys", "dallas",
+    "broncos", "denver", "detroit", "packers", "green bay",
+    "texans", "houston texans", "colts", "indianapolis", "jaguars", "jacksonville",
+    "chiefs", "kansas city", "raiders", "las vegas", "chargers",
+    "rams", "dolphins", "miami", "vikings", "minnesota", "patriots", "new england",
+    "saints", "new orleans", "giants", "jets", "eagles", "philadelphia",
+    "steelers", "pittsburgh", "49ers", "niners", "san francisco",
+    "seahawks", "seattle", "buccaneers", "bucs", "tampa", "titans", "tennessee",
+    "commanders", "washington",
+)
+_NON_NFL_FOOTBALL_MARKERS = (
+    "ncaaf", "ncaa", "college", "cfb",
+    "cfl", "canadian football", "canada-cfl",
+    "roughrider", "stampeder", "elks", "blue bomber", "tiger-cat", "tigercat",
+    "argonaut", "alouette", "redblack", "red black", "bc lions", "b.c. lions",
+    "b c lions", "british columbia", "saskatchewan", "winnipeg",
+    "calgary stamp", "edmonton elk", "hamilton tiger", "ottawa red",
+    "montreal alou", "toronto argonaut",
+    "ufl", "xfl", "usfl", "aaf", "arena football",
+    "roughneck", "battlehawk", "brahma", "showboat", "stallion",
+)
+
+
+def _football_blob(ev: dict) -> str:
     lg = ev.get("league") if isinstance(ev.get("league"), dict) else {}
-    blob = " ".join(
+    return " ".join(
         [
             str(lg.get("slug") or ""),
             str(lg.get("name") or ""),
@@ -107,23 +133,56 @@ def _looks_like_college_football(ev: dict) -> bool:
             _team_str(ev.get("away")),
         ]
     ).lower()
+
+
+def _looks_like_non_nfl_football(ev: dict) -> bool:
+    blob = _football_blob(ev)
+    if any(x in blob for x in _NON_NFL_FOOTBALL_MARKERS):
+        return True
+    # BC Lions must not be treated as Detroit
+    if "lions" in blob and ("bc " in blob or "b.c" in blob or "vancouver" in blob):
+        return True
+    return False
+
+
+def _looks_like_college_football(ev: dict) -> bool:
+    blob = _football_blob(ev)
     return any(x in blob for x in ("ncaaf", "ncaa", "college", "cfb"))
 
 
+def _team_looks_nfl(name: str) -> bool:
+    n = (name or "").lower()
+    if not n:
+        return False
+    if any(x in n for x in _NON_NFL_FOOTBALL_MARKERS):
+        return False
+    if "lions" in n:
+        return "detroit" in n or n.strip() == "lions"
+    return any(tok in n for tok in _NFL_TEAM_TOKENS)
+
+
 def _is_nfl_event(ev: dict) -> bool:
+    if _looks_like_non_nfl_football(ev):
+        return False
     lg = ev.get("league") if isinstance(ev.get("league"), dict) else {}
     slug = (lg.get("slug") or "").lower()
     name = (lg.get("name") or "").lower()
-    if "nfl" in slug or slug in ("usa-nfl", "us-nfl"):
+    if "cfl" in slug or "cfl" in name:
+        return False
+    if slug.startswith("nfl") or "nfl" in slug or slug in ("usa-nfl", "us-nfl"):
         return True
-    if "national football" in name or name.strip() == "nfl" or "nfl" in name:
+    if "national football" in name or name.strip() == "nfl" or (
+        "nfl" in name and "cfl" not in name
+    ):
         return True
     sp = ev.get("sport") if isinstance(ev.get("sport"), dict) else {}
     sp_slug = (sp.get("slug") or "").lower()
     sp_name = (sp.get("name") or "").lower()
     if sp_slug == "nfl" or sp_name == "nfl":
         return True
-    if sp_slug == "american-football" and not _looks_like_college_football(ev):
+    home = _team_str(ev.get("home"))
+    away = _team_str(ev.get("away"))
+    if _team_looks_nfl(home) and _team_looks_nfl(away):
         return True
     return False
 
@@ -712,7 +771,7 @@ def fetch_nfl_odds_bundle(
     """
     start = (date_from or "")[:10]
     end = (date_to or date_from or "")[:10]
-    cache_key = f"nfl|{start}|{end}|{bookmakers}|v4"
+    cache_key = f"nfl|{start}|{end}|{bookmakers}|v5"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]
@@ -734,11 +793,16 @@ def fetch_nfl_odds_bundle(
     try:
         events: List[dict] = []
         attempts = (
+            {"sport": "nfl", "from": start, "to": end},
+            {"sport": "american-football", "league": "nfl-regular-season", "from": start, "to": end},
             {"sport": "american-football", "from": start, "to": end},
-            {"sport": "american-football"},  # next ~14 days if the week window is empty
+            {"sport": "nfl"},
+            {"sport": "american-football", "league": "nfl-regular-season"},
         )
         for attempt in attempts:
             q_params: Dict[str, str] = {"sport": attempt["sport"], "apiKey": api_key}
+            if attempt.get("league"):
+                q_params["league"] = str(attempt["league"])
             if attempt.get("from"):
                 q_params["from"] = f"{attempt['from']}T00:00:00Z"
             if attempt.get("to"):
@@ -749,6 +813,8 @@ def fetch_nfl_odds_bundle(
             except Exception:
                 continue
             out["meta"]["apiCalls"] = out["meta"]["apiCalls"] + 1
+            if isinstance(raw_ev, dict) and raw_ev.get("error"):
+                continue
             raw_all = _events_list(raw_ev)
             on_range = (
                 _events_in_range(raw_all, start, end)
@@ -756,15 +822,11 @@ def fetch_nfl_odds_bundle(
                 else raw_all
             )
             nfl_events = [e for e in on_range if _is_nfl_event(e)]
-            if not nfl_events and on_range:
-                nfl_events = [
-                    e
-                    for e in on_range
-                    if not _looks_like_college_football(e)
-                ]
             if nfl_events:
                 events = nfl_events
                 out["meta"]["eventsSport"] = attempt["sport"]
+                if attempt.get("league"):
+                    out["meta"]["eventsLeague"] = attempt["league"]
                 out["meta"]["eventsQuery"] = (
                     "ranged" if attempt.get("from") else "next_14d"
                 )
