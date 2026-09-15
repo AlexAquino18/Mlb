@@ -7,13 +7,16 @@
     { "source": "/nfl", "destination": "/nfl/index.html" },
     { "source": "/nfl/", "destination": "/nfl/index.html" },
     { "source": "/nba", "destination": "/nba/index.html" },
-    { "source": "/nba/", "destination": "/nba/index.html" }
+    { "source": "/nba/", "destination": "/nba/index.html" },
+    { "source": "/cs2", "destination": "/cs2/index.html" },
+    { "source": "/cs2/", "destination": "/cs2/index.html" }
   ],
   "functions": {
     "api/fangraphs_pitcher.py": { "maxDuration": 60 },
     "api/so_matchup.py": { "maxDuration": 60 },
     "api/batter_advanced.py": { "maxDuration": 60 },
     "api/odds_io.py": { "maxDuration": 60 },
+    "api/cs2.py": { "maxDuration": 60, "includeFiles": "lib/cs2_scanner/**" },
     "api/pp.js": { "maxDuration": 30 }
   }
 }

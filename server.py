@@ -255,6 +255,43 @@ def odds_io_route():
         )
 
 
+@app.route("/api/cs2", methods=["GET", "POST", "OPTIONS"])
+def cs2_route():
+    """CS2 PrizePicks vs Underdog vs Betr scanner."""
+    if request.method == "OPTIONS":
+        return Response(status=204, headers=CORS_HEADERS)
+    try:
+        import os as _os
+        import sys as _sys
+        _apid = _os.path.join(_os.path.dirname(__file__), "api")
+        if _apid not in _sys.path:
+            _sys.path.insert(0, _apid)
+        from cs2_impl import get_dashboard
+
+        date = request.args.get("date")
+        try:
+            threshold = float(request.args.get("threshold") or 0.5)
+        except ValueError:
+            threshold = 0.5
+        refresh = request.method == "POST" or str(request.args.get("refresh") or "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        body = get_dashboard(date=date, threshold=threshold, refresh=refresh)
+        return Response(
+            json.dumps(body, default=str),
+            status=200,
+            headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "no-store"},
+        )
+    except Exception as e:
+        return Response(
+            json.dumps({"ok": False, "error": "server_error", "detail": str(e)}),
+            status=200,
+            headers={**CORS_HEADERS, "Content-Type": "application/json"},
+        )
+
+
 @app.route("/", defaults={"filename": "index.html"})
 @app.route("/<path:filename>")
 def static_files(filename):
