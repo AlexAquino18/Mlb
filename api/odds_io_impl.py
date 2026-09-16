@@ -85,19 +85,19 @@ _CACHE: Dict[str, tuple] = {}
 CACHE_TTL_SEC = 15 * 60
 
 
-def _get_json(url: str) -> Any:
+def _get_json(url: str, user_agent: str = "MLB-Edge/1.0") -> Any:
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "MLB-Edge/1.0", "Accept": "application/json"},
+        headers={"User-Agent": user_agent, "Accept": "application/json"},
         method="GET",
     )
     with urllib.request.urlopen(req, timeout=18) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _safe_get_json(url: str) -> Tuple[Any, Optional[str]]:
+def _safe_get_json(url: str, user_agent: str = "MLB-Edge/1.0") -> Tuple[Any, Optional[str]]:
     try:
-        return _get_json(url), None
+        return _get_json(url, user_agent=user_agent), None
     except urllib.error.HTTPError as e:
         try:
             body = e.read().decode("utf-8", errors="replace")
@@ -918,6 +918,128 @@ def _odds_multi_rows(
     return rows, first_raw
 
 
+AN_SCOREBOARD = "https://api.actionnetwork.com/web/v2/scoreboard/mlb"
+AN_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+# Action Network book IDs: 68 = DraftKings NJ, 69 = FanDuel NJ (national US feeds).
+AN_BOOK_IDS = {68: "DraftKings", 69: "FanDuel"}
+AN_MARKET_MAP = {
+    "core_bet_type_37_strikeouts": ("strikeouts", "Pitcher Strikeouts"),
+    "core_bet_type_42_pitching_outs": ("pitcher_outs", "Pitching Outs"),
+    "core_bet_type_36_hits": ("hits", "Hits"),
+    "core_bet_type_34_rbi": ("rbi", "RBI"),
+    "core_bet_type_33_hr": ("hr", "Home Runs"),
+}
+
+
+def fetch_actionnetwork_mlb(date_key: str, out: Dict[str, Any]) -> List[dict]:
+    """FanDuel / DraftKings MLB player props from Action Network (no API key)."""
+    pick_types = ",".join(AN_MARKET_MAP.keys())
+    book_ids = ",".join(str(i) for i in AN_BOOK_IDS)
+    q = urllib.parse.urlencode(
+        {"customPickTypes": pick_types, "bookIds": book_ids},
+        safe=",",
+    )
+    url = f"{AN_SCOREBOARD}?{q}"
+    raw, err = _safe_get_json(url, user_agent=AN_UA)
+    out["meta"]["apiCalls"] = out["meta"].get("apiCalls", 0) + 1
+    if err:
+        out["meta"]["actionNetworkError"] = err
+        return []
+    if not isinstance(raw, dict):
+        out["meta"]["actionNetworkError"] = "bad_payload"
+        return []
+    games = raw.get("games") or []
+    rows: List[dict] = []
+    for g in games:
+        if not isinstance(g, dict):
+            continue
+        start = str(g.get("start_time") or "")
+        if date_key and date_key not in _event_date_keys({"date": start}):
+            continue
+        teams = g.get("teams") or []
+        home = away = ""
+        if isinstance(teams, list) and len(teams) >= 2:
+            # AN lists home then away in some payloads; also has home_team_id.
+            hid = g.get("home_team_id")
+            aid = g.get("away_team_id")
+            by_id = {t.get("id"): t for t in teams if isinstance(t, dict)}
+            if hid in by_id:
+                home = str(by_id[hid].get("full_name") or by_id[hid].get("display_name") or "")
+            if aid in by_id:
+                away = str(by_id[aid].get("full_name") or by_id[aid].get("display_name") or "")
+            if not home or not away:
+                away = str(teams[0].get("full_name") or "") if isinstance(teams[0], dict) else away
+                home = str(teams[1].get("full_name") or "") if isinstance(teams[1], dict) else home
+        players = {}
+        for p in g.get("players") or []:
+            if isinstance(p, dict) and p.get("id") is not None:
+                players[p["id"]] = str(p.get("full_name") or p.get("preferred_name") or "").strip()
+        markets = g.get("markets") or {}
+        if not isinstance(markets, dict):
+            continue
+        bucket: Dict[Tuple[Any, ...], dict] = {}
+        for bid_s, mk in markets.items():
+            try:
+                bid = int(bid_s)
+            except (TypeError, ValueError):
+                continue
+            bname = AN_BOOK_IDS.get(bid)
+            if not bname:
+                continue
+            if not isinstance(mk, dict):
+                continue
+            event_mk = mk.get("event") if isinstance(mk.get("event"), dict) else mk
+            if not isinstance(event_mk, dict):
+                continue
+            for mkey, outcomes in event_mk.items():
+                hint_pair = AN_MARKET_MAP.get(str(mkey))
+                if not hint_pair or not isinstance(outcomes, list):
+                    continue
+                hint, mlabel = hint_pair
+                for o in outcomes:
+                    if not isinstance(o, dict):
+                        continue
+                    if o.get("is_alt_market"):
+                        continue
+                    pid = o.get("player_id")
+                    player = players.get(pid) or ""
+                    if not player:
+                        continue
+                    try:
+                        hf = float(o.get("value"))
+                    except (TypeError, ValueError):
+                        continue
+                    side = str(o.get("side") or "").lower()
+                    price = _flatten_price(o.get("odds"))
+                    key = (player, bname, hint, hf)
+                    rec = bucket.setdefault(
+                        key,
+                        {
+                            "eventId": g.get("id"),
+                            "home": home,
+                            "away": away,
+                            "bookmaker": bname,
+                            "market": mlabel,
+                            "player": player,
+                            "hdp": hf,
+                            "over": None,
+                            "under": None,
+                            "statHint": hint,
+                        },
+                    )
+                    if side == "over":
+                        rec["over"] = price
+                    elif side == "under":
+                        rec["under"] = price
+        rows.extend(
+            rec
+            for rec in bucket.values()
+            if rec.get("over") not in (None, "") or rec.get("under") not in (None, "")
+        )
+    out["meta"]["actionNetworkRows"] = len(rows)
+    return rows
+
+
 def _the_odds_event_to_rows(ev: dict) -> List[dict]:
     home = str(ev.get("home_team") or "")
     away = str(ev.get("away_team") or "")
@@ -1081,10 +1203,10 @@ def fetch_mlb_odds_bundle(
 ) -> Dict[str, Any]:
     """
     FanDuel / DraftKings MLB player props.
-    Prefers The Odds API (US books), then Odds-API.io. Cached 15 minutes per date.
+    Action Network (no key) first, then The Odds API / Odds-API.io if needed.
     """
     date_key = (target_date or "")[:10]
-    cache_key = f"{date_key}|{bookmakers}|v25"
+    cache_key = f"{date_key}|{bookmakers}|v26"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]
@@ -1111,7 +1233,11 @@ def fetch_mlb_odds_bundle(
         rows: List[dict] = []
         first_multi_raw: Any = None
 
-        if toa_key:
+        rows.extend(fetch_actionnetwork_mlb(date_key, out))
+        skip_paid = _has_fd_dk_strikeouts(rows)
+        out["meta"]["skippedPaidOdds"] = skip_paid
+
+        if not skip_paid and toa_key:
             ok_toa, toa_probe_err = _the_odds_key_works(toa_key)
             out["meta"]["apiCalls"] = out["meta"].get("apiCalls", 0) + 1
             out["meta"]["theOddsKeyOk"] = ok_toa
@@ -1120,7 +1246,7 @@ def fetch_mlb_odds_bundle(
             elif toa_probe_err:
                 out["meta"]["theOddsError"] = toa_probe_err
 
-        skip_io = _has_fd_dk_strikeouts(rows)
+        skip_io = skip_paid or _has_fd_dk_strikeouts(rows)
         out["meta"]["skippedOddsIo"] = skip_io
 
         events: List[dict] = []

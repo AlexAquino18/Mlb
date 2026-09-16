@@ -2012,7 +2012,7 @@ async function applyOddsRowsToState(rows, games) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v43:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v44:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -2035,7 +2035,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, rev: "20260916oddsv43" });
+  const qs = new URLSearchParams({ date: dateStr, rev: "20260916oddsv44" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isLocal = host === "localhost" || host === "127.0.0.1";

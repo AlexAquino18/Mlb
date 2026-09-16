@@ -234,31 +234,35 @@ def odds_io_route():
         bookmakers = request.args.get("bookmakers") or DEFAULT_BOOKMAKERS
         dbg = request.args.get("structure") or request.args.get("debug") or ""
         debug_structure = str(dbg).lower() in ("1", "true", "yes")
-        if not api_key:
-            body = {"ok": False, "error": "missing_ODDS_API_KEY"}
-        elif sport in ("nfl", "football"):
-            start = (date_from or raw_date or "")[:10]
-            end = (date_to or date_from or raw_date or "")[:10]
-            if len(start) != 10:
-                body = {"ok": False, "error": "missing_from"}
+        if sport in ("nfl", "football"):
+            if not api_key:
+                body = {"ok": False, "error": "missing_ODDS_API_KEY"}
             else:
-                body = fetch_nfl_odds_bundle(
-                    api_key, start, end, bookmakers, debug_structure=debug_structure
-                )
+                start = (date_from or raw_date or "")[:10]
+                end = (date_to or date_from or raw_date or "")[:10]
+                if len(start) != 10:
+                    body = {"ok": False, "error": "missing_from"}
+                else:
+                    body = fetch_nfl_odds_bundle(
+                        api_key, start, end, bookmakers, debug_structure=debug_structure
+                    )
         elif not raw_date:
             body = {"ok": False, "error": "missing_date"}
         else:
             body = fetch_mlb_odds_bundle(
-                api_key,
+                api_key or "",
                 raw_date[:10],
                 bookmakers,
                 debug_structure=debug_structure,
-                the_odds_key=the_odds_key,
+                the_odds_key=the_odds_key or "",
             )
+        cache = "no-store"
+        if isinstance(body, dict) and body.get("ok") and body.get("rows"):
+            cache = "public, max-age=60, s-maxage=60"
         return Response(
             json.dumps(body, default=str),
             status=200,
-            headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "public, max-age=900"},
+            headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": cache},
         )
     except Exception as e:
         return Response(

@@ -58,26 +58,27 @@ class handler(BaseHTTPRequestHandler):
                 or os.environ.get("ODDS_API_KEY")
                 or os.environ.get("ODDS_API_IO_KEY")
             )
-            if not api_key:
-                out = {"ok": False, "error": "missing_ODDS_API_KEY"}
-            elif sport in ("nfl", "football"):
-                start = (date_from or raw_date or "")[:10]
-                end = (date_to or date_from or raw_date or "")[:10]
-                if len(start) != 10:
-                    out = {"ok": False, "error": "missing_from"}
+            if sport in ("nfl", "football"):
+                if not api_key:
+                    out = {"ok": False, "error": "missing_ODDS_API_KEY"}
                 else:
-                    out = fetch_nfl_odds_bundle(
-                        api_key, start, end, bookmakers, debug_structure=debug_structure
-                    )
+                    start = (date_from or raw_date or "")[:10]
+                    end = (date_to or date_from or raw_date or "")[:10]
+                    if len(start) != 10:
+                        out = {"ok": False, "error": "missing_from"}
+                    else:
+                        out = fetch_nfl_odds_bundle(
+                            api_key, start, end, bookmakers, debug_structure=debug_structure
+                        )
             elif not raw_date:
                 out = {"ok": False, "error": "missing_date"}
             else:
                 out = fetch_mlb_odds_bundle(
-                    api_key,
+                    api_key or "",
                     raw_date[:10],
                     bookmakers,
                     debug_structure=debug_structure,
-                    the_odds_key=the_odds_key,
+                    the_odds_key=the_odds_key or "",
                 )
         except Exception as e:
             sys.stderr.write(traceback.format_exc() + "\n")
