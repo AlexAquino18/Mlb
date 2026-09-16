@@ -303,11 +303,112 @@ def _bookmakers_map(raw: Any) -> Dict[str, Any]:
         for item in raw:
             if not isinstance(item, dict):
                 continue
-            name = str(item.get("name") or item.get("bookmaker") or item.get("title") or "").strip()
+            name = str(
+                item.get("name")
+                or item.get("bookmaker")
+                or item.get("title")
+                or item.get("key")
+                or ""
+            ).strip()
             markets = item.get("markets")
+            if markets is None and item.get("odds") is not None:
+                markets = [
+                    {
+                        "name": item.get("market") or item.get("marketName") or "Player Props",
+                        "odds": item.get("odds"),
+                    }
+                ]
             if name and markets is not None:
                 out[name] = markets
     return out
+
+
+def _markets_as_list(raw: Any) -> List[dict]:
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    if isinstance(raw, dict):
+        out: List[dict] = []
+        for k, v in raw.items():
+            if isinstance(v, dict):
+                m = dict(v)
+                if not m.get("name"):
+                    m["name"] = str(k)
+                out.append(m)
+            elif isinstance(v, list):
+                out.append({"name": str(k), "odds": v})
+        return out
+    return []
+
+
+def _odds_as_list(raw: Any) -> List[dict]:
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    if isinstance(raw, dict):
+        if any(k in raw for k in ("over", "under", "label", "hdp", "home", "away")):
+            return [raw]
+        return [v for v in raw.values() if isinstance(v, dict)]
+    return []
+
+
+def _flatten_price(v: Any) -> Optional[str]:
+    if v is None or v == "":
+        return None
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, str):
+        s = v.strip()
+        return s or None
+    if isinstance(v, dict):
+        for k in ("american", "decimal", "odds", "price", "value"):
+            got = _flatten_price(v.get(k))
+            if got:
+                return got
+    return None
+
+
+def _odd_over_under(odd: dict) -> Tuple[Optional[str], Optional[str]]:
+    over = (
+        _flatten_price(odd.get("over"))
+        or _flatten_price(odd.get("overOdds"))
+        or _flatten_price(odd.get("overPrice"))
+        or _flatten_price(odd.get("o"))
+    )
+    under = (
+        _flatten_price(odd.get("under"))
+        or _flatten_price(odd.get("underOdds"))
+        or _flatten_price(odd.get("underPrice"))
+        or _flatten_price(odd.get("u"))
+    )
+    side = " ".join(
+        [
+            str(odd.get("betSide") or ""),
+            str(odd.get("side") or ""),
+            str(odd.get("name") or ""),
+            str(odd.get("selection") or ""),
+            str(odd.get("outcome") or ""),
+        ]
+    ).lower()
+    price = _flatten_price(
+        odd.get("odds") or odd.get("price") or odd.get("american") or odd.get("decimal")
+    )
+    if price:
+        if "under" in side and "over" not in side and not under:
+            under = price
+        elif "over" in side and not over:
+            over = price
+    return over, under
+
+
+def _norm_bookmaker(name: str) -> str:
+    n = (name or "").strip()
+    low = n.lower()
+    if "fanduel" in low:
+        return "FanDuel"
+    if "draftking" in low:
+        return "DraftKings"
+    return n
 
 
 def _odd_line(odd: dict, label: str = "") -> Optional[float]:
@@ -600,13 +701,9 @@ def _first_player_prop_market(ev: dict) -> Tuple[Optional[str], Optional[str], O
     if not bks:
         return None, None, None
     for bk_name, markets in bks.items():
-        if not isinstance(markets, list):
-            continue
-        for mi, m in enumerate(markets):
-            if not isinstance(m, dict):
-                continue
-            for odd in m.get("odds") or []:
-                if isinstance(odd, dict) and odd.get("label"):
+        for mi, m in enumerate(_markets_as_list(markets)):
+            for odd in _odds_as_list(m.get("odds")):
+                if odd.get("label") or odd.get("player"):
                     return bk_name, str(mi), m
     return None, None, None
 
@@ -632,25 +729,30 @@ def _append_prop_rows(
     if not bookmakers:
         return
     for bk, markets in bookmakers.items():
-        if not isinstance(markets, list):
-            continue
-        for m in markets:
-            if not isinstance(m, dict):
+        bk_name = _norm_bookmaker(str(bk))
+        for m in _markets_as_list(markets):
+            mname_raw = str(m.get("name") or "")
+            if "correct score" in mname_raw.lower():
                 continue
-            for odd in m.get("odds") or []:
-                if not isinstance(odd, dict):
-                    continue
+            for odd in _odds_as_list(m.get("odds")):
                 label = (
                     odd.get("label")
                     or odd.get("player")
                     or odd.get("participant")
-                    or odd.get("name")
                     or m.get("label")
+                    or m.get("player")
                 )
+                name_field = str(odd.get("name") or "").strip()
+                if not label and name_field.lower() not in ("over", "under", "yes", "no"):
+                    label = name_field
                 if not label:
                     continue
                 player_name, label_stat = _parse_player_label(label)
                 if not player_name:
+                    continue
+                if not re.search(r"[A-Za-z]", player_name):
+                    continue
+                if re.match(r"^\d", player_name.strip()):
                     continue
                 hdp = _odd_line(odd, str(label))
                 if hdp is None:
@@ -661,11 +763,13 @@ def _append_prop_rows(
                     hf = float(hdp)
                 except (TypeError, ValueError):
                     continue
+                over, under = _odd_over_under(odd)
                 mname = _composite_market_name(m, odd)
                 label_full = str(label or "")
                 hint = (
                     _stat_hint_from_text(label_stat)
                     or _stat_hint_from_text(label_full)
+                    or _stat_hint_from_text(mname_raw)
                     or _stat_hint_from_market(m, sport=sport)
                 )
                 mlow = mname.strip().lower()
@@ -678,12 +782,12 @@ def _append_prop_rows(
                         "eventId": eid,
                         "home": str(home),
                         "away": str(away),
-                        "bookmaker": str(bk),
+                        "bookmaker": bk_name,
                         "market": str(mname),
                         "player": player_name,
                         "hdp": hf,
-                        "over": odd.get("over"),
-                        "under": odd.get("under"),
+                        "over": over,
+                        "under": under,
                         "statHint": hint,
                     }
                 )
@@ -774,8 +878,9 @@ def _odds_multi_rows(
         params: Dict[str, str] = {
             "apiKey": api_key,
             "eventIds": ids_str,
-            "bookmakers": bookmakers,
         }
+        if bookmakers:
+            params["bookmakers"] = bookmakers
         if markets:
             params["markets"] = markets
         multi_url = f"{ODDS_BASE}/odds/multi?{urllib.parse.urlencode(params)}"
@@ -802,7 +907,7 @@ def fetch_mlb_odds_bundle(
     Pass debug_structure=True to attach meta.oddsStructureSample (not cached).
     """
     date_key = (target_date or "")[:10]
-    cache_key = f"{date_key}|{bookmakers}|v23"
+    cache_key = f"{date_key}|{bookmakers}|v24"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]
@@ -872,6 +977,8 @@ def fetch_mlb_odds_bundle(
             event_teams[_eid_key(eid)] = (_team_str(e.get("home")), _team_str(e.get("away")))
 
         event_ids = [e["id"] for e in events if e.get("id") is not None]
+        # Do not pass markets=Player Props — FanDuel/DraftKings use names like
+        # "Player Props - Strikeouts", and an exact filter drops those rows.
         rows, first_multi_raw = _odds_multi_rows(
             api_key,
             event_ids,
@@ -879,17 +986,16 @@ def fetch_mlb_odds_bundle(
             event_teams,
             out,
             sport="mlb",
-            markets="Player Props",
+            markets=None,
             debug_structure=debug_structure,
         )
         errs = out["meta"].get("multiErrors") or []
         quota_hit = any("http_429" in str(x) or "http_403" in str(x) for x in errs)
-        bad_filter = any("http_400" in str(x) for x in errs)
-        if not rows and event_ids and not quota_hit and (bad_filter or errs):
+        if not rows and event_ids and not quota_hit:
             extra, first2 = _odds_multi_rows(
                 api_key,
                 event_ids,
-                bookmakers,
+                "",
                 event_teams,
                 out,
                 sport="mlb",
@@ -900,10 +1006,16 @@ def fetch_mlb_odds_bundle(
                 rows = extra
                 if first_multi_raw is None:
                     first_multi_raw = first2
-                out["meta"]["multiFallback"] = "all_markets"
+                out["meta"]["multiFallback"] = "all_bookmakers"
 
         out["rows"] = rows
         out["meta"]["propRows"] = len(rows)
+        out["meta"]["bookmakersSeen"] = sorted(
+            {str(r.get("bookmaker") or "") for r in rows if r.get("bookmaker")}
+        )
+        out["meta"]["pricedRows"] = sum(
+            1 for r in rows if r.get("over") not in (None, "") or r.get("under") not in (None, "")
+        )
         sample_markets: List[str] = []
         seen_m: set = set()
         for row in rows:
@@ -975,7 +1087,7 @@ def fetch_nfl_odds_bundle(
     """
     start = (date_from or "")[:10]
     end = (date_to or date_from or "")[:10]
-    cache_key = f"nfl|{start}|{end}|{bookmakers}|v7"
+    cache_key = f"nfl|{start}|{end}|{bookmakers}|v8"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]
@@ -1072,16 +1184,16 @@ def fetch_nfl_odds_bundle(
             event_teams,
             out,
             sport="nfl",
-            markets="Player Props",
+            markets=None,
             debug_structure=debug_structure,
         )
         errs = out["meta"].get("multiErrors") or []
         quota_hit = any("http_429" in str(x) or "http_403" in str(x) for x in errs)
-        if not rows and event_ids and not quota_hit and errs:
+        if not rows and event_ids and not quota_hit:
             extra, first2 = _odds_multi_rows(
                 api_key,
                 event_ids,
-                bookmakers,
+                "",
                 event_teams,
                 out,
                 sport="nfl",
@@ -1092,7 +1204,7 @@ def fetch_nfl_odds_bundle(
                 rows = extra
                 if first_multi_raw is None:
                     first_multi_raw = first2
-                out["meta"]["multiFallback"] = "all_markets"
+                out["meta"]["multiFallback"] = "all_bookmakers"
 
         out["rows"] = rows
         out["meta"]["propRows"] = len(rows)

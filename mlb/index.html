@@ -594,8 +594,16 @@ function parseOddsNumber(v) {
   const n = parseFloat(String(v).replace(/[^0-9.\-+eE]/g, ""));
   return Number.isNaN(n) ? null : n;
 }
+function extractOddsRaw(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "object") {
+    return extractOddsRaw(v.american ?? v.decimal ?? v.odds ?? v.price ?? v.value ?? v.over ?? v.under);
+  }
+  return v;
+}
 /** Decimal (e.g. 1.91) or American (-135) string from Odds-API */
 function toAmericanOdds(raw) {
+  raw = extractOddsRaw(raw);
   if (raw == null || raw === "") return null;
   const s = String(raw).trim();
   if (/^[+\-]?\d{3,5}$/.test(s)) {
@@ -608,6 +616,7 @@ function toAmericanOdds(raw) {
 }
 /** Decimal odds for comparison (decimal or American string/number from Odds-API). */
 function oddsToDecimal(raw) {
+  raw = extractOddsRaw(raw);
   if (raw == null || raw === "") return null;
   const s = String(raw).trim();
   if (/^[+\-]?\d{3,5}$/.test(s)) {
@@ -677,25 +686,59 @@ function normBookmakerLabel(name) {
   return name || "";
 }
 /** Per-book Over/Under for rows matching the card line — merge partial rows (some feeds split O/U). */
+function pickCardLine(bookRows, allLines) {
+  const want = ["FanDuel", "DraftKings"];
+  const score = {};
+  for (const r of bookRows || []) {
+    const bn = normBookmakerLabel(r.book);
+    if (!want.includes(bn)) continue;
+    const h = Number(r.hdp);
+    if (!Number.isFinite(h)) continue;
+    const twoWay = oddsToDecimal(r.over) != null && oddsToDecimal(r.under) != null;
+    score[h] = (score[h] || 0) + (twoWay ? 3 : 1);
+  }
+  let best = null, bestN = -1;
+  for (const [h, n] of Object.entries(score)) {
+    if (n > bestN) { bestN = n; best = Number(h); }
+  }
+  if (best != null) return best;
+  const src = [...new Set((allLines || []).map(Number).filter(Number.isFinite))].sort((a, b) => a - b);
+  if (!src.length) return null;
+  return src[Math.floor(src.length / 2)];
+}
+/** Per-book Over/Under for the card line — fall back to that book's closest posted line. */
 function buildBooksFromRows(bookRows, targetLine) {
   const out = {};
   const want = ["FanDuel", "DraftKings"];
   const tol = 0.01;
   for (const bn of want) {
-    const atLine = (bookRows || []).filter(
-      (r) => normBookmakerLabel(r.book) === bn && Math.abs(Number(r.hdp) - Number(targetLine)) < tol
-    );
-    if (!atLine.length) continue;
-    let bestOver = null, bestUnder = null;
+    const mine = (bookRows || []).filter((r) => normBookmakerLabel(r.book) === bn);
+    if (!mine.length) continue;
+    let atLine = mine.filter((r) => Math.abs(Number(r.hdp) - Number(targetLine)) < tol);
+    if (!atLine.length) {
+      let closest = null, closestDiff = 99;
+      for (const r of mine) {
+        const d = Math.abs(Number(r.hdp) - Number(targetLine));
+        if (!Number.isFinite(d) || d > 1.01) continue;
+        if (d < closestDiff) { closestDiff = d; closest = Number(r.hdp); }
+      }
+      if (closest != null) {
+        atLine = mine.filter((r) => Math.abs(Number(r.hdp) - closest) < tol);
+      } else {
+        atLine = mine;
+      }
+    }
+    let bestOver = null, bestUnder = null, usedHdp = Number(targetLine);
     for (const r of atLine) {
       const oDec = oddsToDecimal(r.over);
       const uDec = oddsToDecimal(r.under);
-      if (oDec != null && oDec > (bestOver?.dec || 0)) bestOver = { raw: r.over, dec: oDec };
-      if (uDec != null && uDec > (bestUnder?.dec || 0)) bestUnder = { raw: r.under, dec: uDec };
+      if (oDec != null && oDec > (bestOver?.dec || 0)) bestOver = { raw: extractOddsRaw(r.over), dec: oDec };
+      if (uDec != null && uDec > (bestUnder?.dec || 0)) bestUnder = { raw: extractOddsRaw(r.under), dec: uDec };
+      if (Number.isFinite(Number(r.hdp))) usedHdp = Number(r.hdp);
     }
     if (!bestOver && !bestUnder) continue;
     out[bn] = {
-      hdp: targetLine,
+      hdp: usedHdp,
       over: bestOver?.raw ?? null,
       under: bestUnder?.raw ?? null,
       overAm: toAmericanOdds(bestOver?.raw),
@@ -1925,10 +1968,8 @@ async function applyOddsRowsToState(rows, games) {
   await resolveKAccumTeams(kAccum, games);
 
   for (const [nk, rec] of Object.entries(kAccum)) {
-    const src = [...new Set(rec.lines)].sort((a, b) => a - b);
-    if (!src.length) continue;
-    const midIdx = Math.floor(src.length / 2);
-    const line = src[midIdx];
+    const line = pickCardLine(rec.bookRows, rec.lines);
+    if (line == null) continue;
     const books = buildBooksFromRows(rec.bookRows, line);
     const oE = outsAccum[nk];
     let outsLine = null, outsStatType = null, outsAllLines = null;
@@ -1938,6 +1979,7 @@ async function applyOddsRowsToState(rows, games) {
       outsStatType = oE.statTypes[0];
       outsAllLines = oSrc;
     }
+    const src = [...new Set(rec.lines)].sort((a, b) => a - b);
     ppLines[nk] = {
       line,
       statType: rec.statTypes[0] || "Strikeouts",
@@ -1969,7 +2011,7 @@ async function applyOddsRowsToState(rows, games) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v41:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v42:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -1992,7 +2034,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, rev: "20260916oddsv41" });
+  const qs = new URLSearchParams({ date: dateStr, rev: "20260916oddsv42" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isLocal = host === "localhost" || host === "127.0.0.1";
@@ -2124,11 +2166,14 @@ async function loadPPLines(games, dateStr) {
     }
 
     const ppAdded = await fillMissingKLinesFromPrizePicks();
-    const totalFound = Object.keys(ppLines).filter(k => !k.includes(":")).length;
-    const bookFound = Object.keys(ppLines).filter(k => !k.includes(":") && ppLines[k]?.src !== "prizepicks").length;
+    const namedKeys = Object.keys(ppLines).filter(k => !k.includes(":"));
+    const totalFound = namedKeys.length;
+    const bookFound = namedKeys.filter(k => ppLines[k]?.src !== "prizepicks").length;
+    const fdDk = namedKeys.filter(k => ppLines[k]?.books?.FanDuel || ppLines[k]?.books?.DraftKings).length;
     if (totalFound > 0) {
       const bits = [];
-      if (bookFound) bits.push(`${bookFound} book`);
+      if (fdDk) bits.push(`${fdDk} FanDuel/DraftKings`);
+      else if (bookFound) bits.push(`${bookFound} book`);
       if (ppAdded) bits.push(`${ppAdded} PrizePicks`);
       setStatus(`Sportsbook: ${bits.join(" + ")} pitcher K lines`);
     } else {
