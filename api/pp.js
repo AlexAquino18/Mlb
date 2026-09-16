@@ -82,7 +82,7 @@ export default async function handler(request) {
         headers: {
           ...corsHeaders(),
           "Content-Type":  resp.headers.get("Content-Type") || "application/json",
-          "Cache-Control": "public, max-age=90",
+          "Cache-Control": "public, max-age=90, s-maxage=90, stale-while-revalidate=120",
           "X-PP-Status":   String(resp.status),
           "X-PP-Attempt":  String(attempt + 1),
         },

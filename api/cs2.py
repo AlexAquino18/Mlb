@@ -1,6 +1,6 @@
 """
 Vercel Python — GET /api/cs2?date=YYYY-MM-DD&threshold=0.5
-Optional: &refresh=1 to pull PrizePicks / Underdog / Betr immediately.
+Optional: &refresh=1 to pull PrizePicks / Underdog immediately.
 """
 import json
 import os
@@ -37,8 +37,9 @@ class handler(BaseHTTPRequestHandler):
 
     def _handle(self, refresh: bool):
         out: dict = {"ok": False, "error": "bad_request"}
+        force = refresh
         try:
-            from cs2_impl import get_dashboard
+            from cs2_impl import cache_control, get_dashboard
 
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
@@ -54,9 +55,11 @@ class handler(BaseHTTPRequestHandler):
                 "yes",
             )
             out = get_dashboard(date=date, threshold=threshold, refresh=force)
+            cc = cache_control(out, refresh=force)
         except Exception as e:
             sys.stderr.write(traceback.format_exc() + "\n")
             out = {"ok": False, "error": "server_error", "detail": str(e)}
+            cc = "no-store"
 
         try:
             body = json.dumps(out, default=str).encode("utf-8")
@@ -65,10 +68,11 @@ class handler(BaseHTTPRequestHandler):
                 {"ok": False, "error": "json_error", "detail": str(e2)},
                 default=str,
             ).encode("utf-8")
+            cc = "no-store"
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cc)
         for k, v in _cors().items():
             self.send_header(k, v)
         self.send_header("Content-Length", str(len(body)))

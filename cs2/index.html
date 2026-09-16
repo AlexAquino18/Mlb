@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <title>PropPulse — CS2 Props</title>
-  <meta name="description" content="PropPulse CS2 prop scanner — PrizePicks vs Underdog vs Betr line gaps, with Polymarket series odds." />
+  <meta name="description" content="PropPulse CS2 prop scanner — PrizePicks vs Underdog line gaps, with Polymarket series odds." />
   <meta property="og:title" content="PropPulse — CS2" />
-  <meta property="og:description" content="Live CS2 player prop discrepancies across PrizePicks, Underdog, and Betr." />
+  <meta property="og:description" content="Live CS2 player prop discrepancies across PrizePicks and Underdog." />
   <meta property="og:type" content="website" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
@@ -50,7 +50,7 @@
     }
     .match-head h3 { font-size: 15px; }
     .wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius); background: var(--bg-card); }
-    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    table { width: 100%; border-collapse: collapse; min-width: 560px; }
     th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; font-size: 13px; }
     th { color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
     td.num, th.num { text-align: right; font-family: var(--font-mono); }
@@ -80,7 +80,7 @@
           <a href="/nba/" class="sport-pill soon">NBA</a>
         </nav>
       </div>
-      <div id="subtitle">CS2 · PrizePicks vs Underdog vs Betr</div>
+      <div id="subtitle">CS2 · PrizePicks vs Underdog</div>
     </div>
     <div id="header-right">
       <span id="updated" class="meta-time"></span>
@@ -103,9 +103,11 @@
   <div class="dates" id="dates"></div>
   <div id="summary-grid"></div>
   <div class="banner" id="banner" hidden></div>
-  <div class="section-h">Moved vs opening line</div>
-  <p class="section-sub">Vs the first line we saw this session. Stays until the prop leaves the board.</p>
-  <div id="movers"></div>
+  <div id="movers-section" hidden>
+    <div class="section-h">Moved vs opening line</div>
+    <p class="section-sub">Vs the first line we saw this session. Stays until the prop leaves the board.</p>
+    <div id="movers"></div>
+  </div>
   <div class="section-h">Gaps by match</div>
   <p class="section-sub">Same player, same stat, different books. Percentages are Polymarket series winner.</p>
   <div id="matches"></div>
@@ -116,7 +118,7 @@
     <div class="footer-brand">PROPPULSE</div>
     <p class="footer-tag">Player prop intelligence · MLB, NFL &amp; CS2 live</p>
     <p class="footer-disclaimer">
-      For informational purposes only — not betting advice. CS2 gaps are PrizePicks vs Underdog vs Betr.
+      For informational purposes only — not betting advice. CS2 gaps are PrizePicks vs Underdog.
       Lines move; a spread is not a lock. Verify before wagering. Bet responsibly.
     </p>
   </div>
@@ -192,7 +194,6 @@ function render() {
     ["Movers", s.movers ?? 0],
     ["PrizePicks", s.prizepicks ?? 0],
     ["Underdog", s.underdog ?? 0],
-    ["Betr", s.betr ?? 0],
   ].map(([label, val]) => `<div class="sum-card"><div class="sum-val">${val}</div><div class="sum-lbl">${label}</div></div>`).join("");
 
   const msg = data.message || data.error || data.detail || "";
@@ -202,14 +203,15 @@ function render() {
   const movers = (data.movers || []).filter((m) =>
     matchesQuery([m.player, m.team, m.stat, m.matchup].join(" "))
   );
+  $("movers-section").hidden = !movers.length;
   $("movers").innerHTML = table(
-    ["Player", "Team", "Stat", "Matchup", "PrizePicks", "Underdog", "Betr", "Open → now"],
+    ["Player", "Team", "Stat", "Matchup", "PrizePicks", "Underdog", "Open → now"],
     movers.map((m) => [
       esc(m.player), esc(m.team), esc(m.stat), esc(m.matchup || "—"),
-      cell(m.prizepicks), cell(m.underdog), cell(m.betr),
+      cell(m.prizepicks), cell(m.underdog),
       `${m.spread_was ?? "—"} → ${m.spread_now ?? "—"}`,
     ]),
-    ["", "", "", "", "num", "num", "num", "num"]
+    ["", "", "", "", "num", "num", "num"]
   );
 
   const matches = (data.matches || []).map((m) => ({
@@ -231,13 +233,13 @@ function render() {
           ${oddsPills(m.series)}
         </div>
         ${table(
-          ["Player", "Team", "Stat", "Spread", "PrizePicks", "Underdog", "Betr"],
+          ["Player", "Team", "Stat", "Spread", "PrizePicks", "Underdog"],
           m.gaps.map((g) => [
             esc(g.player), esc(g.team), esc(g.stat),
             `<span class="spread">${Number(g.spread).toFixed(1)}</span>`,
-            cell(g.prizepicks), cell(g.underdog), cell(g.betr),
+            cell(g.prizepicks), cell(g.underdog),
           ]),
-          ["", "", "", "num", "num", "num", "num"]
+          ["", "", "", "num", "num", "num"]
         )}
       </section>`).join("");
   }
@@ -256,11 +258,21 @@ async function load(refresh) {
   if (refresh) qs.set("refresh", "1");
   const next = "?" + qs.toString();
   if (location.search !== next) history.replaceState(null, "", next);
-  $("updated").textContent = refresh ? "Pulling PrizePicks, Underdog, Betr…" : "Loading…";
-  const res = await fetch(url + "?" + qs.toString(), { headers: { Accept: "application/json" } });
-  boardData = await res.json();
-  currentDate = boardData.date || currentDate;
-  render();
+  $("updated").textContent = refresh ? "Pulling PrizePicks and Underdog…" : "Loading…";
+  try {
+    const res = await fetch(url + "?" + qs.toString(), { headers: { Accept: "application/json" } });
+    boardData = await res.json();
+    if (!boardData || boardData.ok === false) {
+      $("banner").hidden = false;
+      $("banner").textContent = boardData?.message || boardData?.detail || boardData?.error || "Scanner returned no data.";
+    }
+    currentDate = (boardData && boardData.date) || currentDate;
+    if (boardData) render();
+  } catch (err) {
+    $("banner").hidden = false;
+    $("banner").textContent = "Could not load CS2 lines. Retry in a moment.";
+    $("updated").textContent = "Load failed";
+  }
 }
 
 $("threshold").onchange = () => load();

@@ -136,7 +136,7 @@ def build_dashboard(date: str | None = None, threshold: float = 0.5, limit: int 
     if not snaps:
         return {
             "ok": False,
-            "message": "No snapshot yet. Hit Refresh to pull PrizePicks, Underdog, and Betr.",
+            "message": "No snapshot yet. Hit Refresh to pull PrizePicks and Underdog.",
             "dates": [],
             "date": date,
             "gaps": [],
@@ -148,7 +148,7 @@ def build_dashboard(date: str | None = None, threshold: float = 0.5, limit: int 
         }
 
     latest_id, latest_at = snaps[0]
-    latest_props = store.load_lines(latest_id)
+    latest_props = [p for p in store.load_lines(latest_id) if p.source in BOOKS]
     openings = store.load_openings()
 
     dates = available_dates(latest_props)
@@ -321,20 +321,13 @@ def build_dashboard(date: str | None = None, threshold: float = 0.5, limit: int 
     live_books = sum(1 for src in BOOKS if source_counts.get(src))
     message = None
     if source_errors:
-        if set(source_errors) <= {"betr"} and live_books >= 2:
-            message = (
-                "Betr CS2 lines need a Betr login (BETR_ACCESS_TOKEN or "
-                "BETR_USERNAME / BETR_PASSWORD). PrizePicks and Underdog are live."
-            )
-        else:
-            bits = [f"{name}: {err}" for name, err in source_errors.items()]
-            message = "Some books failed — " + " · ".join(bits)
+        bits = [f"{name}: {err}" for name, err in source_errors.items()]
+        message = "Some books failed — " + " · ".join(bits)
     elif live_books < 2:
         message = (
-            "Need lines from at least two books to show gaps. "
+            "Need lines from both PrizePicks and Underdog to show gaps. "
             f"PrizePicks {source_counts.get('prizepicks', 0)}, "
-            f"Underdog {source_counts.get('underdog', 0)}, "
-            f"Betr {source_counts.get('betr', 0)}."
+            f"Underdog {source_counts.get('underdog', 0)}."
         )
 
     return {
@@ -350,7 +343,6 @@ def build_dashboard(date: str | None = None, threshold: float = 0.5, limit: int 
             "closed": closed,
             "prizepicks": source_counts.get("prizepicks", 0),
             "underdog": source_counts.get("underdog", 0),
-            "betr": source_counts.get("betr", 0),
             "max_spread": gaps[0]["spread"] if gaps else 0,
             "matches": len(matches),
             "series": sum(1 for m in matches if m.get("series")),

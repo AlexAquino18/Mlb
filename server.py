@@ -33,7 +33,7 @@ UA_POOL = [
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
 }
 
@@ -257,7 +257,7 @@ def odds_io_route():
 
 @app.route("/api/cs2", methods=["GET", "POST", "OPTIONS"])
 def cs2_route():
-    """CS2 PrizePicks vs Underdog vs Betr scanner."""
+    """CS2 PrizePicks vs Underdog scanner."""
     if request.method == "OPTIONS":
         return Response(status=204, headers=CORS_HEADERS)
     try:
@@ -266,7 +266,7 @@ def cs2_route():
         _apid = _os.path.join(_os.path.dirname(__file__), "api")
         if _apid not in _sys.path:
             _sys.path.insert(0, _apid)
-        from cs2_impl import get_dashboard
+        from cs2_impl import cache_control, get_dashboard
 
         date = request.args.get("date")
         try:
@@ -282,13 +282,17 @@ def cs2_route():
         return Response(
             json.dumps(body, default=str),
             status=200,
-            headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "no-store"},
+            headers={
+                **CORS_HEADERS,
+                "Content-Type": "application/json",
+                "Cache-Control": cache_control(body, refresh=refresh),
+            },
         )
     except Exception as e:
         return Response(
             json.dumps({"ok": False, "error": "server_error", "detail": str(e)}),
             status=200,
-            headers={**CORS_HEADERS, "Content-Type": "application/json"},
+            headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "no-store"},
         )
 
 

@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timezone
 
 import requests
 
+import config
 import store
-from sources import betr, chalkboard, prizepicks, underdog
+from sources import prizepicks, underdog
 
 _LOCK = threading.Lock()
 _STATE = {
@@ -30,21 +32,37 @@ def status() -> dict:
     }
 
 
-def run_ingest() -> dict:
-    if not _LOCK.acquire(blocking=False):
+def snapshot_is_fresh(st: dict | None = None) -> bool:
+    row = st or status()
+    if not row.get("has_data"):
+        return False
+    at = row.get("last_snapshot_at") or ""
+    try:
+        dt = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds()
+        return age < config.INGEST_TTL_SECONDS
+    except Exception:
+        return True
+
+
+def run_ingest(force: bool = False) -> dict:
+    if not _LOCK.acquire(timeout=120):
+        _STATE["error"] = "Timed out waiting for an in-flight refresh"
         return status()
-    _STATE["running"] = True
-    _STATE["error"] = None
     try:
         store.init_db()
+        if not force and snapshot_is_fresh():
+            return status()
+        _STATE["running"] = True
+        _STATE["error"] = None
         session = requests.Session()
         counts = {}
         props = []
         for name, fetcher in (
             ("prizepicks", prizepicks.fetch),
             ("underdog", underdog.fetch),
-            ("betr", betr.fetch),
-            ("chalkboard", chalkboard.fetch),
         ):
             try:
                 batch = fetcher(session)
@@ -62,7 +80,6 @@ def run_ingest() -> dict:
             counts["polymarket"] = f"error: {exc}"
         _STATE["last_snapshot_id"] = snapshot_id
         _STATE["last_counts"] = counts
-        _STATE["running"] = False
         return status()
     except Exception as exc:
         _STATE["error"] = str(exc)

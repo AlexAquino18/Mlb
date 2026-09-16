@@ -1,5 +1,5 @@
 """
-CS2 prop scanner — PrizePicks vs Underdog vs Betr (+ Polymarket series).
+CS2 prop scanner — PrizePicks vs Underdog (+ Polymarket series).
 Used by Vercel /api/cs2 and local server.py.
 """
 from __future__ import annotations
@@ -25,27 +25,24 @@ def _board_key(date: str, threshold: float) -> str:
     return f"{date}|{threshold:.2f}"
 
 
+def cache_control(payload: Dict[str, Any], refresh: bool = False) -> str:
+    if refresh or not payload.get("ok"):
+        return "no-store"
+    status = payload.get("status") or {}
+    if not status.get("has_data") and not payload.get("matches"):
+        return "no-store"
+    return "public, max-age=60, s-maxage=180, stale-while-revalidate=300"
+
+
 def ensure_snapshot(force: bool = False) -> Dict[str, Any]:
     import ingest
     import store
-    from datetime import datetime, timezone
 
     store.init_db()
     st = ingest.status()
-    if not force and st.get("has_data"):
-        at = st.get("last_snapshot_at") or ""
-        try:
-            dt = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            age = (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds()
-            if age < CACHE_TTL_SEC:
-                return st
-        except Exception:
-            return st
-    st = ingest.run_ingest()
-    _CACHE["_ingest_ts"] = time.time()
-    return st
+    if not force and ingest.snapshot_is_fresh(st):
+        return st
+    return ingest.run_ingest(force=force)
 
 
 def get_dashboard(
@@ -66,7 +63,9 @@ def get_dashboard(
             payload["status"] = status
             return payload
     payload = board.build_dashboard(date=day or None, threshold=threshold)
-    payload["ok"] = True
+    if payload.get("ok") is not False:
+        payload["ok"] = True
     payload["status"] = status
-    _CACHE[key] = (now, payload)
+    if payload.get("ok"):
+        _CACHE[key] = (now, payload)
     return payload

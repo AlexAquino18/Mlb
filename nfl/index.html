@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <title>PropPulse — NFL Props</title>
-  <meta name="description" content="PropPulse NFL Week 1 player props — pass, rush, rec, TDs, defense, kicking, line movement, and +EV vs PrizePicks, FanDuel, and DraftKings." />
+  <meta name="description" content="PropPulse NFL player props — pass, rush, rec, TDs, defense, kicking, line movement, and +EV vs PrizePicks, FanDuel, and DraftKings." />
   <meta property="og:title" content="PropPulse — NFL" />
-  <meta property="og:description" content="Week 1 NFL player props, line movement, and +EV odds." />
+  <meta property="og:description" content="NFL player props, line movement, and +EV odds." />
   <meta property="og:type" content="website" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
@@ -1467,7 +1467,7 @@ function renderSlate(games) {
   if (!games.length) {
     return `<div class="game-card empty">
       <h3>No games on this week yet</h3>
-      <p>ESPN has not published this slate. Regular season Week 1 is live — pick it from the week menu if you are on a different week.</p>
+      <p>ESPN has not published this slate. Pick another week from the menu, or check back when the schedule posts.</p>
     </div>`;
   }
   if (!list.length) {
@@ -1524,7 +1524,7 @@ function oddsEmptyCopy() {
   }
   if (err) return `Odds feed error: ${err}`;
   if (m.note === "no_nfl_events_for_range") {
-    return `No NFL events in the odds feed for ${m.dateFrom || "this window"} to ${m.dateTo || ""}. Week 1 books usually post Thursday–Sunday — retry closer to kickoff.`;
+    return `No NFL events in the odds feed for ${m.dateFrom || "this window"} to ${m.dateTo || ""}. Books usually post Thursday–Sunday — retry closer to kickoff.`;
   }
   if ((m.eventCount || 0) > 0 && !(m.propRows || lastOddsRows.length)) {
     return `Found ${m.eventCount} NFL event${m.eventCount === 1 ? "" : "s"} but FanDuel / DraftKings have not posted player props yet.`;

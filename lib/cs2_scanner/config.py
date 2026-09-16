@@ -31,7 +31,8 @@ BETR_API_VERSION = os.environ.get("BETR_API_VERSION", "16.0")
 BETR_APP_VERSION = os.environ.get("BETR_APP_VERSION", "3.42.7")
 BETR_PROMOTIONS_API_VERSION = os.environ.get("BETR_PROMOTIONS_API_VERSION", "6.0")
 
-BOOKS = ("prizepicks", "underdog", "betr")
+BOOKS = ("prizepicks", "underdog")
+INGEST_TTL_SECONDS = int(os.environ.get("CS2_INGEST_TTL_SECONDS", str(15 * 60)))
 
 # --- Chalkboard ---
 # Chalkboard does offer CS2 at major events, but there is no public board API
