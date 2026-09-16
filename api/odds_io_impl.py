@@ -12,7 +12,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 # API metadata often includes ISO timestamps; harvesting all string leaves pollutes composite market names.
 _ISO_LIKE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}|^\d{4}-\d{2}-\d{2}$")
@@ -206,10 +208,24 @@ def _is_mlb_event(ev: dict) -> bool:
 
 
 def _event_date_key(ev: dict) -> str:
+    dates = _event_date_keys(ev)
+    return sorted(dates)[0] if dates else ""
+
+
+def _event_date_keys(ev: dict) -> List[str]:
     ds = ev.get("date") or ev.get("startTime") or ""
-    if isinstance(ds, str) and len(ds) >= 10:
-        return ds[:10]
-    return ""
+    if not isinstance(ds, str) or len(ds) < 10:
+        return []
+    keys = {ds[:10]}
+    try:
+        dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        keys.add(dt.astimezone(ZoneInfo("America/New_York")).date().isoformat())
+        keys.add(dt.astimezone(timezone.utc).date().isoformat())
+    except Exception:
+        pass
+    return sorted(keys)
 
 
 def _team_str(v: Any) -> str:
@@ -744,17 +760,17 @@ def fetch_mlb_odds_bundle(
 
 def _events_in_range(events: List[dict], date_from: str, date_to: str) -> List[dict]:
     if date_from and date_to and date_from == date_to:
-        return [e for e in events if _event_date_key(e) == date_from]
+        return [e for e in events if date_from in _event_date_keys(e)]
     out: List[dict] = []
     for e in events:
-        dk = _event_date_key(e)
-        if not dk:
+        dates = _event_date_keys(e)
+        if not dates:
             continue
-        if date_from and dk < date_from:
-            continue
-        if date_to and dk > date_to:
-            continue
-        out.append(e)
+        if any(
+            (not date_from or d >= date_from) and (not date_to or d <= date_to)
+            for d in dates
+        ):
+            out.append(e)
     return out
 
 
@@ -771,7 +787,7 @@ def fetch_nfl_odds_bundle(
     """
     start = (date_from or "")[:10]
     end = (date_to or date_from or "")[:10]
-    cache_key = f"nfl|{start}|{end}|{bookmakers}|v5"
+    cache_key = f"nfl|{start}|{end}|{bookmakers}|v6"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]
@@ -792,6 +808,7 @@ def fetch_nfl_odds_bundle(
 
     try:
         events: List[dict] = []
+        seen_ids: set = set()
         attempts = (
             {"sport": "nfl", "from": start, "to": end},
             {"sport": "american-football", "league": "nfl-regular-season", "from": start, "to": end},
@@ -819,18 +836,28 @@ def fetch_nfl_odds_bundle(
             on_range = (
                 _events_in_range(raw_all, start, end)
                 if attempt.get("from")
-                else raw_all
+                else _events_in_range(raw_all, start, end) or raw_all
             )
             nfl_events = [e for e in on_range if _is_nfl_event(e)]
-            if nfl_events:
-                events = nfl_events
+            added = 0
+            for e in nfl_events:
+                eid = _eid_key(e.get("id"))
+                if not eid or eid in seen_ids:
+                    continue
+                seen_ids.add(eid)
+                events.append(e)
+                added += 1
+            if added:
                 out["meta"]["eventsSport"] = attempt["sport"]
                 if attempt.get("league"):
                     out["meta"]["eventsLeague"] = attempt["league"]
-                out["meta"]["eventsQuery"] = (
-                    "ranged" if attempt.get("from") else "next_14d"
+                out["meta"].setdefault("eventsQueries", []).append(
+                    ("ranged" if attempt.get("from") else "next_14d") + f"+{added}"
                 )
+            if len(events) >= 8:
                 break
+        if events:
+            events = _events_in_range(events, start, end) or events
         out["meta"]["eventCount"] = len(events)
 
         rows: List[dict] = []

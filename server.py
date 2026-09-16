@@ -255,6 +255,35 @@ def odds_io_route():
         )
 
 
+@app.route("/api/nfl_stats")
+def nfl_stats_route():
+    """ESPN weekly NFL projections + FPI matchup ratings."""
+    if request.method == "OPTIONS":
+        return Response(status=204, headers=CORS_HEADERS)
+    try:
+        import os as _os
+        import sys as _sys
+        _apid = _os.path.join(_os.path.dirname(__file__), "api")
+        if _apid not in _sys.path:
+            _sys.path.insert(0, _apid)
+        from nfl_stats_impl import get_nfl_model
+
+        week = int(request.args.get("week") or 1)
+        season = int(request.args.get("season") or 2026)
+        body = get_nfl_model(max(2020, min(2035, season)), max(1, min(22, week)))
+        return Response(
+            json.dumps(body, default=str),
+            status=200,
+            headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "public, max-age=900"},
+        )
+    except Exception as e:
+        return Response(
+            json.dumps({"ok": False, "error": "server_error", "detail": str(e)}),
+            status=200,
+            headers={**CORS_HEADERS, "Content-Type": "application/json"},
+        )
+
+
 @app.route("/api/cs2", methods=["GET", "POST", "OPTIONS"])
 def cs2_route():
     """CS2 PrizePicks vs Underdog scanner."""
