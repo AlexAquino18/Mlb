@@ -389,7 +389,7 @@
   <div id="tabs">
     <button class="tab-btn" data-tab="slate">Slate</button>
     <button class="tab-btn active" data-tab="props">Player Props</button>
-    <button class="tab-btn" data-tab="ev">+EV / Model</button>
+    <button class="tab-btn" data-tab="ev">+EV</button>
   </div>
   <div id="filters" style="display:none"></div>
   <div id="loader" style="display:none">
@@ -410,8 +410,7 @@
     <p class="footer-tag">Player prop intelligence · MLB, NFL &amp; CS2 live</p>
     <p class="footer-disclaimer">
       For informational purposes only — not betting advice. NFL schedule from ESPN.
-      Odds from FanDuel / DraftKings via Odds-API.io. Projections from ESPN weekly models + FPI matchups.
-      +EV grades PrizePicks standard lines at −119 vs de-vigged book prices and the ESPN projection.
+      Odds from FanDuel / DraftKings. +EV grades PrizePicks standard lines at −119 vs de-vigged FanDuel / DraftKings prices.
       Line movement is logged locally in your browser. Verify inactives and props before wagering. Bet responsibly.
     </p>
     <p class="footer-meta">Auto-refreshes every 30 minutes · every 8 minutes while games are live · Data cached to limit API usage</p>
@@ -664,13 +663,13 @@ function weekWindow(games) {
 
 function oddsIoUrl(from, to) {
   if (typeof location === "undefined" || location.protocol === "file:") return "";
-  const qs = new URLSearchParams({ sport: "nfl", from, to, rev: "20260915nflv3" });
+  const qs = new URLSearchParams({ sport: "nfl", from, to, rev: "20260916nflv4" });
   const host = location.hostname;
   const isLocal = host === "localhost" || host === "127.0.0.1";
   if (isLocal) return `http://127.0.0.1:8080/api/odds_io?${qs}`;
   return `${location.origin}/api/odds_io?${qs}`;
 }
-function oddsCacheKey(from, to) { return `nfl_odds_v5:${from}:${to}`; }
+function oddsCacheKey(from, to) { return `nfl_odds_v6:${from}:${to}`; }
 function oddsCacheGet(from, to) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(from, to));
@@ -1356,6 +1355,22 @@ function evPPSideFair(books, side) {
   if (bestP <= 0) return null;
   return { pFair: Math.min(0.98, Math.max(0.02, bestP)), baselineSrc: bestSrc };
 }
+function bookJuiceBetterThanPP(am) {
+  return am != null && am <= -120;
+}
+function findBookGroupForPp(groups, pp) {
+  const exact = groups[`${pp.nk}|${pp.statKey}|${pp.line}`];
+  if (exact) return { g: exact, usedLine: pp.line, diff: 0 };
+  let best = null;
+  const prefix = `${pp.nk}|${pp.statKey}|`;
+  for (const [key, g] of Object.entries(groups || {})) {
+    if (!key.startsWith(prefix)) continue;
+    const diff = Math.abs(Number(g.line) - Number(pp.line));
+    if (!Number.isFinite(diff) || diff > 0.51) continue;
+    if (!best || diff < best.diff) best = { g, usedLine: g.line, diff };
+  }
+  return best;
+}
 function evFairOverFromBooks(books) {
   const twoWay = Object.entries(books || {}).filter(([, b]) => b && b.over && b.under);
   if (!twoWay.length) return null;
@@ -1407,7 +1422,7 @@ async function buildEV(games) {
   }
 
   const board = await fetchPrizePicksStandardLines();
-  const diag = { bookGroups: Object.keys(groups).length, twoWayGroups: 0, ppExactMatches: 0, modelPlays: 0 };
+  const diag = { bookGroups: Object.keys(groups).length, twoWayGroups: 0, ppExactMatches: 0, ppNearEv: 0 };
   lastPPBoardMeta = { ...board.meta, ...diag };
   const out = [];
   const seen = new Set();
@@ -1418,56 +1433,49 @@ async function buildEV(games) {
     out.push(row);
   }
 
-  for (const pp of pickPpLines(games)) {
+  for (const pp of board.allLines || []) {
+    if (!pp?.nk || !STAT_META[pp.statKey] || pp.statKey === "other") continue;
+    if (!ppDayInWindow(pp.start, games)) continue;
     const inj = injuryFor(pp.player);
     if (inj && /out|\bir\b|inactive|pup/i.test(inj.status || "")) continue;
-    const g = groups[`${pp.nk}|${pp.statKey}|${pp.line}`];
+    const hit = findBookGroupForPp(groups, pp);
+    if (!hit) continue;
+    const g = hit.g;
+    diag.ppExactMatches++;
     const game = findGameForTeamAbbr(pp.team, games);
     const proj = projectStat(pp.nk, pp.statKey, game);
-    const pModelOver = pOverModel(pp.statKey, proj, pp.line);
-    if (g) diag.ppExactMatches++;
-    const matchup = g
-      ? (g.away && g.home ? `${g.away} @ ${g.home}` : "")
+    const matchup = g.away && g.home
+      ? `${g.away} @ ${g.home}`
       : (game ? `${game.away.abbr} @ ${game.home.abbr}` : (pp.team || ""));
     for (const side of ["Over", "Under"]) {
-      let pFair = null;
-      let baselineSrc = "";
-      if (pModelOver != null) {
-        const pM = side === "Over" ? pModelOver : 1 - pModelOver;
-        const est = g ? evPPSideFair(g.books, side) : null;
-        if (est) {
-          pFair = 0.62 * pM + 0.38 * est.pFair;
-          baselineSrc = `ESPN model + ${est.baselineSrc}`;
-        } else {
-          pFair = pM;
-          baselineSrc = "ESPN weekly + FPI";
-        }
-      } else if (g) {
-        const est = evPPSideFair(g.books, side);
-        if (!est) continue;
-        pFair = est.pFair;
-        baselineSrc = est.baselineSrc;
-      } else {
-        continue;
-      }
+      const est = evPPSideFair(g.books, side);
+      if (!est) continue;
+      let { pFair, baselineSrc } = est;
       let ev = pFair * PP_EV_DEC - 1;
-      const bestAm = g ? bestSideAmerican(g.books, side) : null;
-      if (bestAm != null && bestAm <= -120) {
-        const pJuice = Math.abs(bestAm) / (Math.abs(bestAm) + 100);
+      const bestAm = bestSideAmerican(g.books, side);
+      const juiceEdge = bookJuiceBetterThanPP(bestAm);
+      if (juiceEdge && bestAm != null) {
+        const pJuice = bestAm >= 100 ? 100 / (bestAm + 100) : Math.abs(bestAm) / (Math.abs(bestAm) + 100);
         const evJuice = pJuice * PP_EV_DEC - 1;
         if (evJuice > ev) { pFair = pJuice; ev = evJuice; baselineSrc = "book juice"; }
       }
-      const minEv = pModelOver != null && !g ? 0.012 : 0.001;
-      if (ev < minEv) continue;
+      if (ev > 0 || juiceEdge) diag.ppNearEv++;
+      if (ev < 0.001 && !juiceEdge) continue;
       const b = PP_EV_DEC - 1;
       const kelly = Math.max(0, (pFair * (b + 1) - 1) / b);
-      if (pModelOver != null) diag.modelPlays++;
+      const bookTxt = evBookPricesTxt(g.books, side);
+      const bits = [
+        bookTxt,
+        hit.diff ? `book ${hit.usedLine}` : "",
+        proj != null ? `proj ${proj}` : "",
+        juiceEdge && ev < 0.001 ? "book juice worse than PP −119" : "",
+      ].filter(Boolean);
       pushEV({
-        evRow: true, isPP: true, ppOnBoard: true, isModel: pModelOver != null,
+        evRow: true, isPP: true, ppOnBoard: true, isModel: false,
         player: pp.player, statKey: pp.statKey, statLabel: STAT_META[pp.statKey]?.label || pp.statKey,
         line: pp.line, side, book: "PrizePicks", dec: PP_EV_DEC, proj,
         matchup, pFair, ev, kellyQ: kelly / 4,
-        baselineSrc, detailTxt: [proj != null ? `proj ${proj}` : "", evBookPricesTxt(g?.books, side)].filter(Boolean).join(" · "),
+        baselineSrc, detailTxt: bits.join(" · "),
       });
     }
   }
@@ -1501,7 +1509,7 @@ async function buildEV(games) {
     }
   }
 
-  lastPPBoardMeta = { ...board.meta, ...diag, modelPlayers: _nflModel.playerCount || 0 };
+  lastPPBoardMeta = { ...board.meta, ...diag };
   out.sort((a, b) => {
     if (a.isPP !== b.isPP) return a.isPP ? -1 : 1;
     return b.ev - a.ev;
@@ -1578,10 +1586,10 @@ function renderFilters(tab) {
     return;
   }
   if (tab === "ev") {
-    const opts = ["all", "pp", "model", "strong", "over", "under"];
+    const opts = ["all", "pp", "strong", "over", "under"];
     f.innerHTML = opts.map(o =>
       `<button class="filter-btn${o === activeFilter ? " active" : ""}" data-filter="${o}">${
-        o === "strong" ? "3%+ EV" : o === "pp" ? "PrizePicks" : o === "model" ? "Model" : o.toUpperCase()
+        o === "strong" ? "3%+ EV" : o === "pp" ? "PrizePicks" : o.toUpperCase()
       }</button>`
     ).join("") + `<span id="game-count"></span>`;
     f.style.display = "flex";
@@ -1842,7 +1850,6 @@ function evColor(ev) { return ev >= 0.05 ? "#34d399" : ev >= 0.03 ? "#22d3ee" : 
 function renderEV(rows) {
   const filtered = rows.filter(r => {
     if (activeFilter === "pp") return !!r.isPP;
-    if (activeFilter === "model") return !!r.isModel;
     if (activeFilter === "strong") return r.ev >= 0.03;
     if (activeFilter === "over") return r.side === "Over";
     if (activeFilter === "under") return r.side === "Under";
@@ -1850,12 +1857,12 @@ function renderEV(rows) {
   });
   const meta = lastPPBoardMeta || {};
   const intro = `<div class="game-card ev-intro"><div style="padding:16px 18px">
-    <div class="ev-intro-hd">+EV / Matchup Model</div>
-    <div class="ev-intro-body">Grades PrizePicks NFL standard lines at −119 using ESPN weekly projections (already matchup-aware) tilted with FPI offense/defense and game totals, then blended with FanDuel / DraftKings de-vig when those books are up. Exact PP line. Stake = ¼-Kelly.</div>
-    <div class="ev-intro-meta">${meta.error ? `PrizePicks unavailable (${meta.error}) — book-vs-book only.` : `${meta.standard || 0} PP standard · ${meta.ppExactMatches || 0} matched FD/DK · ${meta.modelPlayers || 0} ESPN projs · ${meta.modelPlays || 0} model-graded · ${meta.twoWayGroups || 0} two-way props`}</div>
+    <div class="ev-intro-hd">+EV vs FanDuel / DraftKings</div>
+    <div class="ev-intro-body">Grades PrizePicks NFL standard lines at −119 against FanDuel and DraftKings de-vig (and juice when a book is heavier than −119). Same number as the books — ESPN projections are shown as context only. Stake = ¼-Kelly.</div>
+    <div class="ev-intro-meta">${meta.error ? `PrizePicks unavailable (${meta.error}) — book-vs-book only.` : `${meta.standard || 0} PP standard · ${meta.ppExactMatches || 0} matched FD/DK · ${meta.twoWayGroups || 0} two-way props`}</div>
   </div></div>`;
   if (!filtered.length) {
-    return intro + `<div class="game-card ev-empty"><p>No +EV plays on this slate yet. Lines tighten all week — check back closer to kickoff.</p></div>`;
+    return intro + `<div class="game-card ev-empty"><p>${meta.ppExactMatches === 0 && meta.standard ? "No PrizePicks standard line shares the same number as FanDuel / DraftKings on this slate." : "No +EV plays on this slate yet. Lines tighten all week — check back closer to kickoff."}</p></div>`;
   }
   const rowsHtml = filtered.map(r => {
     const c = evColor(r.ev);
@@ -1971,7 +1978,7 @@ async function loadTab(tab) {
     const games = await loadEspnWeek();
     gamesState = games;
 
-    setStatus("Fetching books, PrizePicks, and ESPN projections…");
+    setStatus("Fetching FanDuel / DraftKings and PrizePicks…");
     await Promise.allSettled([
       loadOdds(games),
       fetchInjuries(),

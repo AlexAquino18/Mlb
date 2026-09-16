@@ -85,19 +85,21 @@ _CACHE: Dict[str, tuple] = {}
 CACHE_TTL_SEC = 15 * 60
 
 
-def _get_json(url: str, user_agent: str = "MLB-Edge/1.0") -> Any:
+def _get_json(url: str, user_agent: str = "MLB-Edge/1.0", timeout: int = 18) -> Any:
     req = urllib.request.Request(
         url,
         headers={"User-Agent": user_agent, "Accept": "application/json"},
         method="GET",
     )
-    with urllib.request.urlopen(req, timeout=18) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _safe_get_json(url: str, user_agent: str = "MLB-Edge/1.0") -> Tuple[Any, Optional[str]]:
+def _safe_get_json(
+    url: str, user_agent: str = "MLB-Edge/1.0", timeout: int = 18
+) -> Tuple[Any, Optional[str]]:
     try:
-        return _get_json(url, user_agent=user_agent), None
+        return _get_json(url, user_agent=user_agent, timeout=timeout), None
     except urllib.error.HTTPError as e:
         try:
             body = e.read().decode("utf-8", errors="replace")
@@ -918,10 +920,11 @@ def _odds_multi_rows(
     return rows, first_raw
 
 
-AN_SCOREBOARD = "https://api.actionnetwork.com/web/v2/scoreboard/mlb"
 AN_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 # Action Network book IDs: 68 = DraftKings NJ, 69 = FanDuel NJ (national US feeds).
 AN_BOOK_IDS = {68: "DraftKings", 69: "FanDuel"}
+AN_MLB_SCOREBOARD = "https://api.actionnetwork.com/web/v2/scoreboard/mlb"
+AN_NFL_SCOREBOARD = "https://api.actionnetwork.com/web/v2/scoreboard/nfl"
 AN_MARKET_MAP = {
     "core_bet_type_37_strikeouts": ("strikeouts", "Pitcher Strikeouts"),
     "core_bet_type_42_pitching_outs": ("pitcher_outs", "Pitching Outs"),
@@ -929,51 +932,96 @@ AN_MARKET_MAP = {
     "core_bet_type_34_rbi": ("rbi", "RBI"),
     "core_bet_type_33_hr": ("hr", "Home Runs"),
 }
+AN_NFL_BATCHES = [
+    {
+        "core_bet_type_9_passing_yards": ("pass_yds", "Passing Yards"),
+        "core_bet_type_10_pass_completions": ("completions", "Completions"),
+        "core_bet_type_12_rushing_yards": ("rush_yds", "Rushing Yards"),
+        "core_bet_type_15_receptions": ("receptions", "Receptions"),
+        "core_bet_type_16_receiving_yards": ("rec_yds", "Receiving Yards"),
+        "core_bet_type_18_rushing_attempts": ("rush_att", "Rush Attempts"),
+        "core_bet_type_30_passing_attempts": ("pass_att", "Pass Attempts"),
+    },
+    {
+        "core_bet_type_11_passing_tds": ("pass_td", "Passing TDs"),
+        "core_bet_type_13_rushing_tds": ("rush_td", "Rushing TDs"),
+        "core_bet_type_17_receiving_tds": ("rec_td", "Receiving TDs"),
+        "core_bet_type_62_anytime_touchdown_scorer": ("anytime_td", "Anytime TD"),
+        "core_bet_type_65_interceptions": ("ints", "Interceptions"),
+        "core_bet_type_66_rushing_receiving_yards": ("rush_rec_yds", "Rush+Rec Yds"),
+        "core_bet_type_71_passing_rushing_yards": ("pass_rush_yds", "Pass+Rush Yds"),
+        "core_bet_type_43_kicking_points": ("kicking_pts", "Kicking Pts"),
+        "core_bet_type_213_field_goals_made": ("fg_made", "FG Made"),
+        "core_bet_type_578_sacks": ("sacks", "Sacks"),
+    },
+]
 
 
-def fetch_actionnetwork_mlb(date_key: str, out: Dict[str, Any]) -> List[dict]:
-    """FanDuel / DraftKings MLB player props from Action Network (no API key)."""
-    pick_types = ",".join(AN_MARKET_MAP.keys())
-    book_ids = ",".join(str(i) for i in AN_BOOK_IDS)
-    q = urllib.parse.urlencode(
-        {"customPickTypes": pick_types, "bookIds": book_ids},
-        safe=",",
-    )
-    url = f"{AN_SCOREBOARD}?{q}"
-    raw, err = _safe_get_json(url, user_agent=AN_UA)
-    out["meta"]["apiCalls"] = out["meta"].get("apiCalls", 0) + 1
-    if err:
-        out["meta"]["actionNetworkError"] = err
-        return []
+def _an_game_in_range(g: dict, date_from: str, date_to: str) -> bool:
+    start = str(g.get("start_time") or "")
+    keys = _event_date_keys({"date": start})
+    if not keys:
+        return True
+    lo = (date_from or "")[:10]
+    hi = (date_to or date_from or "")[:10]
+    if lo and hi and hi != lo:
+        return any(lo <= d <= hi for d in keys)
+    if lo:
+        return lo in keys
+    return True
+
+
+def _an_team_names(g: dict) -> Tuple[str, str]:
+    home = away = ""
+    teams = g.get("teams") or []
+    if not isinstance(teams, list):
+        return home, away
+    hid = g.get("home_team_id")
+    aid = g.get("away_team_id")
+    by_id = {t.get("id"): t for t in teams if isinstance(t, dict)}
+
+    def _tn(t: Any) -> str:
+        if not isinstance(t, dict):
+            return ""
+        return str(t.get("full_name") or t.get("display_name") or t.get("name") or "").strip()
+
+    if hid in by_id:
+        home = _tn(by_id[hid])
+    if aid in by_id:
+        away = _tn(by_id[aid])
+    if (not home or not away) and len(teams) >= 2:
+        if not away:
+            away = _tn(teams[0])
+        if not home:
+            home = _tn(teams[1])
+    return home, away
+
+
+def _an_rows_from_payload(
+    raw: Any,
+    market_map: Dict[str, Tuple[str, str]],
+    date_from: str,
+    date_to: str,
+) -> List[dict]:
     if not isinstance(raw, dict):
-        out["meta"]["actionNetworkError"] = "bad_payload"
         return []
     games = raw.get("games") or []
+    players: Dict[Any, str] = {}
+    for g in games:
+        if not isinstance(g, dict):
+            continue
+        for p in g.get("players") or []:
+            if isinstance(p, dict) and p.get("id") is not None:
+                name = str(p.get("full_name") or p.get("preferred_name") or "").strip()
+                if name:
+                    players[p["id"]] = name
     rows: List[dict] = []
     for g in games:
         if not isinstance(g, dict):
             continue
-        start = str(g.get("start_time") or "")
-        if date_key and date_key not in _event_date_keys({"date": start}):
+        if not _an_game_in_range(g, date_from, date_to):
             continue
-        teams = g.get("teams") or []
-        home = away = ""
-        if isinstance(teams, list) and len(teams) >= 2:
-            # AN lists home then away in some payloads; also has home_team_id.
-            hid = g.get("home_team_id")
-            aid = g.get("away_team_id")
-            by_id = {t.get("id"): t for t in teams if isinstance(t, dict)}
-            if hid in by_id:
-                home = str(by_id[hid].get("full_name") or by_id[hid].get("display_name") or "")
-            if aid in by_id:
-                away = str(by_id[aid].get("full_name") or by_id[aid].get("display_name") or "")
-            if not home or not away:
-                away = str(teams[0].get("full_name") or "") if isinstance(teams[0], dict) else away
-                home = str(teams[1].get("full_name") or "") if isinstance(teams[1], dict) else home
-        players = {}
-        for p in g.get("players") or []:
-            if isinstance(p, dict) and p.get("id") is not None:
-                players[p["id"]] = str(p.get("full_name") or p.get("preferred_name") or "").strip()
+        home, away = _an_team_names(g)
         markets = g.get("markets") or {}
         if not isinstance(markets, dict):
             continue
@@ -984,25 +1032,20 @@ def fetch_actionnetwork_mlb(date_key: str, out: Dict[str, Any]) -> List[dict]:
             except (TypeError, ValueError):
                 continue
             bname = AN_BOOK_IDS.get(bid)
-            if not bname:
-                continue
-            if not isinstance(mk, dict):
+            if not bname or not isinstance(mk, dict):
                 continue
             event_mk = mk.get("event") if isinstance(mk.get("event"), dict) else mk
             if not isinstance(event_mk, dict):
                 continue
             for mkey, outcomes in event_mk.items():
-                hint_pair = AN_MARKET_MAP.get(str(mkey))
+                hint_pair = market_map.get(str(mkey))
                 if not hint_pair or not isinstance(outcomes, list):
                     continue
                 hint, mlabel = hint_pair
                 for o in outcomes:
-                    if not isinstance(o, dict):
+                    if not isinstance(o, dict) or o.get("is_alt_market"):
                         continue
-                    if o.get("is_alt_market"):
-                        continue
-                    pid = o.get("player_id")
-                    player = players.get(pid) or ""
+                    player = players.get(o.get("player_id")) or ""
                     if not player:
                         continue
                     try:
@@ -1036,6 +1079,55 @@ def fetch_actionnetwork_mlb(date_key: str, out: Dict[str, Any]) -> List[dict]:
             for rec in bucket.values()
             if rec.get("over") not in (None, "") or rec.get("under") not in (None, "")
         )
+    return rows
+
+
+def _fetch_actionnetwork_scoreboard(
+    scoreboard: str,
+    market_map: Dict[str, Tuple[str, str]],
+    date_from: str,
+    date_to: str,
+    out: Dict[str, Any],
+    timeout: int = 25,
+) -> List[dict]:
+    pick_types = ",".join(market_map.keys())
+    book_ids = ",".join(str(i) for i in AN_BOOK_IDS)
+    q = urllib.parse.urlencode(
+        {"customPickTypes": pick_types, "bookIds": book_ids},
+        safe=",",
+    )
+    url = f"{scoreboard}?{q}"
+    raw, err = _safe_get_json(url, user_agent=AN_UA, timeout=timeout)
+    out["meta"]["apiCalls"] = out["meta"].get("apiCalls", 0) + 1
+    if err:
+        out["meta"].setdefault("actionNetworkErrors", []).append(err)
+        return []
+    return _an_rows_from_payload(raw, market_map, date_from, date_to)
+
+
+def fetch_actionnetwork_mlb(date_key: str, out: Dict[str, Any]) -> List[dict]:
+    """FanDuel / DraftKings MLB player props from Action Network (no API key)."""
+    rows = _fetch_actionnetwork_scoreboard(
+        AN_MLB_SCOREBOARD, AN_MARKET_MAP, date_key, date_key, out, timeout=22
+    )
+    out["meta"]["actionNetworkRows"] = len(rows)
+    return rows
+
+
+def fetch_actionnetwork_nfl(date_from: str, date_to: str, out: Dict[str, Any]) -> List[dict]:
+    """FanDuel / DraftKings NFL player props from Action Network (no API key)."""
+    rows: List[dict] = []
+    seen: set = set()
+    for batch in AN_NFL_BATCHES:
+        part = _fetch_actionnetwork_scoreboard(
+            AN_NFL_SCOREBOARD, batch, date_from, date_to, out, timeout=28
+        )
+        for rec in part:
+            key = (rec.get("player"), rec.get("bookmaker"), rec.get("statHint"), rec.get("hdp"))
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(rec)
     out["meta"]["actionNetworkRows"] = len(rows)
     return rows
 
@@ -1180,10 +1272,10 @@ def fetch_the_odds_mlb(api_key: str, date_key: str, out: Dict[str, Any]) -> List
     return rows
 
 
-def _has_fd_dk_strikeouts(rows: List[dict]) -> bool:
+def _has_fd_dk_priced(rows: List[dict], stat_hint: Optional[str] = None) -> bool:
     fd = dk = False
     for r in rows:
-        if (r.get("statHint") or "") != "strikeouts":
+        if stat_hint and (r.get("statHint") or "") != stat_hint:
             continue
         if r.get("over") in (None, "") and r.get("under") in (None, ""):
             continue
@@ -1192,6 +1284,10 @@ def _has_fd_dk_strikeouts(rows: List[dict]) -> bool:
         elif r.get("bookmaker") == "DraftKings":
             dk = True
     return fd and dk
+
+
+def _has_fd_dk_strikeouts(rows: List[dict]) -> bool:
+    return _has_fd_dk_priced(rows, "strikeouts")
 
 
 def fetch_mlb_odds_bundle(
@@ -1399,11 +1495,11 @@ def fetch_nfl_odds_bundle(
 ) -> Dict[str, Any]:
     """
     NFL player props for a date range (typically Thu–Tue of a given week).
-    Odds-API.io sport slug is american-football (nfl is not a valid sport).
+    Action Network (no key) first, then Odds-API.io if needed.
     """
     start = (date_from or "")[:10]
     end = (date_to or date_from or "")[:10]
-    cache_key = f"nfl|{start}|{end}|{bookmakers}|v8"
+    cache_key = f"nfl|{start}|{end}|{bookmakers}|v9"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]
@@ -1422,105 +1518,111 @@ def fetch_nfl_odds_bundle(
     if end < start:
         start, end = end, start
 
+    io_key = (api_key or "").strip()
+
     try:
+        rows: List[dict] = []
+        first_multi_raw: Any = None
+        rows.extend(fetch_actionnetwork_nfl(start, end, out))
+        skip_paid = _has_fd_dk_priced(rows)
+        out["meta"]["skippedPaidOdds"] = skip_paid
+
         events: List[dict] = []
         seen_ids: set = set()
-        attempts = (
-            {"sport": "nfl", "from": start, "to": end},
-            {"sport": "american-football", "league": "nfl-regular-season", "from": start, "to": end},
-            {"sport": "american-football", "from": start, "to": end},
-            {"sport": "nfl"},
-            {"sport": "american-football", "league": "nfl-regular-season"},
-        )
-        for attempt in attempts:
-            q_params: Dict[str, str] = {"sport": attempt["sport"], "apiKey": api_key}
-            if attempt.get("league"):
-                q_params["league"] = str(attempt["league"])
-            if attempt.get("from"):
-                q_params["from"] = f"{attempt['from']}T00:00:00Z"
-            if attempt.get("to"):
-                q_params["to"] = f"{attempt['to']}T23:59:59Z"
-            events_url = f"{ODDS_BASE}/events?{urllib.parse.urlencode(q_params)}"
-            try:
-                raw_ev = _get_json(events_url)
-            except Exception:
-                continue
-            out["meta"]["apiCalls"] = out["meta"]["apiCalls"] + 1
-            if isinstance(raw_ev, dict) and raw_ev.get("error"):
-                continue
-            raw_all = _events_list(raw_ev)
-            on_range = (
-                _events_in_range(raw_all, start, end)
-                if attempt.get("from")
-                else _events_in_range(raw_all, start, end) or raw_all
+        if not skip_paid and io_key:
+            attempts = (
+                {"sport": "nfl", "from": start, "to": end},
+                {"sport": "american-football", "league": "nfl-regular-season", "from": start, "to": end},
+                {"sport": "american-football", "from": start, "to": end},
+                {"sport": "nfl"},
+                {"sport": "american-football", "league": "nfl-regular-season"},
             )
-            nfl_events = [e for e in on_range if _is_nfl_event(e)]
-            added = 0
-            for e in nfl_events:
-                eid = _eid_key(e.get("id"))
-                if not eid or eid in seen_ids:
-                    continue
-                seen_ids.add(eid)
-                events.append(e)
-                added += 1
-            if added:
-                out["meta"]["eventsSport"] = attempt["sport"]
+            for attempt in attempts:
+                q_params: Dict[str, str] = {"sport": attempt["sport"], "apiKey": io_key}
                 if attempt.get("league"):
-                    out["meta"]["eventsLeague"] = attempt["league"]
-                out["meta"].setdefault("eventsQueries", []).append(
-                    ("ranged" if attempt.get("from") else "next_14d") + f"+{added}"
+                    q_params["league"] = str(attempt["league"])
+                if attempt.get("from"):
+                    q_params["from"] = f"{attempt['from']}T00:00:00Z"
+                if attempt.get("to"):
+                    q_params["to"] = f"{attempt['to']}T23:59:59Z"
+                events_url = f"{ODDS_BASE}/events?{urllib.parse.urlencode(q_params)}"
+                try:
+                    raw_ev = _get_json(events_url)
+                except Exception:
+                    continue
+                out["meta"]["apiCalls"] = out["meta"]["apiCalls"] + 1
+                if isinstance(raw_ev, dict) and raw_ev.get("error"):
+                    continue
+                raw_all = _events_list(raw_ev)
+                on_range = (
+                    _events_in_range(raw_all, start, end)
+                    if attempt.get("from")
+                    else _events_in_range(raw_all, start, end) or raw_all
                 )
-            if len(events) >= 8:
-                break
-        if events:
-            events = _events_in_range(events, start, end) or events
-        out["meta"]["eventCount"] = len(events)
+                nfl_events = [e for e in on_range if _is_nfl_event(e)]
+                added = 0
+                for e in nfl_events:
+                    eid = _eid_key(e.get("id"))
+                    if not eid or eid in seen_ids:
+                        continue
+                    seen_ids.add(eid)
+                    events.append(e)
+                    added += 1
+                if added:
+                    out["meta"]["eventsSport"] = attempt["sport"]
+                    if attempt.get("league"):
+                        out["meta"]["eventsLeague"] = attempt["league"]
+                    out["meta"].setdefault("eventsQueries", []).append(
+                        ("ranged" if attempt.get("from") else "next_14d") + f"+{added}"
+                    )
+                if len(events) >= 8:
+                    break
+            if events:
+                events = _events_in_range(events, start, end) or events
+            out["meta"]["eventCount"] = len(events)
 
-        rows: List[dict] = []
-        if not events:
-            out["ok"] = True
+            if events:
+                event_teams: Dict[str, Tuple[str, str]] = {}
+                for e in events:
+                    eid = e.get("id")
+                    if eid is None:
+                        continue
+                    event_teams[_eid_key(eid)] = (_team_str(e.get("home")), _team_str(e.get("away")))
+
+                event_ids = [e["id"] for e in events if e.get("id") is not None]
+                io_rows, first_multi_raw = _odds_multi_rows(
+                    io_key,
+                    event_ids,
+                    bookmakers,
+                    event_teams,
+                    out,
+                    sport="nfl",
+                    markets=None,
+                    debug_structure=debug_structure,
+                )
+                errs = out["meta"].get("multiErrors") or []
+                quota_hit = any("http_429" in str(x) or "http_403" in str(x) for x in errs)
+                if not io_rows and event_ids and not quota_hit:
+                    extra, first2 = _odds_multi_rows(
+                        io_key,
+                        event_ids,
+                        "",
+                        event_teams,
+                        out,
+                        sport="nfl",
+                        markets=None,
+                        debug_structure=debug_structure,
+                    )
+                    if extra:
+                        io_rows = extra
+                        if first_multi_raw is None:
+                            first_multi_raw = first2
+                        out["meta"]["multiFallback"] = "all_bookmakers"
+                rows.extend(io_rows or [])
+        elif skip_paid:
+            out["meta"]["eventCount"] = 0
+        else:
             out["meta"]["note"] = "no_nfl_events_for_range"
-            out["rows"] = []
-            if not debug_structure:
-                _CACHE[cache_key] = (now, out)
-            return out
-
-        event_teams: Dict[str, Tuple[str, str]] = {}
-        for e in events:
-            eid = e.get("id")
-            if eid is None:
-                continue
-            event_teams[_eid_key(eid)] = (_team_str(e.get("home")), _team_str(e.get("away")))
-
-        event_ids = [e["id"] for e in events if e.get("id") is not None]
-        rows, first_multi_raw = _odds_multi_rows(
-            api_key,
-            event_ids,
-            bookmakers,
-            event_teams,
-            out,
-            sport="nfl",
-            markets=None,
-            debug_structure=debug_structure,
-        )
-        errs = out["meta"].get("multiErrors") or []
-        quota_hit = any("http_429" in str(x) or "http_403" in str(x) for x in errs)
-        if not rows and event_ids and not quota_hit:
-            extra, first2 = _odds_multi_rows(
-                api_key,
-                event_ids,
-                "",
-                event_teams,
-                out,
-                sport="nfl",
-                markets=None,
-                debug_structure=debug_structure,
-            )
-            if extra:
-                rows = extra
-                if first_multi_raw is None:
-                    first_multi_raw = first2
-                out["meta"]["multiFallback"] = "all_bookmakers"
 
         out["rows"] = rows
         out["meta"]["propRows"] = len(rows)
