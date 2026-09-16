@@ -900,8 +900,9 @@ function logNflOddsHistory(games) {
   for (const g of games || []) {
     for (const p of g.players || []) {
       for (const l of p.lineList || []) {
-        const fd = l.books.FanDuel || {};
-        const dk = l.books.DraftKings || {};
+        const books = l.books || {};
+        const fd = books.FanDuel || {};
+        const dk = books.DraftKings || {};
         appendNflOddsHistory(wk, p.nk, l.statKey, {
           line: l.line,
           fdOver: decToAm(fd.over),
@@ -1189,7 +1190,7 @@ function decoratePlayer(p, game) {
   const lineList = (p.lineList || []).map(l => {
     const proj = projectStat(p.nk, l.statKey, game);
     const pOver = pOverModel(l.statKey, proj, l.line);
-    return { ...l, proj, pOver, modelEdge: proj != null ? Math.round((proj - l.line) * 10) / 10 : null };
+    return { ...l, books: l.books || {}, proj, pOver, modelEdge: proj != null ? Math.round((proj - l.line) * 10) / 10 : null };
   });
   return { ...p, team, lineList };
 }
@@ -1304,9 +1305,10 @@ function evFairOverFromBooks(books) {
   return { pOverFair: Math.min(0.98, Math.max(0.02, pSum / twoWay.length)) };
 }
 function evBookPricesTxt(books, side) {
+  const bkMap = books || {};
   return EV_BOOKS
-    .filter(bk => books[bk] && books[bk][side.toLowerCase()])
-    .map(bk => `${bk === "FanDuel" ? "FD" : "DK"} ${evAmerican(books[bk][side.toLowerCase()])}`)
+    .filter(bk => bkMap[bk] && bkMap[bk][side.toLowerCase()])
+    .map(bk => `${bk === "FanDuel" ? "FD" : "DK"} ${evAmerican(bkMap[bk][side.toLowerCase()])}`)
     .join(" / ");
 }
 function bestSideAmerican(books, side) {
@@ -1652,15 +1654,16 @@ function renderSlate(games) {
 
 function bookOddsLine(books) {
   const parts = [];
+  const bkMap = books || {};
   for (const bk of EV_BOOKS) {
-    const b = books[bk];
+    const b = bkMap[bk];
     if (!b) continue;
     const tag = bk === "FanDuel" ? "FD" : "DK";
     const o = b.over ? `O ${evAmerican(b.over)}` : "";
     const u = b.under ? `U ${evAmerican(b.under)}` : "";
     parts.push(`${tag} ${[o, u].filter(Boolean).join(" / ")}`);
   }
-  if (books.PrizePicks) parts.push("PP −119");
+  if (bkMap.PrizePicks) parts.push("PP −119");
   return parts.join(" · ");
 }
 
@@ -1735,7 +1738,7 @@ function renderProps(games) {
         const active = expandedTrack === tid;
         const mov = l.lineMov;
         const movChip = mov ? `<span class="mov-chip ${mov.dir}">${mov.from}→${mov.to}</span>` : "";
-        const pp = ppMatchFor(p.nk, l.statKey, l.line) || l.books.PrizePicks;
+        const pp = ppMatchFor(p.nk, l.statKey, l.line) || (l.books && l.books.PrizePicks);
         const ppChip = pp ? `<span class="pp-chip">PP</span>` : "";
         const edge = l.modelEdge;
         const projLine = l.proj != null
@@ -1859,8 +1862,9 @@ function downloadCsv() {
   for (const g of games) {
     for (const p of g.players || []) {
       for (const l of p.lineList || []) {
-        const fd = l.books.FanDuel || {};
-        const dk = l.books.DraftKings || {};
+        const books = l.books || {};
+        const fd = books.FanDuel || {};
+        const dk = books.DraftKings || {};
         const open = (l.hist && l.hist[0] && l.hist[0].line) || "";
         rows.push([
           p.name, g.away.abbr, g.home.abbr,
