@@ -1358,18 +1358,17 @@ function evPPSideFair(books, side) {
 function bookJuiceBetterThanPP(am) {
   return am != null && am <= -120;
 }
+/** PrizePicks voids on a whole number (exactly 1 reception, 9 carries, …). FanDuel Over 0.5 still hits. Only grade .5 lines. */
+function isHalfPointLine(line) {
+  const n = Number(line);
+  if (!Number.isFinite(n)) return false;
+  return Math.abs(Math.abs(n % 1) - 0.5) < 0.001;
+}
 function findBookGroupForPp(groups, pp) {
+  if (!isHalfPointLine(pp.line)) return null;
   const exact = groups[`${pp.nk}|${pp.statKey}|${pp.line}`];
-  if (exact) return { g: exact, usedLine: pp.line, diff: 0 };
-  let best = null;
-  const prefix = `${pp.nk}|${pp.statKey}|`;
-  for (const [key, g] of Object.entries(groups || {})) {
-    if (!key.startsWith(prefix)) continue;
-    const diff = Math.abs(Number(g.line) - Number(pp.line));
-    if (!Number.isFinite(diff) || diff > 0.51) continue;
-    if (!best || diff < best.diff) best = { g, usedLine: g.line, diff };
-  }
-  return best;
+  if (!exact || !isHalfPointLine(exact.line)) return null;
+  return { g: exact, usedLine: pp.line, diff: 0 };
 }
 function evFairOverFromBooks(books) {
   const twoWay = Object.entries(books || {}).filter(([, b]) => b && b.over && b.under);
@@ -1435,6 +1434,7 @@ async function buildEV(games) {
 
   for (const pp of board.allLines || []) {
     if (!pp?.nk || !STAT_META[pp.statKey] || pp.statKey === "other") continue;
+    if (!isHalfPointLine(pp.line)) continue;
     if (!ppDayInWindow(pp.start, games)) continue;
     const inj = injuryFor(pp.player);
     if (inj && /out|\bir\b|inactive|pup/i.test(inj.status || "")) continue;
@@ -1481,6 +1481,7 @@ async function buildEV(games) {
   }
 
   for (const g of Object.values(groups)) {
+    if (!isHalfPointLine(g.line)) continue;
     const fair = evFairOverFromBooks(g.books);
     if (!fair) continue;
     diag.twoWayGroups++;
@@ -1858,7 +1859,7 @@ function renderEV(rows) {
   const meta = lastPPBoardMeta || {};
   const intro = `<div class="game-card ev-intro"><div style="padding:16px 18px">
     <div class="ev-intro-hd">+EV vs FanDuel / DraftKings</div>
-    <div class="ev-intro-body">Grades PrizePicks NFL standard lines at −119 against FanDuel and DraftKings de-vig (and juice when a book is heavier than −119). Same number as the books — ESPN projections are shown as context only. Stake = ¼-Kelly.</div>
+    <div class="ev-intro-body">Grades PrizePicks NFL <strong>half-point (.5)</strong> lines at −119 against FanDuel and DraftKings. Whole-number lines are skipped — PrizePicks voids on the number while FanDuel Over 0.5 still hits. Stake = ¼-Kelly.</div>
     <div class="ev-intro-meta">${meta.error ? `PrizePicks unavailable (${meta.error}) — book-vs-book only.` : `${meta.standard || 0} PP standard · ${meta.ppExactMatches || 0} matched FD/DK · ${meta.twoWayGroups || 0} two-way props`}</div>
   </div></div>`;
   if (!filtered.length) {

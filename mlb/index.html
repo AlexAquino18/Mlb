@@ -6258,6 +6258,12 @@ function isGoblinStylePlay(statKey, line, side) {
   if (side !== "Over" || line > 0.5) return false;
   return ["hits", "tb", "runs", "rbi", "hrr", "sb", "bb"].includes(statKey);
 }
+/** PrizePicks voids on a whole number; sportsbooks Over 0.5 still hit. Only grade .5 lines. */
+function isHalfPointLine(line) {
+  const n = Number(line);
+  if (!Number.isFinite(n)) return false;
+  return Math.abs(Math.abs(n % 1) - 0.5) < 0.001;
+}
 
 /** Accepts decimal (1.87) or American (+120 / -135) prices; returns decimal or null. */
 function evDecimalOdds(v) {
@@ -6308,8 +6314,9 @@ async function buildEV(games) {
 
   // A) PrizePicks standard board only — exact line match (goblin/demon excluded on PP side)
   for (const pp of board.allLines || []) {
+    if (!isHalfPointLine(pp.line)) continue;
     const g = groups[`${pp.nk}|${pp.statKey}|${pp.line}`];
-    if (!g) continue;
+    if (!g || !isHalfPointLine(g.line)) continue;
     diag.ppExactMatches++;
     const matchup = g.away && g.home ? `${g.away} @ ${g.home}` : "";
     for (const side of ["Over", "Under"]) {
@@ -6341,6 +6348,7 @@ async function buildEV(games) {
 
   // B) Book-vs-book edges (FanDuel vs DraftKings de-vig — not labeled as PrizePicks)
   for (const g of Object.values(groups)) {
+    if (!isHalfPointLine(g.line)) continue;
     const fair = evFairOverFromBooks(g.books);
     if (!fair) continue;
     diag.twoWayGroups++;
@@ -6405,8 +6413,8 @@ function renderEVCards(rows) {
       <div style="padding:16px 18px">
         <div class="ev-intro-hd">+EV Odds Scanner</div>
         <div class="ev-intro-body">
-          Grades <strong>PrizePicks standard board lines</strong> at −119 against FanDuel / DraftKings de-vig and juice.
-          PP must match books on the <em>exact same number</em>. Book-vs-book edges listed separately. Stake = ¼-Kelly.
+          Grades <strong>PrizePicks half-point (.5) lines</strong> at −119 against FanDuel / DraftKings de-vig and juice.
+          Whole-number lines are skipped (PrizePicks voids on the number; FanDuel Over 0.5 still hits). Stake = ¼-Kelly.
         </div>
         ${matchTxt || boardNote ? `<div class="ev-intro-meta">${boardNote || matchTxt}${boardNote && matchTxt ? `<br>${matchTxt}` : ""}</div>` : ""}
       </div>
