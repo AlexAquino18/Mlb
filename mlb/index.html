@@ -2950,6 +2950,23 @@ function parseIP(s) {
   const p = String(s||"0").split(".");
   return (parseInt(p[0])||0) + (parseInt(p[1]||0)/3);
 }
+function splitGameDate(sp) {
+  return String(sp?.date || sp?.game?.officialDate || "").slice(0, 10);
+}
+/** MLB gameLog is oldest-first. `limit=N` is a trailing window, so slice(0,5) was 5 starts ago — sort and take the newest. */
+function latestGameSplits(splits, n, beforeYmd, requireStart) {
+  const rows = (splits || []).filter((sp) => {
+    if (requireStart && !(Number(sp.stat?.gamesStarted) > 0)) return false;
+    return !!splitGameDate(sp);
+  });
+  rows.sort((a, b) => splitGameDate(b).localeCompare(splitGameDate(a)));
+  let out = rows;
+  if (beforeYmd) {
+    const prior = rows.filter((sp) => splitGameDate(sp) < beforeYmd);
+    if (prior.length) out = prior;
+  }
+  return out.slice(0, n);
+}
 function pct(v, max) { return Math.min(100, Math.max(0, (v/max)*100)).toFixed(1); }
 function confColor(c) { return c >= 70 ? "#34d399" : c >= 50 ? "#fbbf24" : "#fb7185"; }
 
@@ -3017,21 +3034,22 @@ async function getSchedule(date) {
   return out;
 }
 
-async function getPitcherData(id, season) {
-  const key = `${id}-${season}`;
+async function getPitcherData(id, season, asOfDate) {
+  const asOf = (asOfDate || selectedDate || "").slice(0, 10);
+  const key = `${id}-${season}-${asOf}`;
   if (_pitcher[key]) return _pitcher[key];
 
   const isSpring = false;
 
-  // Parallel: person (hand), season stats, game log (enough rows for last-5 + last-3 splits)
+  // Full regular-season log (oldest→newest). Do not use a small limit — that window's first 5 starts are stale.
   const fetches = [
     mlbGet(`/people/${id}`),
     mlbGet(`/people/${id}/stats?stats=season&group=pitching&gameType=R&season=${season}`),
-    mlbGet(`/people/${id}/stats?stats=gameLog&group=pitching&season=${season}&limit=12`),
+    mlbGet(`/people/${id}/stats?stats=gameLog&group=pitching&gameType=R&season=${season}`),
   ];
   if (isSpring) {
     fetches.push(mlbGet(`/people/${id}/stats?stats=season&group=pitching&gameType=S&season=${season + 1}`));
-    fetches.push(mlbGet(`/people/${id}/stats?stats=gameLog&group=pitching&gameType=S&season=${season + 1}&limit=5`));
+    fetches.push(mlbGet(`/people/${id}/stats?stats=gameLog&group=pitching&gameType=S&season=${season + 1}`));
   }
 
   let settled = await Promise.allSettled(fetches);
@@ -3071,11 +3089,11 @@ async function getPitcherData(id, season) {
     ? (parseFloat(s.strikePercentage) || ((s.strikes||0) / Math.max(1, s.numberOfPitches||0)))
     : 0.645;
 
-  // Recent form – last 5 regular-season starts; last-3 K% for short-term trend
+  // Recent form – last 5 regular-season starts (newest first); last-3 K% for short-term trend
   let recentERA = null, recentK9 = null, recentKPct = null, recentKPct3 = null, recentStarts = 0;
   if (logData.status === "fulfilled") {
     const splits = logData.value?.stats?.[0]?.splits || [];
-    const starts = splits.filter(sp => sp.stat?.gamesStarted > 0).slice(0,5);
+    const starts = latestGameSplits(splits, 5, asOf, true);
     if (starts.length) {
       recentStarts = starts.length;
       const totalER = starts.reduce((a,sp)=>a+(sp.stat.earnedRuns||0),0);
@@ -3110,7 +3128,7 @@ async function getPitcherData(id, season) {
   let stRecentERA = null, stRecentK9 = null;
   if (isSpring && springLogData && springLogData.status === "fulfilled") {
     const splits = springLogData.value?.stats?.[0]?.splits || [];
-    const starts = splits.filter(sp => sp.stat?.gamesStarted > 0).slice(0,3);
+    const starts = latestGameSplits(splits, 3, asOf, true);
     if (starts.length >= 1) {
       const totalER = starts.reduce((a,sp)=>a+(sp.stat.earnedRuns||0),0);
       const totalIP = starts.reduce((a,sp)=>a+parseIP(sp.stat.inningsPitched),0);
@@ -3120,13 +3138,13 @@ async function getPitcherData(id, season) {
     }
   }
 
-  // Individual start records for game log display (last 5 starts)
+  // Individual start records for game log display (last 5 starts, newest first)
   let gameLog = [];
   if (logData.status === "fulfilled") {
     const splits = logData.value?.stats?.[0]?.splits || [];
-    gameLog = splits.filter(sp => sp.stat?.gamesStarted > 0).slice(0,5).map(sp => ({
-      date:    (sp.date || "").slice(5),   // MM-DD
-      opp:     sp.opponent?.abbreviation || sp.opponent?.name || "?",
+    gameLog = latestGameSplits(splits, 5, asOf, true).map(sp => ({
+      date:    splitGameDate(sp).slice(5),   // MM-DD
+      opp:     sp.opponent?.abbreviation || sp.opponent?.teamName || sp.opponent?.name || "?",
       ip:      sp.stat.inningsPitched || "0",
       k:       sp.stat.strikeOuts || 0,
       er:      sp.stat.earnedRuns || 0,
@@ -3574,8 +3592,8 @@ async function buildNRFI(games, season) {
     const apSrc  = awRes.src,  hpSrc  = hmRes.src;
 
     const [ap, hp] = await Promise.all([
-      apProb ? getPitcherData(apProb.id, season) : Promise.resolve(AVG_PITCHER),
-      hpProb ? getPitcherData(hpProb.id, season) : Promise.resolve(AVG_PITCHER),
+      apProb ? getPitcherData(apProb.id, season, selectedDate) : Promise.resolve(AVG_PITCHER),
+      hpProb ? getPitcherData(hpProb.id, season, selectedDate) : Promise.resolve(AVG_PITCHER),
     ]);
     // Team validation via currentTeamId — catches bad schedule data
     const awExpAbbr = teamAbbr(aw.team), hmExpAbbr = teamAbbr(hm.team);
@@ -4161,7 +4179,7 @@ async function buildSO(games, season) {
     const parkKPPAdj = parkRunEnvKPP(venuePF);
 
     for (const e of entries) {
-      let p = e.prob ? await getPitcherData(e.prob.id, season) : AVG_PITCHER;
+      let p = e.prob ? await getPitcherData(e.prob.id, season, selectedDate) : AVG_PITCHER;
       // Team validation using MLB_ID_TO_ABBR (abbreviation is absent in schedule data)
       const soExpAbbr = teamAbbr(e.pitchTeam);
       const soExpId   = e.pitchTeam?.id;
@@ -5204,14 +5222,15 @@ async function getHitterVsSplit(playerId, season, pitcherHand) {
 }
 
 // Fetch last 5 regular-season games for a batter (tries current year first, then falls back)
-async function getHitterGameLog(playerId, season) {
-  const key = `hgl_${playerId}_${season}`;
+async function getHitterGameLog(playerId, season, asOfDate) {
+  const asOf = (asOfDate || selectedDate || "").slice(0, 10);
+  const key = `hgl_${playerId}_${season}_${asOf}`;
   if (_hitterStats[key] !== undefined) return _hitterStats[key];
   try {
-    const d = await mlbGet(`/people/${playerId}/stats?stats=gameLog&group=hitting&gameType=R&season=${season}&limit=5`);
-    const splits = d?.stats?.[0]?.splits || [];
-    const result = splits.slice(0, 5).map(sp => ({
-      date: (sp.date || sp.game?.officialDate || "").slice(5),
+    const d = await mlbGet(`/people/${playerId}/stats?stats=gameLog&group=hitting&gameType=R&season=${season}`);
+    const splits = latestGameSplits(d?.stats?.[0]?.splits || [], 5, asOf, false);
+    const result = splits.map(sp => ({
+      date: splitGameDate(sp).slice(5),
       opp:  sp.opponent?.abbreviation || sp.opponent?.name?.slice(0,3).toUpperCase() || "?",
       ab:   sp.stat?.atBats          || 0,
       h:    sp.stat?.hits            || 0,
@@ -5736,8 +5755,8 @@ async function toggleBatterLog(playerId, season) {
   // Always try the current calendar year first so we get 2026 games as soon as they start
   const currentYear = new Date().getFullYear();
   let log = [];
-  if (currentYear !== season) log = await getHitterGameLog(playerId, currentYear);
-  if (!log.length) log = await getHitterGameLog(playerId, season);
+  if (currentYear !== season) log = await getHitterGameLog(playerId, currentYear, selectedDate);
+  if (!log.length) log = await getHitterGameLog(playerId, season, selectedDate);
   if (!log.length) {
     el.innerHTML = `<div style="color:#475569;font-size:11px;padding:4px 0">No recent game data</div>`;
     return;
