@@ -193,16 +193,19 @@ def _is_mlb_event(ev: dict) -> bool:
     lg = ev.get("league") if isinstance(ev.get("league"), dict) else {}
     slug = (lg.get("slug") or "").lower()
     name = (lg.get("name") or "").lower()
-    if slug == "mlb":
+    if "mlb" in slug or slug in ("usa-mlb", "us-mlb"):
+        return True
+    if "mlb" in name:
         return True
     if "major league" in name and "baseball" in name:
         return True
-    # Many feeds tag MLB this way:
-    if slug in ("usa-mlb", "us-mlb"):
+    sp = ev.get("sport") if isinstance(ev.get("sport"), dict) else {}
+    sp_slug = (sp.get("slug") or "").lower()
+    sp_name = (sp.get("name") or "").lower()
+    if sp_slug == "mlb" or sp_name == "mlb":
         return True
     # If league missing, keep baseball events (MiLB risk — rare on main book feeds)
-    sp = ev.get("sport") if isinstance(ev.get("sport"), dict) else {}
-    if not slug and (sp.get("slug") or "") == "baseball":
+    if not slug and sp_slug == "baseball":
         return True
     return False
 
@@ -406,7 +409,7 @@ def _stat_hint_nfl(raw: str) -> str:
     return ""
 
 
-def _stat_hint_from_market(m: dict) -> str:
+def _stat_hint_from_market(m: dict, sport: str = "") -> str:
     """
     Odds-API often sets market.name to only 'Player Props'. Scan other keys/values for stat text.
     """
@@ -417,9 +420,11 @@ def _stat_hint_from_market(m: dict) -> str:
         blob = ""
     if not blob:
         return ""
-    nfl = _stat_hint_nfl(blob)
-    if nfl:
-        return nfl
+    # NFL keyword scan on a full market JSON blob false-positives MLB strikeout markets.
+    if sport != "mlb":
+        nfl = _stat_hint_nfl(blob)
+        if nfl:
+            return nfl
     if ("nrfi" in blob or "yrfi" in blob) and (
         "1st" in blob or "first" in blob or "inning" in blob or "inn" in blob
     ):
@@ -451,13 +456,15 @@ def _stat_hint_from_text(text: str) -> str:
     raw = (text or "").strip().lower()
     if not raw:
         return ""
-    nfl = _stat_hint_nfl(raw)
-    if nfl:
-        return nfl
-    if raw in ("k", "ks", "k's", "k’s"):
+    if raw in ("k", "ks", "k's", "k’s", "so", "pitcher k", "pitcher ks", "pitcher k's", "pitcher k’s"):
         return "strikeouts"
     if "strikeout" in raw or "strike out" in raw:
         return "strikeouts"
+    if "pitcher" in raw and re.search(r"\bk'?s?\b", raw):
+        return "strikeouts"
+    nfl = _stat_hint_nfl(raw)
+    if nfl:
+        return nfl
     if "total base" in raw:
         return "tb"
     if "home run" in raw:
@@ -484,6 +491,15 @@ def _parse_player_label(label: Any) -> Tuple[str, str]:
     m = re.match(r"^(.*?)\s*\(([^()]+)\)\s*$", raw)
     if m:
         return m.group(1).strip(), m.group(2).strip()
+    # Odds-API docs: "Blake Snell - Strikeouts" as well as "Name (Stat)".
+    for sep in (" - ", " – ", " — "):
+        if sep not in raw:
+            continue
+        left, right = raw.rsplit(sep, 1)
+        left, right = left.strip(), right.strip()
+        if left and _stat_hint_from_text(right):
+            return left, right
+        break
     return raw, ""
 
 
@@ -508,6 +524,7 @@ def _append_prop_rows(
     ev: dict,
     rows: List[dict],
     event_teams: Dict[str, Tuple[str, str]],
+    sport: str = "",
 ) -> None:
     eid = ev.get("id")
     home = _team_str(ev.get("home"))
@@ -548,12 +565,15 @@ def _append_prop_rows(
                 mname = _composite_market_name(m, odd)
                 label_full = str(label or "")
                 hint = (
-                    _stat_hint_from_market(m)
-                    or _stat_hint_from_text(label_stat)
+                    _stat_hint_from_text(label_stat)
                     or _stat_hint_from_text(label_full)
+                    or _stat_hint_from_market(m, sport=sport)
                 )
-                if label_stat and mname.strip().lower() == "player props":
+                mlow = mname.strip().lower()
+                if label_stat and mlow in ("player props", "player prop"):
                     mname = f"Player Props · {label_stat}"
+                elif label_stat and "player props" in mlow and label_stat.lower() not in mname.lower():
+                    mname = f"{mname} · {label_stat}"
                 rows.append(
                     {
                         "eventId": eid,
@@ -588,7 +608,7 @@ def _debug_trim_event(ev: dict) -> Dict[str, Any]:
             "market_index": mi_pp,
             "name": m_pp.get("name"),
             "market_keys": sorted(m_pp.keys()),
-            "stat_hint_guess": _stat_hint_from_market(m_pp),
+            "stat_hint_guess": _stat_hint_from_market(m_pp, sport="mlb"),
             "first_odd_keys": sorted(o0.keys()) if isinstance(o0, dict) else [],
             "first_odd_sample": {k: o0.get(k) for k in sorted(o0.keys())[:20]} if isinstance(o0, dict) else o0,
         }
@@ -648,7 +668,7 @@ def fetch_mlb_odds_bundle(
     Pass debug_structure=True to attach meta.oddsStructureSample (not cached).
     """
     date_key = (target_date or "")[:10]
-    cache_key = f"{date_key}|{bookmakers}|v19"
+    cache_key = f"{date_key}|{bookmakers}|v21"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]
@@ -666,16 +686,45 @@ def fetch_mlb_odds_bundle(
         return out
 
     try:
-        q = urllib.parse.urlencode({"sport": "baseball", "apiKey": api_key})
-        events_url = f"{ODDS_BASE}/events?{q}"
-        raw_ev = _get_json(events_url)
-        out["meta"]["apiCalls"] = 1
-
-        raw_all = _events_list(raw_ev)
-        on_date = [e for e in raw_all if _event_date_key(e) == date_key]
-        events = [e for e in on_date if _is_mlb_event(e)]
-        if not events and on_date:
-            events = on_date
+        events: List[dict] = []
+        seen_ids: set = set()
+        attempts = (
+            {"sport": "mlb"},
+            {"sport": "mlb", "league": "mlb-regular-season"},
+            {"sport": "baseball", "league": "mlb-regular-season"},
+            {"sport": "baseball"},
+        )
+        for attempt in attempts:
+            q_params: Dict[str, str] = {"sport": attempt["sport"], "apiKey": api_key}
+            if attempt.get("league"):
+                q_params["league"] = str(attempt["league"])
+            events_url = f"{ODDS_BASE}/events?{urllib.parse.urlencode(q_params)}"
+            try:
+                raw_ev = _get_json(events_url)
+            except Exception:
+                continue
+            out["meta"]["apiCalls"] = out["meta"].get("apiCalls", 0) + 1
+            if isinstance(raw_ev, dict) and raw_ev.get("error"):
+                continue
+            raw_all = _events_list(raw_ev)
+            on_date = [e for e in raw_all if date_key in _event_date_keys(e)]
+            mlb_ev = [e for e in on_date if _is_mlb_event(e)]
+            pool = mlb_ev if mlb_ev else ([] if events else on_date)
+            added = 0
+            for e in pool:
+                eid = _eid_key(e.get("id"))
+                if not eid or eid in seen_ids:
+                    continue
+                seen_ids.add(eid)
+                events.append(e)
+                added += 1
+            if added:
+                out["meta"]["eventsSport"] = attempt["sport"]
+                if attempt.get("league"):
+                    out["meta"]["eventsLeague"] = attempt["league"]
+                out["meta"].setdefault("eventsQueries", []).append(f"{attempt['sport']}+{added}")
+            if mlb_ev and events:
+                break
         out["meta"]["eventCount"] = len(events)
 
         rows: List[dict] = []
@@ -712,7 +761,7 @@ def fetch_mlb_odds_bundle(
                 first_multi_raw = multi_raw
             out["meta"]["apiCalls"] = out["meta"]["apiCalls"] + 1
             for ev in _multi_list(multi_raw):
-                _append_prop_rows(ev, rows, event_teams)
+                _append_prop_rows(ev, rows, event_teams, sport="mlb")
 
         out["rows"] = rows
         out["meta"]["propRows"] = len(rows)
@@ -894,7 +943,7 @@ def fetch_nfl_odds_bundle(
                 first_multi_raw = multi_raw
             out["meta"]["apiCalls"] = out["meta"]["apiCalls"] + 1
             for ev in _multi_list(multi_raw):
-                _append_prop_rows(ev, rows, event_teams)
+                _append_prop_rows(ev, rows, event_teams, sport="nfl")
 
         out["rows"] = rows
         out["meta"]["propRows"] = len(rows)

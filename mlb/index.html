@@ -1528,6 +1528,47 @@ function eventMatchesGameLoose(home, away, g) {
   return blob.includes(hNick) && blob.includes(aNick);
 }
 
+function oddsStatHintFromText(text) {
+  const raw = String(text || "").trim().toLowerCase();
+  if (!raw) return "";
+  if (["k", "ks", "k's", "k’s", "so", "pitcher k", "pitcher ks", "pitcher k's"].includes(raw)) return "strikeouts";
+  if (raw.includes("strikeout") || raw.includes("strike out")) return "strikeouts";
+  if (raw.includes("pitcher") && /\bk'?s?\b/.test(raw)) return "strikeouts";
+  if (raw.includes("total base")) return "tb";
+  if (raw.includes("home run")) return "hr";
+  if (raw.includes("rbi") || raw.includes("runs batted")) return "rbi";
+  if (raw.includes("stolen") && raw.includes("base")) return "sb";
+  if (raw.includes("base on balls") || (raw.includes("walk") && !raw.includes("pitcher"))) return "bb";
+  if (raw.includes("hits+runs") || raw.includes("h+r+rbi")) return "hrr";
+  if (raw === "runs" || raw.includes("runs scored")) return "runs";
+  if (raw === "hit" || raw === "hits" || raw.startsWith("hits ")) return "hits";
+  return "";
+}
+function splitOddsPlayerLabel(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return { player: "", stat: "" };
+  const paren = s.match(/^(.*?)\s*\(([^()]+)\)\s*$/);
+  if (paren && oddsStatHintFromText(paren[2])) return { player: paren[1].trim(), stat: paren[2].trim() };
+  const parts = s.split(/\s+[-–—]\s+/);
+  if (parts.length >= 2) {
+    const stat = parts[parts.length - 1].trim();
+    const player = parts.slice(0, -1).join(" - ").trim();
+    if (player && oddsStatHintFromText(stat)) return { player, stat };
+  }
+  return { player: s, stat: "" };
+}
+function normalizeOddsRow(row) {
+  if (!row) return row;
+  const parsed = splitOddsPlayerLabel(row.player);
+  const hint = row.statHint || oddsStatHintFromText(parsed.stat) || oddsStatHintFromText(row.market);
+  let market = row.market || "";
+  if (parsed.stat && isBarePlayerPropsMarket(market)) market = `Player Props · ${parsed.stat}`;
+  else if (parsed.stat && /player props/i.test(market) && !market.toLowerCase().includes(parsed.stat.toLowerCase())) {
+    market = `${market} · ${parsed.stat}`;
+  }
+  return { ...row, player: parsed.player || row.player, market, statHint: hint };
+}
+
 function findGameForOddsRow(row, games) {
   for (const g of games) {
     if (eventMatchesGame(row.home, row.away, g)) return g;
@@ -1537,6 +1578,14 @@ function findGameForOddsRow(row, games) {
     if (eventMatchesGameLoose(row.home, row.away, g)) loose.push(g);
   }
   if (loose.length === 1) return loose[0];
+  const player = splitOddsPlayerLabel(row.player).player || row.player;
+  if (player) {
+    const named = [];
+    for (const g of games) {
+      if (nameMatchesProbable(player, g)) named.push(g);
+    }
+    if (named.length === 1) return named[0];
+  }
   return null;
 }
 
@@ -1697,6 +1746,7 @@ function classifyOddsMarket(marketName, row) {
   if (looksLikePitcherK) {
     if (st.includes("batter") || st.includes("hitter")) return { kind: "batter_k" };
     if (st.includes("pitcher") || st.includes("pitching") || st.includes("starter")) return { kind: "pitcher_k" };
+    if (st.includes("player props") && !st.includes("batter") && !st.includes("hitter")) return { kind: "pitcher_k" };
     return { kind: "so_ambiguous" };
   }
   if ((st.includes("out") && (st.includes("pitch") || st.includes("inn"))) || st.includes("pitching outs") || st.includes("outs recorded")) {
@@ -1780,15 +1830,22 @@ async function applyOddsRowsToState(rows, games) {
   const outsAccum = {};
   const hitterAll = {};
 
-  for (const row of rows || []) {
+  for (const rawRow of rows || []) {
+    const row = normalizeOddsRow(rawRow);
     const g = findGameForOddsRow(row, games);
-    if (!g) continue;
     let cl = classifyOddsMarket(row.market, row);
-    cl = disambiguateBarePlayerProp(row, g, cl);
+    if (g) cl = disambiguateBarePlayerProp(row, g, cl);
+    else if ((row.statHint || "").toLowerCase() === "strikeouts") {
+      cl = { kind: "pitcher_k" };
+    } else if (cl.kind === "so_ambiguous") {
+      const hLoose = numericLineFromRow(row);
+      if (!Number.isNaN(hLoose) && lineLooksLikePitcherKAlt(hLoose) && hLoose >= 3.5) cl = { kind: "pitcher_k" };
+    }
     const player = row.player;
     if (cl.kind === "skip") continue;
 
     if (cl.kind === "nrfi_game") {
+      if (!g) continue;
       const blob = `${(row.market || "")} ${(player || "")}`.toLowerCase();
       let pick = "NRFI/YRFI";
       if (blob.includes("yrfi") && !blob.includes("nrfi")) pick = "YRFI";
@@ -1807,6 +1864,7 @@ async function applyOddsRowsToState(rows, games) {
     }
 
     if (cl.kind === "hitter") {
+      if (!g) continue;
       const nk = normName(player);
       const team = teamAbbrForHitter(player, g);
       if (!hitterAll[nk]) hitterAll[nk] = { rawName: player, team, stats: {} };
@@ -1830,15 +1888,16 @@ async function applyOddsRowsToState(rows, games) {
 
     const isPitcherSO =
       cl.kind === "pitcher_k" ||
-      (cl.kind === "so_ambiguous" && ambiguousStrikeoutCountsAsPitcher(row, g, player));
+      (cl.kind === "so_ambiguous" && g && ambiguousStrikeoutCountsAsPitcher(row, g, player));
     if (!isPitcherSO) continue;
 
     // Only ambiguous strikeout markets need to align with schedule probables (reduces mis-tagged hitter rows).
     // Explicit pitcher_k rows must always ingest — otherwise confirmed starters missing from schedule probables
     // never reach ppLines and the UI shows CALC instead of the book K line.
     const hasProbableStarter =
-      g.teams?.home?.probablePitcher?.fullName ||
-      g.teams?.away?.probablePitcher?.fullName;
+      g &&
+      (g.teams?.home?.probablePitcher?.fullName ||
+        g.teams?.away?.probablePitcher?.fullName);
     if (hasProbableStarter && !nameMatchesProbable(player, g) && cl.kind === "so_ambiguous") {
       const hRow = numericLineFromRow(row);
       const looksLikePK =
@@ -1847,7 +1906,7 @@ async function applyOddsRowsToState(rows, games) {
     }
 
     const nk = normName(player);
-    const team = teamAbbrForPitcher(player, g);
+    const team = g ? teamAbbrForPitcher(player, g) : "";
     if (!kAccum[nk]) kAccum[nk] = { rawName: player, team, lines: [], bookRows: [], statTypes: [], gamesHint: null };
     kAccum[nk].lines.push(row.hdp);
     kAccum[nk].statTypes.push(row.market);
@@ -1910,7 +1969,7 @@ async function applyOddsRowsToState(rows, games) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v37:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v39:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -1930,7 +1989,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260707oddsv37" });
+  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260916oddsv39" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isLocal = host === "localhost" || host === "127.0.0.1";
@@ -1982,7 +2041,7 @@ async function loadPPLines(games, dateStr) {
       if (j0?.ok && j0.rows) mergedRows.push(...j0.rows);
       if (j1?.ok && j1.rows) mergedRows.push(...j1.rows);
       if (j2?.ok && j2.rows) mergedRows.push(...j2.rows);
-      const rowsOut = dedupeOddsRows(mergedRows);
+      const rowsOut = dedupeOddsRows(mergedRows).map(normalizeOddsRow);
       if (j0?.ok || j1?.ok || j2?.ok) {
         payload = {
           ok: true,
@@ -2005,7 +2064,7 @@ async function loadPPLines(games, dateStr) {
     }
 
     await applyOddsRowsToState(payload.rows, games);
-    lastOddsRows = Array.isArray(payload.rows) ? payload.rows.slice() : [];
+    lastOddsRows = Array.isArray(payload.rows) ? payload.rows.map(normalizeOddsRow) : [];
 
     const totalFound = Object.keys(ppLines).filter(k => !k.includes(":")).length;
     if (totalFound > 0) {
@@ -2197,7 +2256,9 @@ function findPPForPitcher(fullName, teamAbbr, scheduleGame) {
 function rowLooksLikePitcherStrikeout(row) {
   const sh = (row.statHint || "").toLowerCase();
   if (sh === "strikeouts") return true;
-  const m = (row.market || "").toLowerCase();
+  const parsed = splitOddsPlayerLabel(row.player);
+  if (oddsStatHintFromText(parsed.stat) === "strikeouts") return true;
+  const m = `${row.market || ""} ${parsed.stat || ""}`.toLowerCase();
   if (m.includes("strikeout") || m.includes("strike out")) return true;
   if ((m.includes("pitcher") || m.includes("pitching") || m.includes("starter")) && /\bk(s|'s|’s)?\b/.test(m)) return true;
   const h = numericLineFromRow(row);
@@ -2216,7 +2277,8 @@ function findPPFromRawOddsRows(fullName, teamAbbr, scheduleGame, opts) {
   const matchesProbable =
     (ph && fuzzyNameEq(fullName, ph)) || (pa && fuzzyNameEq(fullName, pa));
   const trustBoxscore = !!(opts && opts.trustBoxscore);
-  for (const row of lastOddsRows) {
+  for (const raw of lastOddsRows) {
+    const row = normalizeOddsRow(raw);
     if (row.hdp == null || !row.player) continue;
     if (pitcherLastToken(row.player) !== lastTok) continue;
     if (!fuzzyNameEq(fullName, row.player)) continue;
