@@ -1768,6 +1768,7 @@ function classifyOddsMarket(marketName, row) {
     st.includes("starter");
 
   if (sh === "strikeouts") return { kind: "pitcher_k" };
+  if (sh === "pitcher_outs") return { kind: "pitcher_outs" };
   if (pitcherScoped && ["hits", "tb", "hr", "runs", "rbi", "bb", "sb", "hrr"].includes(sh)) {
     return { kind: "skip" };
   }
@@ -2011,7 +2012,7 @@ async function applyOddsRowsToState(rows, games) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v42:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v43:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -2034,7 +2035,7 @@ function oddsCacheSet(dateStr, data) {
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, rev: "20260916oddsv42" });
+  const qs = new URLSearchParams({ date: dateStr, rev: "20260916oddsv43" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isLocal = host === "localhost" || host === "127.0.0.1";
@@ -2126,6 +2127,19 @@ async function loadPPLines(games, dateStr) {
         return;
       }
       const j1 = await fetchOddsPayload(dateStr);
+      if (j1?.error === "missing_ODDS_API_KEY") {
+        setStatus("FanDuel / DraftKings need ODDS_API_KEY (The Odds API) on the server");
+        const n = await fillMissingKLinesFromPrizePicks();
+        if (n > 0) {
+          captureLineSnapshot(dateStr);
+          detectLineMovements();
+          detectOddsMovements();
+          logStrikeoutOddsFromPpLines(dateStr);
+          buildPPTeamMap();
+          ppLoaded = true;
+        }
+        return;
+      }
       const mergedRows = [];
       if (j1?.ok && j1.rows) mergedRows.push(...j1.rows);
       if (mergedRows.length < 8) {

@@ -217,7 +217,16 @@ def odds_io_route():
             _sys.path.insert(0, _apid)
         from odds_io_impl import DEFAULT_BOOKMAKERS, fetch_mlb_odds_bundle, fetch_nfl_odds_bundle
 
-        api_key = _os.environ.get("ODDS_API_KEY") or _os.environ.get("ODDS_API_IO_KEY")
+        api_key = (
+            _os.environ.get("ODDS_API_KEY")
+            or _os.environ.get("ODDS_API_IO_KEY")
+            or _os.environ.get("THE_ODDS_API_KEY")
+        )
+        the_odds_key = (
+            _os.environ.get("THE_ODDS_API_KEY")
+            or _os.environ.get("ODDS_API_KEY")
+            or _os.environ.get("ODDS_API_IO_KEY")
+        )
         raw_date = request.args.get("date")
         date_from = request.args.get("from")
         date_to = request.args.get("to")
@@ -240,7 +249,11 @@ def odds_io_route():
             body = {"ok": False, "error": "missing_date"}
         else:
             body = fetch_mlb_odds_bundle(
-                api_key, raw_date[:10], bookmakers, debug_structure=debug_structure
+                api_key,
+                raw_date[:10],
+                bookmakers,
+                debug_structure=debug_structure,
+                the_odds_key=the_odds_key,
             )
         return Response(
             json.dumps(body, default=str),

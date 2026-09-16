@@ -12,6 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -57,6 +58,27 @@ def _should_skip_harvest_key(k: str) -> bool:
     return False
 
 ODDS_BASE = "https://api.odds-api.io/v3"
+THE_ODDS_BASE = "https://api.the-odds-api.com/v4"
+
+# The Odds API market keys → our statHint (FanDuel / DraftKings US books).
+_THE_ODDS_MLB_MARKETS = {
+    "pitcher_strikeouts": "strikeouts",
+    "pitcher_strikeouts_alternate": "strikeouts",
+    "pitcher_outs": "pitcher_outs",
+    "batter_hits": "hits",
+    "batter_total_bases": "tb",
+    "batter_home_runs": "hr",
+    "batter_rbis": "rbi",
+    "batter_runs_scored": "runs",
+    "batter_stolen_bases": "sb",
+    "batter_hits_runs_rbis": "hrr",
+    "batter_walks": "bb",
+}
+# Keep credit use bounded (1 credit per market per event).
+_THE_ODDS_MLB_MARKET_QUERY = (
+    "pitcher_strikeouts,pitcher_outs,batter_hits,batter_total_bases,"
+    "batter_home_runs,batter_rbis,batter_runs_scored,batter_hits_runs_rbis"
+)
 
 # In-server cache to stay under tight hourly quotas (e.g. 100/hr free tiers).
 _CACHE: Dict[str, tuple] = {}
@@ -896,18 +918,173 @@ def _odds_multi_rows(
     return rows, first_raw
 
 
+def _the_odds_event_to_rows(ev: dict) -> List[dict]:
+    home = str(ev.get("home_team") or "")
+    away = str(ev.get("away_team") or "")
+    eid = ev.get("id")
+    bucket: Dict[Tuple[Any, ...], dict] = {}
+    for bk in ev.get("bookmakers") or []:
+        if not isinstance(bk, dict):
+            continue
+        bname = _norm_bookmaker(str(bk.get("title") or bk.get("key") or ""))
+        if bname not in ("FanDuel", "DraftKings"):
+            continue
+        for m in bk.get("markets") or []:
+            if not isinstance(m, dict):
+                continue
+            mkey = str(m.get("key") or "")
+            hint = _THE_ODDS_MLB_MARKETS.get(mkey, "")
+            mlabel = mkey.replace("_", " ").title() or "Player Props"
+            for o in m.get("outcomes") or []:
+                if not isinstance(o, dict):
+                    continue
+                player = str(o.get("description") or "").strip()
+                if not player:
+                    continue
+                try:
+                    hf = float(o.get("point"))
+                except (TypeError, ValueError):
+                    continue
+                side = str(o.get("name") or "").strip().lower()
+                price = _flatten_price(o.get("price"))
+                key = (player, bname, mkey, hf)
+                rec = bucket.setdefault(
+                    key,
+                    {
+                        "eventId": eid,
+                        "home": home,
+                        "away": away,
+                        "bookmaker": bname,
+                        "market": mlabel,
+                        "player": player,
+                        "hdp": hf,
+                        "over": None,
+                        "under": None,
+                        "statHint": hint,
+                    },
+                )
+                if side == "over":
+                    rec["over"] = price
+                elif side == "under":
+                    rec["under"] = price
+    return list(bucket.values())
+
+
+def _the_odds_key_works(api_key: str) -> Tuple[bool, Optional[str]]:
+    url = f"{THE_ODDS_BASE}/sports/?{urllib.parse.urlencode({'apiKey': api_key})}"
+    data, err = _safe_get_json(url)
+    if isinstance(data, list) and data:
+        return True, None
+    if isinstance(data, dict):
+        msg = data.get("message") or data.get("error_msg") or data.get("error")
+        if msg:
+            return False, str(msg)[:220]
+    return False, err
+
+
+def fetch_the_odds_mlb(api_key: str, date_key: str, out: Dict[str, Any]) -> List[dict]:
+    """FanDuel / DraftKings MLB player props via The Odds API (the-odds-api.com)."""
+    from_s, to_s = _et_rfc3339_bounds(date_key)
+    q = urllib.parse.urlencode(
+        {
+            "apiKey": api_key,
+            "commenceTimeFrom": from_s,
+            "commenceTimeTo": to_s,
+        }
+    )
+    events_url = f"{THE_ODDS_BASE}/sports/baseball_mlb/events?{q}"
+    raw_ev, err = _safe_get_json(events_url)
+    out["meta"]["apiCalls"] = out["meta"].get("apiCalls", 0) + 1
+    if err:
+        out["meta"]["theOddsError"] = err
+        return []
+    if isinstance(raw_ev, dict):
+        msg = raw_ev.get("message") or raw_ev.get("error_msg") or raw_ev.get("error")
+        if msg:
+            out["meta"]["theOddsError"] = str(msg)[:220]
+            return []
+        raw_ev = raw_ev.get("data") or []
+    if not isinstance(raw_ev, list):
+        out["meta"]["theOddsError"] = "bad_events_payload"
+        return []
+    events = []
+    for e in raw_ev:
+        if not isinstance(e, dict):
+            continue
+        fake = {"date": e.get("commence_time") or ""}
+        if date_key in _event_date_keys(fake) or not _event_date_keys(fake):
+            events.append(e)
+    if not events:
+        events = [e for e in raw_ev if isinstance(e, dict)]
+    out["meta"]["theOddsEvents"] = len(events)
+    if not events:
+        return []
+
+    def _one(ev: dict) -> List[dict]:
+        eid = ev.get("id")
+        if not eid:
+            return []
+        q2 = urllib.parse.urlencode(
+            {
+                "apiKey": api_key,
+                "regions": "us",
+                "markets": _THE_ODDS_MLB_MARKET_QUERY,
+                "oddsFormat": "american",
+                "bookmakers": "fanduel,draftkings",
+            }
+        )
+        odds_url = f"{THE_ODDS_BASE}/sports/baseball_mlb/events/{eid}/odds?{q2}"
+        data, e2 = _safe_get_json(odds_url)
+        if e2 or not isinstance(data, dict):
+            if e2:
+                out["meta"].setdefault("theOddsOddsErrors", []).append(str(e2)[:160])
+            return []
+        data.setdefault("home_team", ev.get("home_team"))
+        data.setdefault("away_team", ev.get("away_team"))
+        data.setdefault("id", eid)
+        return _the_odds_event_to_rows(data)
+
+    rows: List[dict] = []
+    workers = min(6, max(1, len(events)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = [pool.submit(_one, ev) for ev in events]
+        for fut in as_completed(futs):
+            try:
+                rows.extend(fut.result() or [])
+            except Exception as ex:
+                out["meta"].setdefault("theOddsOddsErrors", []).append(str(ex)[:160])
+    out["meta"]["apiCalls"] = out["meta"].get("apiCalls", 0) + len(events)
+    out["meta"]["theOddsRows"] = len(rows)
+    return rows
+
+
+def _has_fd_dk_strikeouts(rows: List[dict]) -> bool:
+    fd = dk = False
+    for r in rows:
+        if (r.get("statHint") or "") != "strikeouts":
+            continue
+        if r.get("over") in (None, "") and r.get("under") in (None, ""):
+            continue
+        if r.get("bookmaker") == "FanDuel":
+            fd = True
+        elif r.get("bookmaker") == "DraftKings":
+            dk = True
+    return fd and dk
+
+
 def fetch_mlb_odds_bundle(
     api_key: str,
     target_date: str,
     bookmakers: str = DEFAULT_BOOKMAKERS,
     debug_structure: bool = False,
+    the_odds_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    One events call + ceil(n/10) multi-odds calls. Cached 15 minutes per (date, books).
-    Pass debug_structure=True to attach meta.oddsStructureSample (not cached).
+    FanDuel / DraftKings MLB player props.
+    Prefers The Odds API (US books), then Odds-API.io. Cached 15 minutes per date.
     """
     date_key = (target_date or "")[:10]
-    cache_key = f"{date_key}|{bookmakers}|v24"
+    cache_key = f"{date_key}|{bookmakers}|v25"
     now = time.time()
     if not debug_structure and cache_key in _CACHE:
         ts, data = _CACHE[cache_key]
@@ -927,86 +1104,99 @@ def fetch_mlb_odds_bundle(
         out["error"] = "bad_date"
         return out
 
+    toa_key = (the_odds_key or api_key or "").strip()
+    io_key = (api_key or "").strip()
+
     try:
+        rows: List[dict] = []
+        first_multi_raw: Any = None
+
+        if toa_key:
+            ok_toa, toa_probe_err = _the_odds_key_works(toa_key)
+            out["meta"]["apiCalls"] = out["meta"].get("apiCalls", 0) + 1
+            out["meta"]["theOddsKeyOk"] = ok_toa
+            if ok_toa:
+                rows.extend(fetch_the_odds_mlb(toa_key, date_key, out))
+            elif toa_probe_err:
+                out["meta"]["theOddsError"] = toa_probe_err
+
+        skip_io = _has_fd_dk_strikeouts(rows)
+        out["meta"]["skippedOddsIo"] = skip_io
+
         events: List[dict] = []
         seen_ids: set = set()
-        from_s, to_s = _et_rfc3339_bounds(date_key)
-        q_params: Dict[str, str] = {
-            "sport": "baseball",
-            "apiKey": api_key,
-            "from": from_s,
-            "to": to_s,
-            "limit": "80",
-        }
-        events_url = f"{ODDS_BASE}/events?{urllib.parse.urlencode(q_params)}"
-        raw_ev, ev_err = _safe_get_json(events_url)
-        out["meta"]["apiCalls"] = out["meta"].get("apiCalls", 0) + 1
-        if ev_err:
-            out["meta"].setdefault("eventErrors", []).append(ev_err)
-            raw_ev = None
-        if isinstance(raw_ev, dict) and raw_ev.get("error"):
-            out["meta"].setdefault("eventErrors", []).append(str(raw_ev.get("error")))
-            raw_ev = None
-        raw_all = _events_list(raw_ev)
-        mlb_all = [e for e in raw_all if _is_mlb_event(e)]
-        on_date = [e for e in mlb_all if date_key in _event_date_keys(e)]
-        pool = on_date or mlb_all
-        for e in pool:
-            eid = _eid_key(e.get("id"))
-            if not eid or eid in seen_ids:
-                continue
-            seen_ids.add(eid)
-            events.append(e)
-        out["meta"]["eventsSport"] = "baseball"
-        out["meta"]["eventCount"] = len(events)
+        if not skip_io and io_key:
+            from_s, to_s = _et_rfc3339_bounds(date_key)
+            q_params: Dict[str, str] = {
+                "sport": "baseball",
+                "apiKey": io_key,
+                "from": from_s,
+                "to": to_s,
+                "limit": "80",
+            }
+            events_url = f"{ODDS_BASE}/events?{urllib.parse.urlencode(q_params)}"
+            raw_ev, ev_err = _safe_get_json(events_url)
+            out["meta"]["apiCalls"] = out["meta"].get("apiCalls", 0) + 1
+            if ev_err:
+                out["meta"].setdefault("eventErrors", []).append(ev_err)
+                raw_ev = None
+            if isinstance(raw_ev, dict) and raw_ev.get("error"):
+                out["meta"].setdefault("eventErrors", []).append(str(raw_ev.get("error")))
+                raw_ev = None
+            raw_all = _events_list(raw_ev)
+            mlb_all = [e for e in raw_all if _is_mlb_event(e)]
+            on_date = [e for e in mlb_all if date_key in _event_date_keys(e)]
+            pool = on_date or mlb_all
+            for e in pool:
+                eid = _eid_key(e.get("id"))
+                if not eid or eid in seen_ids:
+                    continue
+                seen_ids.add(eid)
+                events.append(e)
+            out["meta"]["eventsSport"] = "baseball"
+            out["meta"]["eventCount"] = len(events)
 
-        rows: List[dict] = []
-        if not events:
-            out["ok"] = True
+            if events:
+                event_teams: Dict[str, Tuple[str, str]] = {}
+                for e in events:
+                    eid = e.get("id")
+                    if eid is None:
+                        continue
+                    event_teams[_eid_key(eid)] = (_team_str(e.get("home")), _team_str(e.get("away")))
+
+                event_ids = [e["id"] for e in events if e.get("id") is not None]
+                io_rows, first_multi_raw = _odds_multi_rows(
+                    io_key,
+                    event_ids,
+                    bookmakers,
+                    event_teams,
+                    out,
+                    sport="mlb",
+                    markets=None,
+                    debug_structure=debug_structure,
+                )
+                errs = out["meta"].get("multiErrors") or []
+                quota_hit = any("http_429" in str(x) or "http_403" in str(x) for x in errs)
+                if not io_rows and event_ids and not quota_hit:
+                    extra, first2 = _odds_multi_rows(
+                        io_key,
+                        event_ids,
+                        "",
+                        event_teams,
+                        out,
+                        sport="mlb",
+                        markets=None,
+                        debug_structure=debug_structure,
+                    )
+                    if extra:
+                        io_rows = extra
+                        if first_multi_raw is None:
+                            first_multi_raw = first2
+                        out["meta"]["multiFallback"] = "all_bookmakers"
+                rows.extend(io_rows or [])
+
+        if not events and not rows:
             out["meta"]["note"] = "no_mlb_events_for_date"
-            out["rows"] = []
-            if not debug_structure:
-                _CACHE[cache_key] = (now, out)
-            return out
-
-        event_teams: Dict[str, Tuple[str, str]] = {}
-        for e in events:
-            eid = e.get("id")
-            if eid is None:
-                continue
-            event_teams[_eid_key(eid)] = (_team_str(e.get("home")), _team_str(e.get("away")))
-
-        event_ids = [e["id"] for e in events if e.get("id") is not None]
-        # Do not pass markets=Player Props — FanDuel/DraftKings use names like
-        # "Player Props - Strikeouts", and an exact filter drops those rows.
-        rows, first_multi_raw = _odds_multi_rows(
-            api_key,
-            event_ids,
-            bookmakers,
-            event_teams,
-            out,
-            sport="mlb",
-            markets=None,
-            debug_structure=debug_structure,
-        )
-        errs = out["meta"].get("multiErrors") or []
-        quota_hit = any("http_429" in str(x) or "http_403" in str(x) for x in errs)
-        if not rows and event_ids and not quota_hit:
-            extra, first2 = _odds_multi_rows(
-                api_key,
-                event_ids,
-                "",
-                event_teams,
-                out,
-                sport="mlb",
-                markets=None,
-                debug_structure=debug_structure,
-            )
-            if extra:
-                rows = extra
-                if first_multi_raw is None:
-                    first_multi_raw = first2
-                out["meta"]["multiFallback"] = "all_bookmakers"
 
         out["rows"] = rows
         out["meta"]["propRows"] = len(rows)

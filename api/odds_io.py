@@ -48,7 +48,16 @@ class handler(BaseHTTPRequestHandler):
             bookmakers = (qs.get("bookmakers") or [DEFAULT_BOOKMAKERS])[0]
             dbg = (qs.get("structure") or qs.get("debug") or [""])[0]
             debug_structure = str(dbg).lower() in ("1", "true", "yes")
-            api_key = os.environ.get("ODDS_API_KEY") or os.environ.get("ODDS_API_IO_KEY")
+            api_key = (
+                os.environ.get("ODDS_API_KEY")
+                or os.environ.get("ODDS_API_IO_KEY")
+                or os.environ.get("THE_ODDS_API_KEY")
+            )
+            the_odds_key = (
+                os.environ.get("THE_ODDS_API_KEY")
+                or os.environ.get("ODDS_API_KEY")
+                or os.environ.get("ODDS_API_IO_KEY")
+            )
             if not api_key:
                 out = {"ok": False, "error": "missing_ODDS_API_KEY"}
             elif sport in ("nfl", "football"):
@@ -64,7 +73,11 @@ class handler(BaseHTTPRequestHandler):
                 out = {"ok": False, "error": "missing_date"}
             else:
                 out = fetch_mlb_odds_bundle(
-                    api_key, raw_date[:10], bookmakers, debug_structure=debug_structure
+                    api_key,
+                    raw_date[:10],
+                    bookmakers,
+                    debug_structure=debug_structure,
+                    the_odds_key=the_odds_key,
                 )
         except Exception as e:
             sys.stderr.write(traceback.format_exc() + "\n")
