@@ -12,6 +12,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#070b14" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
@@ -38,6 +40,8 @@
       font-family: var(--font-ui);
       color: var(--text);
       min-height: 100vh;
+      display: flex;
+      flex-direction: column;
       background: var(--bg-deep);
       background-image:
         radial-gradient(ellipse 120% 80% at 50% -30%, rgba(34, 211, 238, 0.09), transparent 50%),
@@ -122,7 +126,7 @@
     input[type=search] { cursor: text; min-width: 160px; }
     #updated { color: var(--muted); font-size: 11px; font-family: var(--font-mono); }
 
-    #main { max-width: 1040px; margin: 0 auto; padding: 28px 18px; padding-bottom: max(28px, env(safe-area-inset-bottom)); }
+    #main { flex: 1; width: 100%; max-width: 1040px; margin: 0 auto; padding: 28px 18px; padding-bottom: max(28px, env(safe-area-inset-bottom)); }
     #tabs {
       display: flex;
       gap: 6px;
@@ -559,11 +563,15 @@ async function fetchTimeout(url, ms = 12000, opts = {}) {
     throw e;
   }
 }
-async function fetchJson(url, timeout = 14000) {
-  const bases = [url, PROXY + encodeURIComponent(url), PROXY2 + encodeURIComponent(url)];
-  for (const base of bases) {
+async function fetchJson(url, timeout = 10000) {
+  const attempts = [
+    { u: url, t: timeout },
+    { u: PROXY + encodeURIComponent(url), t: Math.min(8000, timeout) },
+    { u: PROXY2 + encodeURIComponent(url), t: Math.min(8000, timeout) },
+  ];
+  for (const a of attempts) {
     try {
-      const r = await fetchTimeout(base, timeout, { headers: { Accept: "application/json" } });
+      const r = await fetchTimeout(a.u, a.t, { headers: { Accept: "application/json" } });
       if (r.ok) return r.json();
     } catch (_) {}
   }
@@ -816,23 +824,28 @@ async function loadOdds(games) {
   lastOddsRows = [];
   lastOddsMeta = null;
   const { from, to } = weekWindow(games);
-  let payload = oddsCacheGet(from, to);
-  if (!payload) {
-    const url = oddsIoUrl(from, to);
-    if (!url) {
-      lastOddsMeta = { error: "file_host" };
-      return { ok: false, error: "file_host" };
+  try {
+    let payload = oddsCacheGet(from, to);
+    if (!payload) {
+      const url = oddsIoUrl(from, to);
+      if (!url) {
+        lastOddsMeta = { error: "file_host", dateFrom: from, dateTo: to };
+        return { ok: false, error: "file_host" };
+      }
+      const r = await fetchTimeout(url, 28000, { headers: { Accept: "application/json" } });
+      payload = await r.json();
+      if (payload?.ok) oddsCacheSet(from, to, payload);
     }
-    const r = await fetchTimeout(url, 28000, { headers: { Accept: "application/json" } });
-    payload = await r.json();
-    if (payload?.ok) oddsCacheSet(from, to, payload);
+    lastOddsRows = Array.isArray(payload?.rows) ? payload.rows.slice() : [];
+    lastOddsMeta = { ...(payload?.meta || {}) };
+    if (payload?.error) lastOddsMeta.error = payload.error;
+    lastOddsMeta.dateFrom = lastOddsMeta.dateFrom || from;
+    lastOddsMeta.dateTo = lastOddsMeta.dateTo || to;
+    return payload || { ok: false };
+  } catch (e) {
+    lastOddsMeta = { error: String(e.message || e), dateFrom: from, dateTo: to };
+    return { ok: false, error: lastOddsMeta.error };
   }
-  lastOddsRows = Array.isArray(payload?.rows) ? payload.rows.slice() : [];
-  lastOddsMeta = { ...(payload?.meta || {}) };
-  if (payload?.error) lastOddsMeta.error = payload.error;
-  lastOddsMeta.dateFrom = lastOddsMeta.dateFrom || from;
-  lastOddsMeta.dateTo = lastOddsMeta.dateTo || to;
-  return payload || { ok: false };
 }
 
 const NFL_ODDS_HIST_VER = "v1";
@@ -896,27 +909,35 @@ function movementFromHistory(hist) {
   return { lineMov, oddsMov };
 }
 function logNflOddsHistory(games) {
-  const wk = weekKey();
-  for (const g of games || []) {
-    for (const p of g.players || []) {
-      for (const l of p.lineList || []) {
-        const books = l.books || {};
-        const fd = books.FanDuel || {};
-        const dk = books.DraftKings || {};
-        appendNflOddsHistory(wk, p.nk, l.statKey, {
-          line: l.line,
-          fdOver: decToAm(fd.over),
-          fdUnder: decToAm(fd.under),
-          dkOver: decToAm(dk.over),
-          dkUnder: decToAm(dk.under),
-        });
-        l.hist = getNflOddsHistory(wk, p.nk, l.statKey);
-        const mov = movementFromHistory(l.hist);
-        l.lineMov = mov.lineMov;
-        l.oddsMov = mov.oddsMov;
+  try {
+    const wk = weekKey();
+    for (const g of games || []) {
+      for (const p of g.players || []) {
+        for (const l of p.lineList || []) {
+          const books = l.books || {};
+          const fd = books.FanDuel || {};
+          const dk = books.DraftKings || {};
+          if (!fd.over && !fd.under && !dk.over && !dk.under) {
+            l.hist = [];
+            l.lineMov = null;
+            l.oddsMov = null;
+            continue;
+          }
+          appendNflOddsHistory(wk, p.nk, l.statKey, {
+            line: l.line,
+            fdOver: decToAm(fd.over),
+            fdUnder: decToAm(fd.under),
+            dkOver: decToAm(dk.over),
+            dkUnder: decToAm(dk.under),
+          });
+          l.hist = getNflOddsHistory(wk, p.nk, l.statKey);
+          const mov = movementFromHistory(l.hist);
+          l.lineMov = mov.lineMov;
+          l.oddsMov = mov.oddsMov;
+        }
       }
     }
-  }
+  } catch (_) {}
 }
 function renderOddsSparkChart(hist) {
   const rows = Array.isArray(hist) ? hist.filter(p => p && (p.fdOver != null || p.dkOver != null)) : [];
@@ -1113,7 +1134,30 @@ function ppMatchFor(nk, statKey, line) {
   return _ppBoard?.mapByLine?.[`${nk}|${statKey}|${line}`] || null;
 }
 
+function ppDayInWindow(start, games) {
+  const raw = String(start || "");
+  if (raw.length < 10) return true;
+  const day = raw.slice(0, 10);
+  const { from, to } = weekWindow(games || gamesState || []);
+  return day >= from && day <= to;
+}
+function pickPpLines(games) {
+  const best = new Map();
+  for (const pp of _ppBoard?.allLines || []) {
+    if (!pp?.nk || !STAT_META[pp.statKey]) continue;
+    if (!ppDayInWindow(pp.start, games)) continue;
+    const k = `${pp.nk}|${pp.statKey}`;
+    const prev = best.get(k);
+    if (!prev) { best.set(k, pp); continue; }
+    const proj = espnRaw(pp.nk, pp.statKey);
+    if (proj != null && Number.isFinite(Number(proj))) {
+      if (Math.abs(pp.line - Number(proj)) < Math.abs(prev.line - Number(proj))) best.set(k, pp);
+    }
+  }
+  return [...best.values()];
+}
 function addPropRow(bucket, row, statKey, book, line, extra) {
+  if (!bucket) return;
   const nk = normName(row.player);
   if (!bucket.players.has(nk)) {
     bucket.players.set(nk, { name: row.player, nk, team: extra?.team || "", lines: {} });
@@ -1151,8 +1195,15 @@ function groupPlayerProps(games) {
     const bucket = g ? byGame.get(g.id) : leftover;
     addPropRow(bucket, row, statKey, book, line);
   }
-  for (const pp of _ppBoard?.allLines || []) {
-    if (!pp?.nk || !STAT_META[pp.statKey]) continue;
+  const haveStat = new Set();
+  for (const bucket of [...byGame.values(), leftover]) {
+    for (const pl of bucket.players.values()) {
+      for (const l of Object.values(pl.lines)) haveStat.add(`${pl.nk}|${l.statKey}`);
+    }
+  }
+  for (const pp of pickPpLines(games)) {
+    if (haveStat.has(`${pp.nk}|${pp.statKey}`)) continue;
+    haveStat.add(`${pp.nk}|${pp.statKey}`);
     const g = findGameForTeamAbbr(pp.team, games);
     const bucket = g ? byGame.get(g.id) : leftover;
     addPropRow(bucket, {
@@ -1192,6 +1243,14 @@ function decoratePlayer(p, game) {
     const pOver = pOverModel(l.statKey, proj, l.line);
     return { ...l, books: l.books || {}, proj, pOver, modelEdge: proj != null ? Math.round((proj - l.line) * 10) / 10 : null };
   });
+  lineList.sort((a, b) => {
+    const ae = Math.abs(a.modelEdge || 0), be = Math.abs(b.modelEdge || 0);
+    if (be !== ae) return be - ae;
+    const ab = Object.keys(a.books || {}).length, bb = Object.keys(b.books || {}).length;
+    if (bb !== ab) return bb - ab;
+    return String(a.statKey).localeCompare(String(b.statKey)) || a.line - b.line;
+  });
+  if (lineList.length > 18) lineList.length = 18;
   return { ...p, team, lineList };
 }
 
@@ -1298,7 +1357,7 @@ function evPPSideFair(books, side) {
   return { pFair: Math.min(0.98, Math.max(0.02, bestP)), baselineSrc: bestSrc };
 }
 function evFairOverFromBooks(books) {
-  const twoWay = Object.entries(books || {}).filter(([, b]) => b.over && b.under);
+  const twoWay = Object.entries(books || {}).filter(([, b]) => b && b.over && b.under);
   if (!twoWay.length) return null;
   let pSum = 0;
   for (const [, b] of twoWay) { const iO = 1 / b.over, iU = 1 / b.under; pSum += iO / (iO + iU); }
@@ -1359,7 +1418,7 @@ async function buildEV(games) {
     out.push(row);
   }
 
-  for (const pp of board.allLines || []) {
+  for (const pp of pickPpLines(games)) {
     const inj = injuryFor(pp.player);
     if (inj && /out|\bir\b|inactive|pup/i.test(inj.status || "")) continue;
     const g = groups[`${pp.nk}|${pp.statKey}|${pp.line}`];
@@ -1557,7 +1616,8 @@ function movedCount(games) {
 
 function renderSummary(data, tab) {
   const grid = document.getElementById("summary-grid");
-  const slate = tab === "slate" ? filterSlateGames(data || []) : (data || []);
+  const rows = data || [];
+  const slate = tab === "slate" ? filterSlateGames(rows) : rows;
   const live = slate.filter(g => g.status === "in").length;
   const stats = tab === "slate"
     ? [
@@ -1567,14 +1627,14 @@ function renderSummary(data, tab) {
       ]
     : tab === "props"
     ? [
-        { l: "Prop lines", v: data.reduce((n, g) => n + (g.propCount || 0), 0), c: "#34d399" },
-        { l: "Players", v: data.reduce((n, g) => n + (g.players?.length || 0), 0), c: "#22d3ee" },
-        { l: "Moved", v: movedCount(data), c: "#fbbf24" },
+        { l: "Prop lines", v: rows.reduce((n, g) => n + (g.propCount || 0), 0), c: "#34d399" },
+        { l: "Players", v: rows.reduce((n, g) => n + (g.players?.length || 0), 0), c: "#22d3ee" },
+        { l: "Moved", v: movedCount(rows), c: "#fbbf24" },
       ]
     : [
-        { l: "+EV plays", v: data.length, c: "#34d399" },
-        { l: "Strong (3%+)", v: data.filter(r => r.ev >= 0.03).length, c: "#22d3ee" },
-        { l: "PrizePicks", v: data.filter(r => r.isPP && r.ppOnBoard).length, c: "#a78bfa" },
+        { l: "+EV plays", v: rows.length, c: "#34d399" },
+        { l: "Strong (3%+)", v: rows.filter(r => r.ev >= 0.03).length, c: "#22d3ee" },
+        { l: "PrizePicks", v: rows.filter(r => r.isPP && r.ppOnBoard).length, c: "#a78bfa" },
       ];
   grid.innerHTML = stats.map(s =>
     `<div class="sum-card"><div class="sum-val" style="color:${s.c}">${s.v}</div><div class="sum-lbl">${s.l}</div></div>`
@@ -1912,11 +1972,28 @@ async function loadTab(tab) {
     gamesState = games;
 
     setStatus("Fetching books, PrizePicks, and ESPN projections…");
-    await Promise.all([loadOdds(games), fetchInjuries(), fetchPrizePicksStandardLines(), fetchNflModel()]);
+    await Promise.allSettled([
+      loadOdds(games),
+      fetchInjuries(),
+      fetchPrizePicksStandardLines(),
+      fetchNflModel(),
+    ]);
 
     cache.slate = games;
-    cache.props = groupPlayerProps(games);
-    cache.ev = await buildEV(games);
+    const notes = [];
+    try {
+      cache.props = groupPlayerProps(games);
+    } catch (e) {
+      cache.props = games.map(g => ({ ...g, players: [], propCount: 0 }));
+      notes.push("Player props: " + (e.message || e));
+    }
+    try {
+      cache.ev = await buildEV(games);
+    } catch (e) {
+      cache.ev = [];
+      notes.push("+EV: " + (e.message || e));
+    }
+    if (notes.length) setError(notes.join(" · "));
 
     const data = cache[tab];
     renderFilters(tab);

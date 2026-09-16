@@ -15,6 +15,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="PropPulse" />
   <meta name="theme-color" content="#070b14" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
@@ -42,6 +44,8 @@
       font-family: var(--font-ui);
       color: var(--text);
       min-height: 100vh;
+      display: flex;
+      flex-direction: column;
       -webkit-overflow-scrolling: touch;
       overflow-scrolling: touch;
       background: var(--bg-deep);
@@ -147,7 +151,7 @@
     .btn-accent:hover:not(:disabled) { background: rgba(34, 211, 238, 0.22); border-color: rgba(34, 211, 238, 0.65); }
     .btn-accent:disabled { opacity: .45; cursor: default; }
 
-    #main { max-width: 1040px; margin: 0 auto; padding: 28px 18px; padding-bottom: max(28px, env(safe-area-inset-bottom)); }
+    #main { flex: 1; width: 100%; max-width: 1040px; margin: 0 auto; padding: 28px 18px; padding-bottom: max(28px, env(safe-area-inset-bottom)); }
     #tabs {
       display: flex;
       gap: 6px;
@@ -1339,9 +1343,10 @@ async function mlbGet(path) {
     PROXY  + encodeURIComponent(url),         // corsproxy.io
     PROXY2 + encodeURIComponent(url),         // allorigins fallback
   ];
-  for (const base of bases) {
+  const timeouts = [8000, 7000, 7000];
+  for (let i = 0; i < bases.length; i++) {
     try {
-      const r = await fetchTimeout(base, 10000);
+      const r = await fetchTimeout(bases[i], timeouts[i]);
       if (r.ok) return r.json();
     } catch (_) {}
   }
@@ -1968,9 +1973,11 @@ async function loadPPLines(games, dateStr) {
       }
       const prevDay = addCalendarDaysYMD(dateStr, -1);
       const nextDay = addCalendarDaysYMD(dateStr, 1);
-      const j0 = await fetchOddsPayload(prevDay);
-      const j1 = await fetchOddsPayload(dateStr);
-      const j2 = await fetchOddsPayload(nextDay);
+      const [j0, j1, j2] = await Promise.all([
+        fetchOddsPayload(prevDay),
+        fetchOddsPayload(dateStr),
+        fetchOddsPayload(nextDay),
+      ]);
       const mergedRows = [];
       if (j0?.ok && j0.rows) mergedRows.push(...j0.rows);
       if (j1?.ok && j1.rows) mergedRows.push(...j1.rows);

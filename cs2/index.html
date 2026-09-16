@@ -10,6 +10,8 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#070b14" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/assets/layout.css" />
   <style>
@@ -130,6 +132,7 @@ const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 let currentDate = params.get("date");
 let boardData = null;
+let _cs2Inflight = null;
 if (params.get("threshold")) $("threshold").value = params.get("threshold");
 
 function esc(s) {
@@ -252,40 +255,53 @@ async function load(refresh) {
     $("banner").textContent = "Open via http://localhost:8080/cs2/ so the scanner API can run.";
     return;
   }
-  const threshold = $("threshold").value;
-  const qs = new URLSearchParams({ threshold });
-  if (currentDate) qs.set("date", currentDate);
-  if (refresh) qs.set("refresh", "1");
-  const next = "?" + qs.toString();
-  if (location.search !== next) history.replaceState(null, "", next);
-  $("updated").textContent = refresh ? "Pulling PrizePicks and Underdog…" : "Loading…";
-  try {
-    const res = await fetch(url + "?" + qs.toString(), { headers: { Accept: "application/json" } });
-    boardData = await res.json();
-    if (!boardData || boardData.ok === false) {
+  if (_cs2Inflight) return _cs2Inflight;
+  const btn = $("refresh");
+  const prevLabel = btn.textContent;
+  const run = (async () => {
+    const threshold = $("threshold").value;
+    const qs = new URLSearchParams({ threshold });
+    if (currentDate) qs.set("date", currentDate);
+    if (refresh) qs.set("refresh", "1");
+    const next = "?" + qs.toString();
+    if (location.search !== next) history.replaceState(null, "", next);
+    btn.disabled = true;
+    if (refresh) btn.textContent = "Pulling books…";
+    $("updated").textContent = refresh ? "Pulling PrizePicks and Underdog…" : "Loading…";
+    if (!boardData) $("matches").innerHTML = `<div class="empty">Loading PrizePicks and Underdog…</div>`;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 45000);
+      try {
+        const res = await fetch(url + "?" + qs.toString(), { headers: { Accept: "application/json" }, signal: ctrl.signal });
+        boardData = await res.json();
+        if (!boardData || boardData.ok === false) {
+          $("banner").hidden = false;
+          $("banner").textContent = boardData?.message || boardData?.detail || boardData?.error || "Scanner returned no data.";
+        }
+        currentDate = (boardData && boardData.date) || currentDate;
+        if (boardData) render();
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (err) {
       $("banner").hidden = false;
-      $("banner").textContent = boardData?.message || boardData?.detail || boardData?.error || "Scanner returned no data.";
+      $("banner").textContent = "Could not load CS2 lines. Retry in a moment.";
+      $("updated").textContent = "Load failed";
+      if (!boardData) $("matches").innerHTML = `<div class="empty">Could not load CS2 lines.</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prevLabel || "Refresh lines";
     }
-    currentDate = (boardData && boardData.date) || currentDate;
-    if (boardData) render();
-  } catch (err) {
-    $("banner").hidden = false;
-    $("banner").textContent = "Could not load CS2 lines. Retry in a moment.";
-    $("updated").textContent = "Load failed";
-  }
+  })();
+  _cs2Inflight = run;
+  try { await run; }
+  finally { if (_cs2Inflight === run) _cs2Inflight = null; }
 }
 
 $("threshold").onchange = () => load();
 $("q").oninput = render;
-$("refresh").onclick = async () => {
-  $("refresh").disabled = true;
-  $("refresh").textContent = "Pulling books…";
-  try { await load(true); }
-  finally {
-    $("refresh").disabled = false;
-    $("refresh").textContent = "Refresh lines";
-  }
-};
+$("refresh").onclick = () => load(true);
 load();
 setInterval(() => load(), 15 * 60 * 1000);
 </script>

@@ -22,6 +22,8 @@ body {
   font-family: var(--font-ui);
   color: var(--text);
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-deep);
   background-image:
     radial-gradient(ellipse 120% 80% at 50% -30%, rgba(34, 211, 238, 0.09), transparent 50%),
@@ -93,6 +95,8 @@ h1 {
 .sport-pill.soon { opacity: 0.85; }
 
 #main {
+  flex: 1;
+  width: 100%;
   max-width: 1040px;
   margin: 0 auto;
   padding: 28px 18px;
@@ -146,9 +150,10 @@ h1 {
   gap: 10px;
   min-height: 200px;
 }
-a.sport-card:hover {
+a.sport-card:hover, a.sport-card:focus-visible {
   border-color: rgba(34, 211, 238, 0.42);
   transform: translateY(-2px);
+  outline: none;
 }
 .sport-card.disabled {
   opacity: 0.72;
