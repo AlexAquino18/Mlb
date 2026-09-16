@@ -15,6 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="/assets/billing.js"></script>
   <style>
     :root {
       --bg-deep: #070b14;
@@ -360,7 +361,7 @@
     }
   </style>
 </head>
-<body>
+<body data-billing="base">
 
 <div id="header">
   <div id="header-inner">
@@ -1965,6 +1966,14 @@ function clearCaches() {
 }
 
 async function loadTab(tab) {
+  if (tab === "ev" && window.PropPulseBilling) {
+    await PropPulseBilling.ready;
+    if (!PropPulseBilling.can("ev")) {
+      PropPulseBilling.promptUpgrade();
+      setLoading(false);
+      return;
+    }
+  }
   setLoading(true);
   setError("");
   document.getElementById("cards").innerHTML = "";
@@ -2089,6 +2098,8 @@ document.addEventListener("visibilitychange", () => {
 });
 
 (async function start() {
+  if (window.PropPulseBilling) await PropPulseBilling.ready;
+  if (window.PropPulseBilling && !PropPulseBilling.can("base")) return;
   await bootDefaultWeek();
   await loadTab("props");
 })();

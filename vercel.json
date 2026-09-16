@@ -28,6 +28,7 @@
     "api/odds_io.py": { "maxDuration": 60 },
     "api/nfl_stats.py": { "maxDuration": 30 },
     "api/cs2.py": { "maxDuration": 60, "includeFiles": "lib/cs2_scanner/**" },
-    "api/pp.js": { "maxDuration": 30 }
+    "api/pp.js": { "maxDuration": 30 },
+    "api/billing.py": { "maxDuration": 30 }
   }
 }

@@ -14,6 +14,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/assets/layout.css" />
+  <script src="/assets/billing.js"></script>
   <style>
     #main { padding-top: 22px; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 18px; }
@@ -67,7 +68,7 @@
     a.poly { color: var(--accent); font-size: 12px; }
   </style>
 </head>
-<body>
+<body data-billing="base">
 
 <header id="header">
   <div id="header-inner">
@@ -302,8 +303,12 @@ async function load(refresh) {
 $("threshold").onchange = () => load();
 $("q").oninput = render;
 $("refresh").onclick = () => load(true);
-load();
-setInterval(() => load(), 15 * 60 * 1000);
+(async () => {
+  if (window.PropPulseBilling) await PropPulseBilling.ready;
+  if (window.PropPulseBilling && !PropPulseBilling.can("base")) return;
+  load();
+  setInterval(() => load(), 15 * 60 * 1000);
+})();
 </script>
 </body>
 </html>

@@ -15,7 +15,7 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/assets/layout.css" />
 </head>
-<body>
+<body data-billing="public">
 
 <header id="header">
   <div id="header-inner">
@@ -32,6 +32,7 @@
       </div>
       <div id="subtitle">Player prop intelligence · MLB, NFL &amp; CS2 live</div>
     </div>
+    <div id="header-right"></div>
   </div>
 </header>
 
@@ -67,6 +68,43 @@
       <div class="sport-card-tags"><span class="tag tag-soon">COMING SOON</span></div>
     </a>
   </div>
+
+  <section class="pricing" id="pricing">
+    <h3>Plans</h3>
+    <p class="pricing-lead">Monthly access. Cancel anytime in the billing portal.</p>
+    <div class="price-grid">
+      <div class="price-card">
+        <h4>Base</h4>
+        <div class="price-amt">$9.99 <span>/ month</span></div>
+        <ul>
+          <li>MLB NRFI, strikeouts, hitters</li>
+          <li>NFL slate and player props</li>
+          <li>CS2 PrizePicks vs Underdog</li>
+          <li>FanDuel / DraftKings lines</li>
+        </ul>
+        <button type="button" class="btn" data-checkout="base">Subscribe to Base</button>
+      </div>
+      <div class="price-card featured">
+        <h4>+EV</h4>
+        <div class="price-amt">$14.99 <span>/ month</span></div>
+        <ul>
+          <li>Everything in Base</li>
+          <li>PrizePicks vs FanDuel / DraftKings +EV</li>
+          <li>Half-point lines only (no void mismatches)</li>
+          <li>MLB and NFL +EV tabs</li>
+        </ul>
+        <button type="button" class="btn" data-checkout="ev">Subscribe to +EV</button>
+      </div>
+    </div>
+    <div class="restore">
+      <p>Already subscribed? Restore access with the email you used at checkout.</p>
+      <form class="restore-row" id="restore-form">
+        <input type="email" id="restore-email" required placeholder="you@email.com" autocomplete="email" />
+        <button type="submit" class="btn">Restore</button>
+      </form>
+    </div>
+    <div id="billing-msg"></div>
+  </section>
 </main>
 
 <footer id="site-footer">
@@ -79,5 +117,43 @@
   </div>
 </footer>
 
+<script src="/assets/billing.js"></script>
+<script>
+  const msg = document.getElementById("billing-msg");
+  function setMsg(text, err) {
+    msg.textContent = text || "";
+    msg.classList.toggle("err", !!err);
+  }
+  document.querySelectorAll("[data-checkout]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      setMsg("");
+      btn.disabled = true;
+      const j = await PropPulseBilling.checkout(btn.getAttribute("data-checkout"));
+      if (!j.ok) {
+        btn.disabled = false;
+        setMsg(j.error === "billing_not_configured"
+          ? "Add STRIPE_SECRET_KEY in Vercel to take payments."
+          : (j.error || "Checkout failed."), true);
+      }
+    });
+  });
+  document.getElementById("restore-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    setMsg("");
+    const email = document.getElementById("restore-email").value;
+    const j = await PropPulseBilling.call("restore", { email });
+    if (j.ok && j.plan) {
+      setMsg("Welcome back — " + (j.plan === "ev" ? "+EV" : "Base") + " is active.");
+      setTimeout(() => { location.href = "/mlb/"; }, 600);
+    } else {
+      setMsg(j.error === "no_active_subscription"
+        ? "No active subscription on that email."
+        : (j.error || "Could not restore."), true);
+    }
+  });
+  if (new URLSearchParams(location.search).get("billing") === "success") {
+    PropPulseBilling.ready.then(() => setMsg("You're in. Open MLB, NFL, or CS2 to start."));
+  }
+</script>
 </body>
 </html>

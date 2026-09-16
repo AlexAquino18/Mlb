@@ -339,6 +339,77 @@ def cs2_route():
         )
 
 
+@app.route("/api/billing", methods=["GET", "POST", "OPTIONS"])
+def billing_route():
+    if request.method == "OPTIONS":
+        return Response(status=204, headers=CORS_HEADERS)
+    try:
+        import os as _os
+        import sys as _sys
+        _apid = _os.path.join(_os.path.dirname(__file__), "api")
+        if _apid not in _sys.path:
+            _sys.path.insert(0, _apid)
+        from billing_impl import (
+            complete_checkout,
+            create_checkout,
+            create_portal,
+            cookie_header,
+            me_from_token,
+            parse_cookie,
+            public_config,
+            restore_email,
+        )
+
+        action = (request.args.get("action") or "").lower()
+        body = request.get_json(silent=True) if request.method == "POST" else {}
+        if not isinstance(body, dict):
+            body = {}
+        if not action:
+            action = str(body.get("action") or "").lower()
+        token = parse_cookie(request.headers.get("Cookie") or "")
+        origin = (body.get("origin") or request.host_url or "").rstrip("/")
+        set_cookie = None
+        if action == "config" or (request.method == "GET" and not action):
+            out = public_config()
+        elif action == "me":
+            out, tok = me_from_token(token)
+            if tok == "":
+                set_cookie = cookie_header("", clear=True)
+            elif tok:
+                set_cookie = cookie_header(tok)
+        elif action == "logout":
+            out = {"ok": True, "plan": None, "enabled": True}
+            set_cookie = cookie_header("", clear=True)
+        elif action == "complete":
+            sid = request.args.get("session_id") or body.get("session_id") or ""
+            out, tok = complete_checkout(str(sid))
+            if tok:
+                set_cookie = cookie_header(tok)
+        elif action == "checkout":
+            plan = str(body.get("plan") or request.args.get("plan") or "base")
+            me, _ = me_from_token(token)
+            out = create_checkout(plan, origin, me.get("customerId") or "")
+        elif action == "portal":
+            me, _ = me_from_token(token)
+            out = create_portal(me.get("customerId") or "", origin)
+        elif action == "restore":
+            out, tok = restore_email(str(body.get("email") or ""))
+            if tok:
+                set_cookie = cookie_header(tok)
+        else:
+            out = {"ok": False, "error": "bad_action"}
+        headers = {**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "no-store"}
+        if set_cookie:
+            headers["Set-Cookie"] = set_cookie
+        return Response(json.dumps(out, default=str), status=200, headers=headers)
+    except Exception as e:
+        return Response(
+            json.dumps({"ok": False, "error": "server_error", "detail": str(e)}),
+            status=200,
+            headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "no-store"},
+        )
+
+
 @app.route("/", defaults={"filename": "index.html"})
 @app.route("/<path:filename>")
 def static_files(filename):
