@@ -36,7 +36,8 @@ LIVE_STATUSES = {"active", "trialing"}
 
 
 def stripe_configured() -> bool:
-    return bool((os.environ.get("STRIPE_SECRET_KEY") or "").strip())
+    key = (os.environ.get("STRIPE_SECRET_KEY") or "").strip()
+    return bool(key) and key.startswith("sk_")
 
 
 def _secret() -> str:
@@ -172,9 +173,23 @@ def _stripe(path: str, method: str = "GET", data: Optional[dict] = None) -> Tupl
             msg = (err.get("error") or {}).get("message") or str(e)
         except Exception:
             msg = str(e)
-        return None, f"stripe_{e.code}: {msg}"[:280]
+        return None, _friendly_stripe(e.code, msg)
     except Exception as e:
         return None, str(e)[:240]
+
+
+def _friendly_stripe(code: int, msg: str) -> str:
+    text = (msg or "").strip()
+    low = text.lower()
+    if code == 401:
+        return "stripe_bad_key: That Stripe secret key was rejected. Use the Secret key (sk_test_ or sk_live_), not the publishable pk_ key."
+    if "no such customer" in low:
+        return "stripe_no_customer"
+    if any(s in low for s in ("activate", "account is not connected", "charges are disabled", "responsibilities")):
+        return f"stripe_account: {text}"[:280]
+    if "billing portal" in low and "configuration" in low:
+        return "stripe_portal_config"
+    return f"stripe_{code}: {text}"[:280]
 
 
 def _plan_from_sub(sub: Optional[dict]) -> Optional[str]:
@@ -254,13 +269,14 @@ def me_from_token(token: str) -> Tuple[Dict[str, Any], Optional[str]]:
     )
 
 
-def create_checkout(plan: str, origin: str, customer_id: str = "") -> Dict[str, Any]:
+def create_checkout(plan: str, origin: str, customer_id: str = "", email: str = "") -> Dict[str, Any]:
     if plan not in PLANS:
         return {"ok": False, "error": "bad_plan"}
     if not stripe_configured():
         return {"ok": False, "error": "billing_not_configured"}
     spec = PLANS[plan]
     origin = (origin or "").rstrip("/")
+    email = (email or "").strip().lower()
     success = f"{origin}/?billing=success&session_id={{CHECKOUT_SESSION_ID}}"
     cancel = f"{origin}/?billing=cancel"
     payload: Dict[str, Any] = {
@@ -268,9 +284,11 @@ def create_checkout(plan: str, origin: str, customer_id: str = "") -> Dict[str, 
         "success_url": success,
         "cancel_url": cancel,
         "allow_promotion_codes": True,
+        "billing_address_collection": "auto",
         "client_reference_id": plan,
         "metadata": {"plan": plan},
         "subscription_data": {"metadata": {"plan": plan}},
+        "managed_payments": {"enabled": False},
         "line_items": [{"quantity": 1}],
     }
     price = _price_id(plan)
@@ -285,11 +303,19 @@ def create_checkout(plan: str, origin: str, customer_id: str = "") -> Dict[str, 
                 "name": spec["name"],
                 "description": "Monthly access to PropPulse player-prop tools"
                 + (" including the +EV scanner." if plan == "ev" else "."),
+                "tax_code": "txcd_10103000",
             },
         }
     if customer_id:
         payload["customer"] = customer_id
+    elif email:
+        payload["customer_email"] = email
     sess, err = _stripe("checkout/sessions", "POST", payload)
+    if err and customer_id and (err == "stripe_no_customer" or "no such customer" in (err or "").lower()):
+        payload.pop("customer", None)
+        if email:
+            payload["customer_email"] = email
+        sess, err = _stripe("checkout/sessions", "POST", payload)
     if err:
         return {"ok": False, "error": err}
     url = (sess or {}).get("url")
@@ -389,15 +415,45 @@ def restore_email(email: str) -> Tuple[Dict[str, Any], Optional[str]]:
     )
 
 
+def _portal_configuration_id() -> str:
+    env_id = (os.environ.get("STRIPE_PORTAL_CONFIGURATION") or "").strip()
+    if env_id:
+        return env_id
+    listed, err = _stripe("billing_portal/configurations", "GET", {"limit": 5, "active": True})
+    if not err and isinstance(listed, dict):
+        for cfg in listed.get("data") or []:
+            if isinstance(cfg, dict) and cfg.get("id") and cfg.get("active") is not False:
+                return str(cfg["id"])
+    created, _ = _stripe(
+        "billing_portal/configurations",
+        "POST",
+        {
+            "business_profile": {"headline": "PropPulse billing"},
+            "features": {
+                "customer_update": {
+                    "enabled": True,
+                    "allowed_updates": ["email", "address", "name"],
+                },
+                "invoice_history": {"enabled": True},
+                "payment_method_update": {"enabled": True},
+                "subscription_cancel": {"enabled": True, "mode": "at_period_end"},
+            },
+        },
+    )
+    if isinstance(created, dict) and created.get("id"):
+        return str(created["id"])
+    return ""
+
+
 def create_portal(customer_id: str, origin: str) -> Dict[str, Any]:
     if not customer_id:
         return {"ok": False, "error": "not_signed_in"}
     origin = (origin or "").rstrip("/")
-    sess, err = _stripe(
-        "billing_portal/sessions",
-        "POST",
-        {"customer": customer_id, "return_url": origin + "/"},
-    )
+    payload: Dict[str, Any] = {"customer": customer_id, "return_url": origin + "/"}
+    cfg = _portal_configuration_id()
+    if cfg:
+        payload["configuration"] = cfg
+    sess, err = _stripe("billing_portal/sessions", "POST", payload)
     if err:
         return {"ok": False, "error": err}
     url = (sess or {}).get("url")
@@ -407,9 +463,12 @@ def create_portal(customer_id: str, origin: str) -> Dict[str, Any]:
 
 
 def public_config() -> Dict[str, Any]:
+    key = _stripe_key()
     return {
         "ok": True,
         "enabled": stripe_configured(),
+        "provider": "stripe" if stripe_configured() else "none",
+        "testMode": key.startswith("sk_test_"),
         "plans": {
             "base": {"id": "base", "name": "Base", "price": 9.99, "cents": 999},
             "ev": {"id": "ev", "name": "+EV", "price": 14.99, "cents": 1499},

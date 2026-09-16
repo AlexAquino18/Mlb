@@ -275,7 +275,8 @@ a.sport-card:hover, a.sport-card:focus-visible {
 .restore { max-width: 720px; margin: 28px auto 0; text-align: center; }
 .restore p { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
 .restore-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
-.restore input {
+.checkout-email-row { margin: 0 auto 22px; max-width: 420px; }
+.restore input, .checkout-email-row input {
   background: rgba(17, 24, 39, 0.9);
   border: 1px solid var(--border-strong);
   border-radius: 10px;

@@ -138,15 +138,32 @@
       if (!j.ok) {
         e.currentTarget.disabled = false;
         err.hidden = false;
-        err.textContent = j.error === "billing_not_configured"
-          ? "Stripe is not connected yet. Add STRIPE_SECRET_KEY on the server."
-          : (j.error || "Checkout failed.");
+        err.textContent = checkoutError(j);
       }
     });
   }
 
+  function checkoutEmail() {
+    const el = document.getElementById("checkout-email") || document.getElementById("restore-email");
+    return (el && el.value ? el.value : "").trim();
+  }
+
+  function checkoutError(j) {
+    const err = String((j && j.error) || "");
+    if (err === "billing_not_configured") {
+      return "Stripe is not connected yet. Add STRIPE_SECRET_KEY in Vercel (sk_test_ to try, sk_live_ for real cards).";
+    }
+    if (err.startsWith("stripe_bad_key")) {
+      return "That Stripe key was rejected. Paste the Secret key (starts with sk_test_ or sk_live_), not the pk_ publishable key.";
+    }
+    if (err.startsWith("stripe_account")) {
+      return "Stripe Checkout is blocked until the account is activated. Sign up at stripe.com with a phone you can receive SMS on, then paste the new secret key in Vercel.";
+    }
+    return err || "Checkout failed.";
+  }
+
   async function checkout(plan) {
-    const j = await call("checkout", { plan });
+    const j = await call("checkout", { plan, email: checkoutEmail() });
     if (j.url) location.href = j.url;
     return j;
   }
@@ -187,9 +204,7 @@
         if (!j.ok) {
           btn.disabled = false;
           err.hidden = false;
-          err.textContent = j.error === "billing_not_configured"
-            ? "Stripe is not connected yet. Add STRIPE_SECRET_KEY on the server."
-            : (j.error || "Checkout failed.");
+          err.textContent = checkoutError(j);
         }
       });
     });

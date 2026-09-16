@@ -108,7 +108,12 @@ class handler(BaseHTTPRequestHandler):
             elif action == "checkout":
                 plan = str(body.get("plan") or (qs.get("plan") or [""])[0] or "base")
                 me, _ = me_from_token(token)
-                out = create_checkout(plan, origin, me.get("customerId") or "")
+                out = create_checkout(
+                    plan,
+                    origin,
+                    me.get("customerId") or "",
+                    str(body.get("email") or me.get("email") or ""),
+                )
             elif action == "portal":
                 me, _ = me_from_token(token)
                 out = create_portal(me.get("customerId") or "", origin)

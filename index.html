@@ -71,7 +71,10 @@
 
   <section class="pricing" id="pricing">
     <h3>Plans</h3>
-    <p class="pricing-lead">Monthly access. Cancel anytime in the billing portal.</p>
+    <p class="pricing-lead">Monthly access. Pay with card via Stripe. Cancel anytime in the billing portal.</p>
+    <div class="restore-row checkout-email-row">
+      <input type="email" id="checkout-email" placeholder="Email for checkout" autocomplete="email" />
+    </div>
     <div class="price-grid">
       <div class="price-card">
         <h4>Base</h4>
@@ -132,7 +135,7 @@
       if (!j.ok) {
         btn.disabled = false;
         setMsg(j.error === "billing_not_configured"
-          ? "Add STRIPE_SECRET_KEY in Vercel to take payments."
+          ? "Add STRIPE_SECRET_KEY in Vercel (sk_test_ first, then sk_live_ once the account is activated)."
           : (j.error || "Checkout failed."), true);
       }
     });

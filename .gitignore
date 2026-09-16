@@ -2,6 +2,9 @@ __pycache__/
 *.py[cod]
 .wrangler/
 *.log
+.env
+.env.*
+!.env.example
 
 .vercel
 lib/cs2_scanner/data/
