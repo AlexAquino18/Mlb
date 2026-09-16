@@ -78,9 +78,12 @@ class handler(BaseHTTPRequestHandler):
                 default=str,
             ).encode("utf-8")
 
+        cache = "no-store"
+        if out.get("ok") and out.get("rows"):
+            cache = "public, max-age=60, s-maxage=60"
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "public, max-age=900, s-maxage=900")
+        self.send_header("Cache-Control", cache)
         for k, v in _cors().items():
             self.send_header(k, v)
         self.send_header("Content-Length", str(len(body)))

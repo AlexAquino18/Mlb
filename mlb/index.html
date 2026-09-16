@@ -1969,7 +1969,7 @@ async function applyOddsRowsToState(rows, games) {
 }
 
 const ODDS_CACHE_TTL = 20 * 60 * 1000;
-function oddsCacheKey(dateStr) { return "mlb_odds_v39:" + dateStr; }
+function oddsCacheKey(dateStr) { return "mlb_odds_v41:" + dateStr; }
 function clearOddsCacheForDate(dateStr) {
   try {
     localStorage.removeItem(oddsCacheKey(dateStr));
@@ -1985,16 +1985,58 @@ function oddsCacheGet(dateStr) {
   } catch (_) { return null; }
 }
 function oddsCacheSet(dateStr, data) {
-  try { localStorage.setItem(oddsCacheKey(dateStr), JSON.stringify({ ts: Date.now(), data })); } catch (_) {}
+  try {
+    if (!data || !data.ok || !Array.isArray(data.rows) || !data.rows.length) return;
+    localStorage.setItem(oddsCacheKey(dateStr), JSON.stringify({ ts: Date.now(), data }));
+  } catch (_) {}
 }
 
 function oddsIoFetchUrl(dateStr) {
-  const qs = new URLSearchParams({ date: dateStr, structure: "1", rev: "20260916oddsv39" });
+  const qs = new URLSearchParams({ date: dateStr, rev: "20260916oddsv41" });
   if (typeof location === "undefined" || location.protocol === "file:") return "";
   const host = location.hostname;
   const isLocal = host === "localhost" || host === "127.0.0.1";
   if (isLocal) return `http://127.0.0.1:8080/api/odds_io?${qs}`;
   return `${location.origin}/api/odds_io?${qs}`;
+}
+
+function mergePrizePicksKIntoPpLines(board) {
+  let added = 0;
+  for (const e of board?.allLines || []) {
+    if (e.statKey !== "strikeouts") continue;
+    const nk = e.nk || normName(e.player);
+    if (!nk || ppLines[nk]) continue;
+    const rec = {
+      line: e.line,
+      statType: "Strikeouts",
+      rawName: e.player,
+      team: (e.team || "").toString(),
+      gamesHint: null,
+      allLines: [e.line],
+      books: null,
+      outsLine: null,
+      outsStatType: null,
+      outsAllLines: null,
+      src: "prizepicks",
+    };
+    ppLines[nk] = rec;
+    const lastName = (cleanName(e.player).split(/\s+/).filter(Boolean).pop() || "").toLowerCase();
+    const team = rec.team.toLowerCase();
+    if (team && lastName && !ppLines[`${team}:${lastName}`]) {
+      ppLines[`${team}:${lastName}`] = rec;
+    }
+    added++;
+  }
+  return added;
+}
+
+async function fillMissingKLinesFromPrizePicks() {
+  try {
+    const board = await fetchPrizePicksStandardLines();
+    return mergePrizePicksKIntoPpLines(board);
+  } catch (_) {
+    return 0;
+  }
 }
 
 async function loadPPLines(games, dateStr) {
@@ -2027,48 +2069,68 @@ async function loadPPLines(games, dateStr) {
       };
       const url0 = oddsIoFetchUrl(dateStr);
       if (!url0) {
+        const n = await fillMissingKLinesFromPrizePicks();
+        if (n > 0) {
+          setStatus(`PrizePicks: ${n} pitcher K lines`);
+          captureLineSnapshot(dateStr);
+          detectLineMovements();
+          detectOddsMovements();
+          logStrikeoutOddsFromPpLines(dateStr);
+          buildPPTeamMap();
+          ppLoaded = true;
+          return;
+        }
         setStatus("Sportsbook lines need a server — using calculated lines");
         return;
       }
-      const prevDay = addCalendarDaysYMD(dateStr, -1);
-      const nextDay = addCalendarDaysYMD(dateStr, 1);
-      const [j0, j1, j2] = await Promise.all([
-        fetchOddsPayload(prevDay),
-        fetchOddsPayload(dateStr),
-        fetchOddsPayload(nextDay),
-      ]);
+      const j1 = await fetchOddsPayload(dateStr);
       const mergedRows = [];
-      if (j0?.ok && j0.rows) mergedRows.push(...j0.rows);
       if (j1?.ok && j1.rows) mergedRows.push(...j1.rows);
-      if (j2?.ok && j2.rows) mergedRows.push(...j2.rows);
-      const rowsOut = dedupeOddsRows(mergedRows).map(normalizeOddsRow);
-      if (j0?.ok || j1?.ok || j2?.ok) {
+      if (mergedRows.length < 8) {
+        const prevDay = addCalendarDaysYMD(dateStr, -1);
+        const nextDay = addCalendarDaysYMD(dateStr, 1);
+        const [j0, j2] = await Promise.all([
+          fetchOddsPayload(prevDay),
+          fetchOddsPayload(nextDay),
+        ]);
+        if (j0?.ok && j0.rows) mergedRows.push(...j0.rows);
+        if (j2?.ok && j2.rows) mergedRows.push(...j2.rows);
+        if (j0?.ok || j1?.ok || j2?.ok) {
+          payload = {
+            ok: true,
+            rows: dedupeOddsRows(mergedRows).map(normalizeOddsRow),
+            meta: {
+              ...(j1?.meta || j2?.meta || j0?.meta || {}),
+              apiCalls:
+                (j0?.meta?.apiCalls ?? 0) + (j1?.meta?.apiCalls ?? 0) + (j2?.meta?.apiCalls ?? 0),
+              propRows: mergedRows.length,
+              oddsDaysMerged: `${prevDay}+${dateStr}+${nextDay}`,
+            },
+          };
+        }
+      } else if (j1?.ok) {
         payload = {
           ok: true,
-          rows: rowsOut,
-          meta: {
-            ...(j1?.meta || j2?.meta || j0?.meta || {}),
-            apiCalls:
-              (j0?.meta?.apiCalls ?? 0) + (j1?.meta?.apiCalls ?? 0) + (j2?.meta?.apiCalls ?? 0),
-            propRows: rowsOut.length,
-            oddsDaysMerged: `${prevDay}+${dateStr}+${nextDay}`,
-          },
+          rows: dedupeOddsRows(mergedRows).map(normalizeOddsRow),
+          meta: { ...(j1.meta || {}), propRows: mergedRows.length },
         };
-        oddsCacheSet(dateStr, payload);
       }
+      if (payload?.ok) oddsCacheSet(dateStr, payload);
     }
 
-    if (!payload || !payload.ok) {
-      setStatus("Sportsbook lines unavailable — using calculated lines");
-      return;
+    if (payload?.ok) {
+      await applyOddsRowsToState(payload.rows, games);
+      lastOddsRows = Array.isArray(payload.rows) ? payload.rows.map(normalizeOddsRow) : [];
     }
 
-    await applyOddsRowsToState(payload.rows, games);
-    lastOddsRows = Array.isArray(payload.rows) ? payload.rows.map(normalizeOddsRow) : [];
-
+    const ppAdded = await fillMissingKLinesFromPrizePicks();
     const totalFound = Object.keys(ppLines).filter(k => !k.includes(":")).length;
+    const bookFound = Object.keys(ppLines).filter(k => !k.includes(":") && ppLines[k]?.src !== "prizepicks").length;
     if (totalFound > 0) {
-      setStatus(`Sportsbook: ${totalFound} pitcher K lines (Odds-API)`);
+      const bits = [];
+      if (bookFound) bits.push(`${bookFound} book`);
+      if (ppAdded) bits.push(`${ppAdded} PrizePicks`);
+      setStatus(`Sportsbook: ${bits.join(" + ")} pitcher K lines`);
     } else {
       setStatus("No book K lines matched — calculated lines");
     }
