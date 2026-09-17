@@ -358,6 +358,7 @@ def billing_route():
             parse_cookie,
             public_config,
             restore_email,
+            redeem_promo,
         )
 
         action = (request.args.get("action") or "").lower()
@@ -399,6 +400,10 @@ def billing_route():
             out = create_portal(me.get("customerId") or "", origin)
         elif action == "restore":
             out, tok = restore_email(str(body.get("email") or ""))
+            if tok:
+                set_cookie = cookie_header(tok)
+        elif action == "redeem":
+            out, tok = redeem_promo(str(body.get("code") or ""), str(body.get("email") or ""))
             if tok:
                 set_cookie = cookie_header(tok)
         else:

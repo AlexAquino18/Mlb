@@ -33,6 +33,8 @@ PLANS = {
     },
 }
 LIVE_STATUSES = {"active", "trialing"}
+TRIAL_DAYS = 3
+COMP_CUSTOMER = "comp"
 
 
 def stripe_configured() -> bool:
@@ -245,6 +247,17 @@ def me_from_token(token: str) -> Tuple[Dict[str, Any], Optional[str]]:
         return {"ok": True, "enabled": True, "plan": None, "email": "", "customerId": ""}, None
     plan = sess["plan"]
     tok_out: Optional[str] = token
+    if (sess.get("customerId") or "") == COMP_CUSTOMER:
+        return (
+            {
+                "ok": True,
+                "enabled": True,
+                "plan": plan,
+                "email": sess.get("email") or "",
+                "customerId": COMP_CUSTOMER,
+            },
+            tok_out,
+        )
     if sess.get("customerId"):
         live, _ = _active_plan_for_customer(sess["customerId"])
         if live == "keep":
@@ -277,6 +290,8 @@ def create_checkout(plan: str, origin: str, customer_id: str = "", email: str = 
     spec = PLANS[plan]
     origin = (origin or "").rstrip("/")
     email = (email or "").strip().lower()
+    if customer_id == COMP_CUSTOMER:
+        customer_id = ""
     success = f"{origin}/?billing=success&session_id={{CHECKOUT_SESSION_ID}}"
     cancel = f"{origin}/?billing=cancel"
     payload: Dict[str, Any] = {
@@ -285,9 +300,13 @@ def create_checkout(plan: str, origin: str, customer_id: str = "", email: str = 
         "cancel_url": cancel,
         "allow_promotion_codes": True,
         "billing_address_collection": "auto",
+        "payment_method_collection": "always",
         "client_reference_id": plan,
         "metadata": {"plan": plan},
-        "subscription_data": {"metadata": {"plan": plan}},
+        "subscription_data": {
+            "metadata": {"plan": plan},
+            "trial_period_days": TRIAL_DAYS,
+        },
         "managed_payments": {"enabled": False},
         "line_items": [{"quantity": 1}],
     }
@@ -445,9 +464,26 @@ def _portal_configuration_id() -> str:
     return ""
 
 
+def redeem_promo(code: str, email: str = "") -> Tuple[Dict[str, Any], Optional[str]]:
+    want = (os.environ.get("OWNER_PROMO_CODE") or "").strip()
+    got = (code or "").strip()
+    if not want or not got:
+        return {"ok": False, "error": "invalid_code"}, None
+    a = want.upper().encode("utf-8")
+    b = got.upper().encode("utf-8")
+    if len(a) != len(b) or not hmac.compare_digest(a, b):
+        return {"ok": False, "error": "invalid_code"}, None
+    email = (email or "").strip().lower() or "owner"
+    token = sign_session(email, "ev", COMP_CUSTOMER)
+    return (
+        {"ok": True, "plan": "ev", "email": email, "customerId": COMP_CUSTOMER, "enabled": True},
+        token,
+    )
+
+
 def create_portal(customer_id: str, origin: str) -> Dict[str, Any]:
-    if not customer_id:
-        return {"ok": False, "error": "not_signed_in"}
+    if not customer_id or customer_id == COMP_CUSTOMER:
+        return {"ok": False, "error": "not_signed_in" if not customer_id else "complimentary"}
     origin = (origin or "").rstrip("/")
     payload: Dict[str, Any] = {"customer": customer_id, "return_url": origin + "/"}
     cfg = _portal_configuration_id()
@@ -469,6 +505,7 @@ def public_config() -> Dict[str, Any]:
         "enabled": stripe_configured(),
         "provider": "stripe" if stripe_configured() else "none",
         "testMode": key.startswith("sk_test_"),
+        "trialDays": TRIAL_DAYS,
         "plans": {
             "base": {"id": "base", "name": "Base", "price": 9.99, "cents": 999},
             "ev": {"id": "ev", "name": "+EV", "price": 14.99, "cents": 1499},

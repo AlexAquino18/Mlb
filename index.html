@@ -36,13 +36,18 @@
   </div>
 </header>
 
-<main id="main">
+<main id="main" class="home-main">
   <section class="hero">
+    <p class="hero-kicker">3-day free trial on every plan</p>
     <h2>Find the edge before the line moves</h2>
     <p>Model-driven prop analysis, sportsbook line matching, and +EV scanning — MLB daily, NFL weekly, CS2 live.</p>
+    <div class="hero-actions">
+      <button type="button" class="btn btn-solid" id="hero-subscribe">Start free trial</button>
+      <a class="btn" href="#sports">Browse sports</a>
+    </div>
   </section>
 
-  <div class="sport-grid">
+  <div class="sport-grid" id="sports">
     <a href="/mlb/" class="sport-card">
       <div class="sport-card-icon">⚾</div>
       <div class="sport-card-name">MLB</div>
@@ -71,12 +76,10 @@
 
   <section class="pricing" id="pricing">
     <h3>Plans</h3>
-    <p class="pricing-lead">Monthly access. Pay with card via Stripe. Cancel anytime in the billing portal.</p>
-    <div class="restore-row checkout-email-row">
-      <input type="email" id="checkout-email" placeholder="Email for checkout" autocomplete="email" />
-    </div>
+    <p class="pricing-lead">3 days free, then monthly. Card required to start the trial. Cancel anytime.</p>
     <div class="price-grid">
       <div class="price-card">
+        <div class="trial-pill">3-day free trial</div>
         <h4>Base</h4>
         <div class="price-amt">$9.99 <span>/ month</span></div>
         <ul>
@@ -85,9 +88,10 @@
           <li>CS2 PrizePicks vs Underdog</li>
           <li>FanDuel / DraftKings lines</li>
         </ul>
-        <button type="button" class="btn" data-checkout="base">Subscribe to Base</button>
+        <button type="button" class="btn" data-checkout="base">Start Base trial</button>
       </div>
       <div class="price-card featured">
+        <div class="trial-pill">3-day free trial</div>
         <h4>+EV</h4>
         <div class="price-amt">$14.99 <span>/ month</span></div>
         <ul>
@@ -96,7 +100,7 @@
           <li>Half-point lines only (no void mismatches)</li>
           <li>MLB and NFL +EV tabs</li>
         </ul>
-        <button type="button" class="btn" data-checkout="ev">Subscribe to +EV</button>
+        <button type="button" class="btn" data-checkout="ev">Start +EV trial</button>
       </div>
     </div>
     <div class="restore">
@@ -127,6 +131,9 @@
     msg.textContent = text || "";
     msg.classList.toggle("err", !!err);
   }
+  document.getElementById("hero-subscribe")?.addEventListener("click", () => {
+    PropPulseBilling.promptSubscribe();
+  });
   document.querySelectorAll("[data-checkout]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       setMsg("");
@@ -134,9 +141,7 @@
       const j = await PropPulseBilling.checkout(btn.getAttribute("data-checkout"));
       if (!j.ok) {
         btn.disabled = false;
-        setMsg(j.error === "billing_not_configured"
-          ? "Add STRIPE_SECRET_KEY in Vercel (sk_test_ first, then sk_live_ once the account is activated)."
-          : (j.error || "Checkout failed."), true);
+        setMsg(j.error || "Checkout failed.", true);
       }
     });
   });
