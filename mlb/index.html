@@ -320,21 +320,21 @@
 
     /* ── +EV TABLE ───────────────────────────────────────────────────────── */
     .ev-intro { margin-bottom: 16px; }
-    .ev-intro-hd { font-size: 14px; font-weight: 700; color: var(--accent); margin-bottom: 8px; letter-spacing: 0.02em; }
-    .ev-intro-body { font-size: 12px; color: var(--muted); line-height: 1.65; }
-    .ev-intro-meta { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 11px; color: #64748b; font-family: var(--font-mono); }
+    .ev-intro-hd { font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 8px; letter-spacing: 0.02em; }
+    .ev-intro-body { font-size: 14px; color: var(--muted); line-height: 1.65; }
+    .ev-intro-meta { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 13px; color: #64748b; font-family: var(--font-mono); }
     .ev-table-wrap { overflow: hidden; }
     .ev-thead, .ev-row {
       display: grid;
-      grid-template-columns: minmax(140px, 1.5fr) minmax(72px, 0.65fr) minmax(100px, 0.85fr) minmax(88px, 0.75fr) minmax(64px, 0.55fr);
-      gap: 10px;
+      grid-template-columns: minmax(170px, 1.5fr) minmax(90px, 0.7fr) minmax(120px, 0.9fr) minmax(110px, 0.8fr) minmax(80px, 0.55fr);
+      gap: 14px;
       align-items: center;
-      padding: 12px 18px;
+      padding: 18px 22px;
     }
     .ev-thead {
       background: rgba(7, 11, 20, 0.55);
       border-bottom: 1px solid var(--border);
-      font-size: 10px;
+      font-size: 12px;
       font-weight: 700;
       letter-spacing: 0.08em;
       text-transform: uppercase;
@@ -348,27 +348,27 @@
     .ev-row:hover { background: rgba(34, 211, 238, 0.03); }
     .ev-row.pp { border-left: 3px solid #a78bfa; }
     .ev-row.book { border-left: 3px solid rgba(34, 211, 238, 0.35); }
-    .ev-player { font-weight: 700; font-size: 13px; color: var(--text); }
-    .ev-matchup { font-size: 10px; color: #64748b; margin-top: 3px; }
-    .ev-stat-chip { margin-top: 4px; }
-    .ev-pick { font-size: 13px; font-weight: 800; letter-spacing: 0.02em; }
+    .ev-player { font-weight: 700; font-size: 17px; color: var(--text); }
+    .ev-matchup { font-size: 13px; color: #94a3b8; margin-top: 4px; }
+    .ev-stat-chip { margin-top: 6px; font-size: 12px; padding: 3px 8px; }
+    .ev-pick { font-size: 17px; font-weight: 800; letter-spacing: 0.02em; }
     .ev-pick.over { color: var(--good); }
     .ev-pick.under { color: var(--bad); }
     .ev-book-chip {
       display: inline-block;
-      font-size: 10px;
+      font-size: 13px;
       font-weight: 700;
       font-family: var(--font-mono);
-      padding: 3px 8px;
+      padding: 4px 10px;
       border-radius: 6px;
-      margin-bottom: 4px;
+      margin-bottom: 5px;
     }
     .ev-book-chip.pp { background: rgba(167, 139, 250, 0.14); border: 1px solid rgba(167, 139, 250, 0.4); color: #c4b5fd; }
     .ev-book-chip.book { background: rgba(34, 211, 238, 0.1); border: 1px solid rgba(34, 211, 238, 0.3); color: var(--accent); }
-    .ev-detail { font-size: 10px; color: #64748b; line-height: 1.45; }
-    .ev-fair { font-size: 12px; color: #94a3b8; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-    .ev-kelly { font-size: 10px; color: #64748b; margin-top: 2px; }
-    .ev-pct { font-size: 15px; font-weight: 800; font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+    .ev-detail { font-size: 13px; color: #94a3b8; line-height: 1.45; }
+    .ev-fair { font-size: 15px; color: #cbd5e1; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    .ev-kelly { font-size: 13px; color: #94a3b8; margin-top: 3px; }
+    .ev-pct { font-size: 20px; font-weight: 800; font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
     .ev-empty { text-align: center; padding: 48px 20px; color: #64748b; }
     .ev-empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.85; }
     .ev-empty p { font-size: 13px; line-height: 1.6; max-width: 420px; margin: 0 auto; }
@@ -453,8 +453,8 @@
       .ev-thead { display: none; }
       .ev-row {
         grid-template-columns: 1fr;
-        gap: 6px;
-        padding: 14px 16px;
+        gap: 8px;
+        padding: 18px 18px;
       }
       .ev-pct { text-align: left; }
     }
