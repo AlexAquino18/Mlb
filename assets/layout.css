@@ -26,7 +26,12 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--bg-deep);
-  body.home {
+  background-image:
+    radial-gradient(ellipse 120% 80% at 50% -30%, rgba(34, 211, 238, 0.09), transparent 50%),
+    radial-gradient(ellipse 70% 50% at 100% 20%, rgba(99, 102, 241, 0.06), transparent 45%),
+    radial-gradient(ellipse 60% 40% at 0% 60%, rgba(52, 211, 153, 0.04), transparent 40%);
+}
+body.home {
   background-image:
     radial-gradient(ellipse 80% 50% at 50% -10%, rgba(34, 211, 238, 0.14), transparent 52%),
     radial-gradient(ellipse 50% 40% at 100% 80%, rgba(52, 211, 153, 0.06), transparent 50%),
@@ -129,18 +134,11 @@ h1 {
   width: 100%;
   flex: 1;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 48px 28px 40px;
+  padding: 36px 28px 48px;
 }
 
-#site-footer {
-  border-top: 1px solid var(--border);
-  background: rgba(7, 11, 20, 0.75);
-  padding: 28px 18px;
-  padding-bottom: max(28px, env(safe-area-inset-bottom));
-  margin-top: 8px;
-}
 #site-footer {
   border-top: 1px solid var(--border);
   background: rgba(7, 11, 20, 0.75);
@@ -168,12 +166,18 @@ body.home .footer-disclaimer { font-size: 12px; color: #4b5a6e; }
 .footer-meta { color: #475569; font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.04em; }
 
 /* Home */
+.home-stack {
+  width: min(760px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
 .sport-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 18px;
-  width: min(760px, 100%);
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
 }
 .sport-card {
   background: linear-gradient(180deg, rgba(22, 32, 52, 0.92), rgba(10, 16, 28, 0.94));
@@ -214,7 +218,79 @@ a.sport-card:hover, a.sport-card:focus-visible {
   color: #e8edf5;
   line-height: 0.9;
 }
-.sport-card-desc { font-size: 15px; color: var(--muted); line-height: 1.45; }
+.sport-card-desc { font-size: 15px; color: var(--muted); line-height: 1.45; margin-bottom: 4px; }
+.sport-includes {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 4px;
+}
+.sport-includes li {
+  font-size: 13px;
+  color: #94a3b8;
+  padding-left: 14px;
+  position: relative;
+  line-height: 1.4;
+}
+.sport-includes li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+}
+.plan-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  width: 100%;
+}
+.plan-card {
+  background: linear-gradient(180deg, rgba(22, 32, 52, 0.92), rgba(10, 16, 28, 0.94));
+  border: 1px solid rgba(56, 189, 248, 0.16);
+  border-radius: 20px;
+  padding: 26px 24px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.plan-card.featured {
+  border-color: rgba(52, 211, 153, 0.4);
+  box-shadow: 0 10px 40px rgba(52, 211, 153, 0.08);
+}
+.plan-card h3 {
+  font-family: var(--font-display);
+  font-size: 34px;
+  letter-spacing: 0.08em;
+  color: #e8edf5;
+  line-height: 1;
+}
+.plan-amt { font-size: 28px; font-weight: 700; color: var(--text); }
+.plan-amt span { font-size: 14px; color: var(--muted); font-weight: 500; }
+.plan-card p { font-size: 14px; color: var(--muted); line-height: 1.5; }
+.plan-card ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 10px;
+  flex: 1;
+}
+.plan-card li {
+  font-size: 14px;
+  color: #c5d0de;
+  padding-left: 16px;
+  position: relative;
+  line-height: 1.4;
+}
+.plan-card li::before {
+  content: "→";
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+}
+.plan-card .btn { align-self: flex-start; margin-top: auto; }
 .sport-card-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 .tag {
   font-size: 11px;
@@ -292,7 +368,7 @@ a.sport-card:hover, a.sport-card:focus-visible {
   #main.home-main { padding: 28px 16px 32px; align-items: flex-start; }
   .header-login { width: 100%; }
   .header-login input { min-width: 0; flex: 1; }
-  .sport-grid { grid-template-columns: 1fr; width: 100%; }
+  .sport-grid, .plan-grid { grid-template-columns: 1fr; width: 100%; }
   .sport-card { min-height: 0; }
   .coming-panel { padding: 32px 20px; }
 }

@@ -31,39 +31,96 @@
 </header>
 
 <main id="main" class="home-main">
-  <div class="sport-grid" id="sports">
-    <a href="/mlb/" class="sport-card">
-      <div class="sport-card-top">
-        <div class="sport-card-icon" aria-hidden="true">⚾</div>
-        <span class="tag tag-live">Live</span>
+  <div class="home-stack">
+    <div class="sport-grid" id="sports">
+      <a href="/mlb/" class="sport-card">
+        <div class="sport-card-top">
+          <div class="sport-card-icon" aria-hidden="true">⚾</div>
+          <span class="tag tag-live">Live</span>
+        </div>
+        <div class="sport-card-name">MLB</div>
+        <p class="sport-card-desc">Daily board with books and PrizePicks.</p>
+        <ul class="sport-includes">
+          <li>NRFI / YRFI game cards</li>
+          <li>Pitcher strikeouts and last 5 starts</li>
+          <li>Hitter props and matchup notes</li>
+          <li>FanDuel / DraftKings lines</li>
+          <li>+EV tab vs PrizePicks</li>
+        </ul>
+      </a>
+      <a href="/nfl/" class="sport-card">
+        <div class="sport-card-top">
+          <div class="sport-card-icon" aria-hidden="true">🏈</div>
+          <span class="tag tag-live">Live</span>
+        </div>
+        <div class="sport-card-name">NFL</div>
+        <p class="sport-card-desc">Weekly slate with player props and +EV.</p>
+        <ul class="sport-includes">
+          <li>Pass, rush, receiving, TDs</li>
+          <li>Defense and kicking props</li>
+          <li>Line movement and PrizePicks badges</li>
+          <li>FanDuel / DraftKings prices</li>
+          <li>+EV tab vs PrizePicks</li>
+        </ul>
+      </a>
+      <a href="/cs2/" class="sport-card">
+        <div class="sport-card-top">
+          <div class="sport-card-icon" aria-hidden="true">🎯</div>
+          <span class="tag tag-live">Live</span>
+        </div>
+        <div class="sport-card-name">CS2</div>
+        <p class="sport-card-desc">Live map props and series odds.</p>
+        <ul class="sport-includes">
+          <li>PrizePicks vs Underdog gaps</li>
+          <li>Player kills, headshots, maps</li>
+          <li>Line moves during the match</li>
+          <li>Polymarket series odds</li>
+        </ul>
+      </a>
+      <a href="/nba/" class="sport-card soon-card">
+        <div class="sport-card-top">
+          <div class="sport-card-icon" aria-hidden="true">🏀</div>
+          <span class="tag tag-soon">Soon</span>
+        </div>
+        <div class="sport-card-name">NBA</div>
+        <p class="sport-card-desc">Coming next — same prop toolkit.</p>
+        <ul class="sport-includes">
+          <li>Points, rebounds, assists</li>
+          <li>Combo props</li>
+          <li>Book line matching</li>
+          <li>+EV grades vs PrizePicks</li>
+        </ul>
+      </a>
+    </div>
+
+    <div class="plan-grid" id="pricing">
+      <div class="plan-card">
+        <span class="tag tag-live">3-day free trial</span>
+        <h3>Base</h3>
+        <div class="plan-amt">$9.99 <span>/ month</span></div>
+        <p>Full site access for every live sport. Cancel before day 4 and you are not charged.</p>
+        <ul>
+          <li>MLB NRFI, strikeouts, hitters</li>
+          <li>NFL slate and player props</li>
+          <li>CS2 PrizePicks vs Underdog</li>
+          <li>FanDuel and DraftKings lines</li>
+        </ul>
+        <button type="button" class="btn" data-checkout="base">Start Base</button>
       </div>
-      <div class="sport-card-name">MLB</div>
-      <p class="sport-card-desc">Strikeouts, NRFI, hitters, +EV</p>
-    </a>
-    <a href="/nfl/" class="sport-card">
-      <div class="sport-card-top">
-        <div class="sport-card-icon" aria-hidden="true">🏈</div>
-        <span class="tag tag-live">Live</span>
+      <div class="plan-card featured">
+        <span class="tag tag-live">3-day free trial</span>
+        <h3>+EV</h3>
+        <div class="plan-amt">$14.99 <span>/ month</span></div>
+        <p>Everything in Base, plus the scanner that grades PrizePicks against the books.</p>
+        <ul>
+          <li>Everything in Base</li>
+          <li>PrizePicks vs FanDuel / DraftKings +EV</li>
+          <li>Half-point lines only (no void mismatches)</li>
+          <li>MLB and NFL +EV tabs</li>
+        </ul>
+        <button type="button" class="btn" data-checkout="ev">Start +EV</button>
       </div>
-      <div class="sport-card-name">NFL</div>
-      <p class="sport-card-desc">Passing, rushing, receiving, +EV</p>
-    </a>
-    <a href="/cs2/" class="sport-card">
-      <div class="sport-card-top">
-        <div class="sport-card-icon" aria-hidden="true">🎯</div>
-        <span class="tag tag-live">Live</span>
-      </div>
-      <div class="sport-card-name">CS2</div>
-      <p class="sport-card-desc">PrizePicks vs Underdog gaps</p>
-    </a>
-    <a href="/nba/" class="sport-card soon-card">
-      <div class="sport-card-top">
-        <div class="sport-card-icon" aria-hidden="true">🏀</div>
-        <span class="tag tag-soon">Soon</span>
-      </div>
-      <div class="sport-card-name">NBA</div>
-      <p class="sport-card-desc">Points, rebounds, assists</p>
-    </a>
+    </div>
   </div>
 </main>
 
@@ -94,6 +151,16 @@
         ? "No active plan on that email."
         : (j.error || "Could not log in."), true);
     }
+  });
+  document.querySelectorAll("[data-checkout]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      const j = await PropPulseBilling.checkout(btn.getAttribute("data-checkout"));
+      if (!j.ok) {
+        btn.disabled = false;
+        setMsg(j.error || "Checkout failed.", true);
+      }
+    });
   });
   if (new URLSearchParams(location.search).get("billing") === "success") {
     PropPulseBilling.ready.then(() => setMsg("You're in."));
