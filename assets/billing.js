@@ -48,7 +48,12 @@
       .pp-acct button, .pp-btn { font-family:var(--font-ui, Outfit, system-ui, sans-serif); font-size:14px; font-weight:600; padding:9px 14px; border-radius:10px; cursor:pointer; border:1px solid rgba(34,211,238,.45); background:rgba(34,211,238,.14); color:#22d3ee; }
       .pp-acct button.ghost { background:transparent; color:#8b9cb3; border-color:rgba(139,156,179,.28); }
       .pp-gate, .pp-modal-bg { position:fixed; inset:0; z-index:400; background:rgba(7,11,20,.82); backdrop-filter:blur(10px); display:flex; align-items:center; justify-content:center; padding:24px 16px; }
-      .pp-panel { max-width:480px; width:100%; background:rgba(17,24,39,.97); border:1px solid rgba(56,189,248,.22); border-radius:18px; padding:28px 26px; box-shadow:0 12px 40px rgba(0,0,0,.45); }
+      .pp-panel { max-width:480px; width:100%; background:rgba(17,24,39,.97); border:1px solid rgba(56,189,248,.22); border-radius:18px; padding:28px 26px; box-shadow:0 12px 40px rgba(0,0,0,.45); position:relative; }
+      .pp-x { position:absolute; top:12px; right:12px; width:36px; height:36px; border:none; border-radius:10px; background:rgba(139,156,179,.12); color:#e8edf5; font-size:22px; line-height:1; cursor:pointer; }
+      .pp-x:hover { background:rgba(139,156,179,.22); }
+      .pp-login-row { display:flex; gap:8px; margin:12px 0 4px; }
+      .pp-login-row .pp-field { margin:0; flex:1; }
+      .pp-login-label { font-size:13px; color:#8b9cb3; margin:12px 0 6px; }
       .pp-panel h3 { font-family:var(--font-display, "Bebas Neue", sans-serif); font-size:36px; letter-spacing:.08em; color:#22d3ee; margin-bottom:8px; }
       .pp-panel p { color:#9fb0c6; font-size:16px; line-height:1.55; margin-bottom:16px; }
       .pp-panel .pp-price { font-size:28px; font-weight:700; color:#e8edf5; margin-bottom:14px; }
@@ -129,6 +134,7 @@
     wrap.id = "pp-modal";
     wrap.className = "pp-modal-bg";
     wrap.innerHTML = `<div class="pp-panel">
+      <button type="button" class="pp-x" data-close aria-label="Close">×</button>
       <span class="pp-trial">3-day free trial</span>
       <h3>${title}</h3>
       <p>${body}</p>
@@ -142,10 +148,13 @@
     </div>`;
     document.body.appendChild(wrap);
     wrap.addEventListener("click", (e) => { if (e.target === wrap) closeModal(); });
-    wrap.querySelector("[data-close]")?.addEventListener("click", () => {
-      try { localStorage.setItem("pp_sub_popup", "1"); } catch (_) {}
-      closeModal();
+    wrap.querySelectorAll("[data-close]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        try { localStorage.setItem("pp_sub_popup", "1"); } catch (_) {}
+        closeModal();
+      });
     });
+    wrap.querySelector("[data-login]")?.addEventListener("click", () => loginFromPanel(wrap));
     wrap.querySelectorAll("[data-go]").forEach((btn) => {
       btn.addEventListener("click", async (e) => {
         const err = wrap.querySelector(".pp-err");
@@ -218,11 +227,38 @@
       <input class="pp-field" id="pp-promo" type="text" placeholder="Promo code (optional)" autocomplete="off" />`;
   }
 
+  function loginHtml() {
+    return `<p class="pp-login-label">Already subscribed?</p>
+      <div class="pp-login-row">
+        <button type="button" class="pp-btn" data-login>Log in</button>
+      </div>`;
+  }
+
+  async function loginFromPanel(root) {
+    const err = root.querySelector(".pp-err");
+    const email = (root.querySelector("#pp-email")?.value || checkoutEmail() || "").trim();
+    if (!email) {
+      if (err) { err.hidden = false; err.textContent = "Enter the email you used at checkout."; }
+      return;
+    }
+    const j = await call("restore", { email });
+    if (j.ok && j.plan) {
+      location.reload();
+      return;
+    }
+    if (err) {
+      err.hidden = false;
+      err.textContent = j.error === "no_active_subscription"
+        ? "No active plan on that email."
+        : checkoutError(j);
+    }
+  }
+
   function promptSubscribe() {
     showModal({
       title: "Start free",
       body: "3 days free on both plans. Card on file — cancel before day 4 and you won’t be charged.",
-      extra: fieldsHtml(),
+      extra: fieldsHtml() + loginHtml(),
       actions: `<button type="button" class="pp-btn primary" data-go="base">Start Base</button>
         <button type="button" class="pp-btn" data-go="ev">Start +EV</button>`,
     });
@@ -233,7 +269,7 @@
       title: "+EV access",
       body: "The +EV scanner grades PrizePicks vs FanDuel and DraftKings. 3-day free trial, then $14.99/month (includes Base).",
       price: "$14.99 <span>/ month after trial</span>",
-      extra: fieldsHtml(),
+      extra: fieldsHtml() + loginHtml(),
       actions: `<button type="button" class="pp-btn primary" data-go="ev">Start +EV trial</button>`,
     });
   }
@@ -245,17 +281,20 @@
     g.id = "pp-gate";
     g.className = "pp-gate";
     g.innerHTML = `<div class="pp-panel">
+      <button type="button" class="pp-x" data-close aria-label="Close">×</button>
       <span class="pp-trial">3-day free trial</span>
       <h3>Subscribe to continue</h3>
       <p>Base unlocks MLB, NFL, and CS2. +EV adds the PrizePicks vs FanDuel / DraftKings scanner. 3 days free, then monthly.</p>
-      ${fieldsHtml()}
+      ${fieldsHtml() + loginHtml()}
       <div class="pp-actions">
-        <button type="button" class="pp-btn primary" data-go="base">Start Base trial</button>
+        <button type="button" class="pp-btn primary" data-go="base">Start Base</button>
         <button type="button" class="pp-btn" data-go="ev">+EV $14.99</button>
       </div>
       <div class="pp-err" hidden></div>
     </div>`;
     document.body.appendChild(g);
+    g.querySelector("[data-close]")?.addEventListener("click", () => { location.href = "/"; });
+    g.querySelector("[data-login]")?.addEventListener("click", () => loginFromPanel(g));
     g.querySelectorAll("[data-go]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const err = g.querySelector(".pp-err");
