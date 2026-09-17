@@ -30,23 +30,18 @@
           <a href="/nba/" class="sport-pill soon">NBA</a>
         </nav>
       </div>
-      <div id="subtitle">Player prop intelligence · MLB, NFL &amp; CS2 live</div>
     </div>
-    <div id="header-right"></div>
+    <div id="header-right">
+      <form class="header-login" id="restore-form">
+        <input type="email" id="restore-email" required placeholder="Email" autocomplete="email" />
+        <button type="submit" class="btn">Log in</button>
+      </form>
+      <div id="billing-msg"></div>
+    </div>
   </div>
 </header>
 
 <main id="main" class="home-main">
-  <section class="hero">
-    <p class="hero-kicker">3-day free trial on every plan</p>
-    <h2>Find the edge before the line moves</h2>
-    <p>Model-driven prop analysis, sportsbook line matching, and +EV scanning — MLB daily, NFL weekly, CS2 live.</p>
-    <div class="hero-actions">
-      <button type="button" class="btn btn-solid" id="hero-subscribe">Start free trial</button>
-      <a class="btn" href="#sports">Browse sports</a>
-    </div>
-  </section>
-
   <div class="sport-grid" id="sports">
     <a href="/mlb/" class="sport-card">
       <div class="sport-card-icon">⚾</div>
@@ -57,7 +52,7 @@
     <a href="/nfl/" class="sport-card">
       <div class="sport-card-icon">🏈</div>
       <div class="sport-card-name">NFL</div>
-      <p class="sport-card-desc">Passing, rushing, receiving, TDs, defense, and kicking props with line movement, PrizePicks badges, and +EV vs FanDuel &amp; DraftKings.</p>
+      <p class="sport-card-desc">Passing, rushing, receiving, TDs, and kicking props with PrizePicks vs FanDuel &amp; DraftKings.</p>
       <div class="sport-card-tags"><span class="tag tag-live">LIVE NOW</span></div>
     </a>
     <a href="/cs2/" class="sport-card">
@@ -69,57 +64,17 @@
     <a href="/nba/" class="sport-card">
       <div class="sport-card-icon">🏀</div>
       <div class="sport-card-name">NBA</div>
-      <p class="sport-card-desc">Player points, rebounds, assists, and combo props with book line matching and +EV grades.</p>
+      <p class="sport-card-desc">Player points, rebounds, assists, and combo props with book lines and +EV grades.</p>
       <div class="sport-card-tags"><span class="tag tag-soon">COMING SOON</span></div>
     </a>
   </div>
-
-  <section class="pricing" id="pricing">
-    <h3>Plans</h3>
-    <p class="pricing-lead">3 days free, then monthly. Card required to start the trial. Cancel anytime.</p>
-    <div class="price-grid">
-      <div class="price-card">
-        <div class="trial-pill">3-day free trial</div>
-        <h4>Base</h4>
-        <div class="price-amt">$9.99 <span>/ month</span></div>
-        <ul>
-          <li>MLB NRFI, strikeouts, hitters</li>
-          <li>NFL slate and player props</li>
-          <li>CS2 PrizePicks vs Underdog</li>
-          <li>FanDuel / DraftKings lines</li>
-        </ul>
-        <button type="button" class="btn" data-checkout="base">Start Base trial</button>
-      </div>
-      <div class="price-card featured">
-        <div class="trial-pill">3-day free trial</div>
-        <h4>+EV</h4>
-        <div class="price-amt">$14.99 <span>/ month</span></div>
-        <ul>
-          <li>Everything in Base</li>
-          <li>PrizePicks vs FanDuel / DraftKings +EV</li>
-          <li>Half-point lines only (no void mismatches)</li>
-          <li>MLB and NFL +EV tabs</li>
-        </ul>
-        <button type="button" class="btn" data-checkout="ev">Start +EV trial</button>
-      </div>
-    </div>
-    <div class="restore">
-      <p>Already subscribed? Restore access with the email you used at checkout.</p>
-      <form class="restore-row" id="restore-form">
-        <input type="email" id="restore-email" required placeholder="you@email.com" autocomplete="email" />
-        <button type="submit" class="btn">Restore</button>
-      </form>
-    </div>
-    <div id="billing-msg"></div>
-  </section>
 </main>
 
 <footer id="site-footer">
   <div class="footer-inner">
     <div class="footer-brand">PROPPULSE</div>
-    <p class="footer-tag">Player prop intelligence · MLB, NFL &amp; CS2 live · NBA coming</p>
     <p class="footer-disclaimer">
-      For informational purposes only — not betting advice. Verify lineups and props before wagering. Bet responsibly.
+      For informational purposes only — not betting advice. Bet responsibly.
     </p>
   </div>
 </footer>
@@ -128,39 +83,26 @@
 <script>
   const msg = document.getElementById("billing-msg");
   function setMsg(text, err) {
+    if (!msg) return;
     msg.textContent = text || "";
     msg.classList.toggle("err", !!err);
   }
-  document.getElementById("hero-subscribe")?.addEventListener("click", () => {
-    PropPulseBilling.promptSubscribe();
-  });
-  document.querySelectorAll("[data-checkout]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      setMsg("");
-      btn.disabled = true;
-      const j = await PropPulseBilling.checkout(btn.getAttribute("data-checkout"));
-      if (!j.ok) {
-        btn.disabled = false;
-        setMsg(j.error || "Checkout failed.", true);
-      }
-    });
-  });
-  document.getElementById("restore-form").addEventListener("submit", async (e) => {
+  document.getElementById("restore-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     setMsg("");
     const email = document.getElementById("restore-email").value;
     const j = await PropPulseBilling.call("restore", { email });
     if (j.ok && j.plan) {
-      setMsg("Welcome back — " + (j.plan === "ev" ? "+EV" : "Base") + " is active.");
-      setTimeout(() => { location.href = "/mlb/"; }, 600);
+      setMsg((j.plan === "ev" ? "+EV" : "Base") + " is on.");
+      setTimeout(() => { location.href = "/mlb/"; }, 500);
     } else {
       setMsg(j.error === "no_active_subscription"
-        ? "No active subscription on that email."
-        : (j.error || "Could not restore."), true);
+        ? "No active plan on that email."
+        : (j.error || "Could not log in."), true);
     }
   });
   if (new URLSearchParams(location.search).get("billing") === "success") {
-    PropPulseBilling.ready.then(() => setMsg("You're in. Open MLB, NFL, or CS2 to start."));
+    PropPulseBilling.ready.then(() => setMsg("You're in."));
   }
 </script>
 </body>

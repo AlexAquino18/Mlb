@@ -44,22 +44,28 @@
     s.id = "pp-billing-css";
     s.textContent = `
       .pp-acct { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-      .pp-acct-chip { font-family:var(--font-mono, ui-monospace, monospace); font-size:10px; font-weight:700; letter-spacing:.06em; padding:5px 10px; border-radius:999px; border:1px solid rgba(52,211,153,.4); background:rgba(52,211,153,.12); color:#34d399; }
-      .pp-acct button, .pp-btn { font-family:var(--font-ui, Outfit, system-ui, sans-serif); font-size:12px; font-weight:600; padding:7px 12px; border-radius:10px; cursor:pointer; border:1px solid rgba(34,211,238,.45); background:rgba(34,211,238,.14); color:#22d3ee; }
+      .pp-acct-chip { font-family:var(--font-mono, ui-monospace, monospace); font-size:11px; font-weight:700; letter-spacing:.06em; padding:6px 12px; border-radius:999px; border:1px solid rgba(52,211,153,.4); background:rgba(52,211,153,.12); color:#34d399; }
+      .pp-acct button, .pp-btn { font-family:var(--font-ui, Outfit, system-ui, sans-serif); font-size:14px; font-weight:600; padding:9px 14px; border-radius:10px; cursor:pointer; border:1px solid rgba(34,211,238,.45); background:rgba(34,211,238,.14); color:#22d3ee; }
       .pp-acct button.ghost { background:transparent; color:#8b9cb3; border-color:rgba(139,156,179,.28); }
       .pp-gate, .pp-modal-bg { position:fixed; inset:0; z-index:400; background:rgba(7,11,20,.82); backdrop-filter:blur(10px); display:flex; align-items:center; justify-content:center; padding:24px 16px; }
-      .pp-panel { max-width: 440px; width:100%; background:rgba(17,24,39,.96); border:1px solid rgba(56,189,248,.22); border-radius:16px; padding:28px 24px; box-shadow:0 12px 40px rgba(0,0,0,.45); }
-      .pp-panel h3 { font-family:var(--font-display, "Bebas Neue", sans-serif); font-size:32px; letter-spacing:.08em; color:#22d3ee; margin-bottom:8px; }
-      .pp-panel p { color:#8b9cb3; font-size:14px; line-height:1.55; margin-bottom:16px; }
+      .pp-panel { max-width:480px; width:100%; background:rgba(17,24,39,.97); border:1px solid rgba(56,189,248,.22); border-radius:18px; padding:28px 26px; box-shadow:0 12px 40px rgba(0,0,0,.45); }
+      .pp-panel h3 { font-family:var(--font-display, "Bebas Neue", sans-serif); font-size:36px; letter-spacing:.08em; color:#22d3ee; margin-bottom:8px; }
+      .pp-panel p { color:#9fb0c6; font-size:16px; line-height:1.55; margin-bottom:16px; }
       .pp-panel .pp-price { font-size:28px; font-weight:700; color:#e8edf5; margin-bottom:14px; }
-      .pp-panel .pp-price span { font-size:14px; color:#8b9cb3; font-weight:500; }
-      .pp-panel .pp-actions { display:flex; flex-wrap:wrap; gap:10px; }
-      .pp-btn.primary { background:linear-gradient(145deg, rgba(34,211,238,.95), rgba(56,189,248,.88)); color:#061016; border:none; padding:10px 16px; }
-      .pp-err { color:#fb7185; font-size:12px; margin-top:10px; }
-      .pp-ok { color:#34d399; font-size:12px; margin-top:10px; }
-      .pp-field { width:100%; margin:0 0 10px; background:rgba(7,11,20,.85); border:1px solid rgba(56,189,248,.28); border-radius:10px; padding:10px 12px; color:#e8edf5; font-size:14px; font-family:inherit; }
+      .pp-panel .pp-price span { font-size:15px; color:#8b9cb3; font-weight:500; }
+      .pp-panel .pp-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:6px; }
+      .pp-btn.primary { background:linear-gradient(145deg, rgba(34,211,238,.95), rgba(56,189,248,.88)); color:#061016; border:none; padding:11px 16px; }
+      .pp-err { color:#fb7185; font-size:13px; margin-top:10px; }
+      .pp-ok { color:#34d399; font-size:13px; margin-top:10px; }
+      .pp-field { width:100%; margin:0 0 10px; background:rgba(7,11,20,.85); border:1px solid rgba(56,189,248,.28); border-radius:10px; padding:11px 12px; color:#e8edf5; font-size:15px; font-family:inherit; }
       .pp-field::placeholder { color:#64748b; }
-      .pp-trial { display:inline-block; font-family:var(--font-mono, ui-monospace, monospace); font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#34d399; background:rgba(52,211,153,.12); border:1px solid rgba(52,211,153,.32); border-radius:999px; padding:4px 10px; margin-bottom:10px; }
+      .pp-trial { display:inline-block; font-family:var(--font-mono, ui-monospace, monospace); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#34d399; background:rgba(52,211,153,.12); border:1px solid rgba(52,211,153,.32); border-radius:999px; padding:5px 11px; margin-bottom:10px; }
+      .pp-plans { display:grid; gap:10px; margin:0 0 14px; }
+      .pp-plan { background:rgba(7,11,20,.55); border:1px solid rgba(56,189,248,.16); border-radius:12px; padding:12px 14px; }
+      .pp-plan.featured { border-color:rgba(52,211,153,.4); }
+      .pp-plan strong { display:block; font-size:16px; color:#e8edf5; margin-bottom:4px; }
+      .pp-plan span { color:#22d3ee; font-weight:700; }
+      .pp-plan p { margin:0; font-size:14px; color:#8b9cb3; }
       .tab-btn.pp-locked { position:relative; }
       .tab-btn.pp-locked::after { content:"🔒"; font-size:10px; margin-left:4px; }
     `;
@@ -83,7 +89,9 @@
       box.className = "pp-acct";
       host.appendChild(box);
     }
+    const login = document.querySelector(".header-login");
     const me = state.me;
+    if (login) login.hidden = !!(me && me.enabled && me.plan);
     if (!me.enabled) {
       box.innerHTML = "";
       return;
@@ -196,17 +204,27 @@
   }
 
   function fieldsHtml() {
-    return `<input class="pp-field" id="pp-email" type="email" placeholder="Email" autocomplete="email" />
+    return `<div class="pp-plans">
+        <div class="pp-plan">
+          <strong>Base <span>$9.99/mo</span></strong>
+          <p>MLB, NFL, CS2, and FanDuel / DraftKings lines.</p>
+        </div>
+        <div class="pp-plan featured">
+          <strong>+EV <span>$14.99/mo</span></strong>
+          <p>Everything in Base, plus PrizePicks vs FanDuel / DraftKings +EV.</p>
+        </div>
+      </div>
+      <input class="pp-field" id="pp-email" type="email" placeholder="Email" autocomplete="email" />
       <input class="pp-field" id="pp-promo" type="text" placeholder="Promo code (optional)" autocomplete="off" />`;
   }
 
   function promptSubscribe() {
     showModal({
       title: "Start free",
-      body: "3 days free on both plans. Card on file, cancel anytime before day 4 and you won’t be charged.",
+      body: "3 days free on both plans. Card on file — cancel before day 4 and you won’t be charged.",
       extra: fieldsHtml(),
-      actions: `<button type="button" class="pp-btn primary" data-go="base">Base $9.99</button>
-        <button type="button" class="pp-btn" data-go="ev">+EV $14.99</button>`,
+      actions: `<button type="button" class="pp-btn primary" data-go="base">Start Base</button>
+        <button type="button" class="pp-btn" data-go="ev">Start +EV</button>`,
     });
   }
 
