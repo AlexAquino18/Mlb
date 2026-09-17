@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/layout.css" />
+  <link rel="stylesheet" href="/assets/layout.css?v=home4" />
 </head>
 <body class="home" data-billing="public">
 
@@ -21,9 +21,9 @@
   <div id="header-inner">
     <a href="/" class="brand-link"><h1>PROPPULSE</h1></a>
     <div id="header-right">
-      <form class="header-login" id="restore-form">
+      <form class="header-auth" id="restore-form">
         <input type="email" id="restore-email" required placeholder="Email" autocomplete="email" />
-        <button type="submit" class="btn">Log in</button>
+        <button type="submit" class="btn hdr-btn">Log in</button>
       </form>
       <div id="billing-msg"></div>
     </div>
@@ -130,7 +130,7 @@
   </div>
 </footer>
 
-<script src="/assets/billing.js"></script>
+<script src="/assets/billing.js?v=home4"></script>
 <script>
   const msg = document.getElementById("billing-msg");
   function setMsg(text, err) {

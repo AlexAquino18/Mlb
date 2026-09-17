@@ -45,7 +45,7 @@
     s.textContent = `
       .pp-acct { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
       .pp-acct-chip { font-family:var(--font-mono, ui-monospace, monospace); font-size:11px; font-weight:700; letter-spacing:.06em; padding:6px 12px; border-radius:999px; border:1px solid rgba(52,211,153,.4); background:rgba(52,211,153,.12); color:#34d399; }
-      .pp-acct button, .pp-btn { font-family:var(--font-ui, Outfit, system-ui, sans-serif); font-size:14px; font-weight:600; padding:9px 14px; border-radius:10px; cursor:pointer; border:1px solid rgba(34,211,238,.45); background:rgba(34,211,238,.14); color:#22d3ee; }
+      .pp-acct button, .pp-btn { font-family:var(--font-ui, Outfit, system-ui, sans-serif); font-size:14px; font-weight:600; height:40px; min-width:110px; padding:0 16px; border-radius:10px; cursor:pointer; border:1px solid rgba(34,211,238,.45); background:rgba(34,211,238,.14); color:#22d3ee; display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; }
       .pp-acct button.ghost { background:transparent; color:#8b9cb3; border-color:rgba(139,156,179,.28); }
       .pp-gate, .pp-modal-bg { position:fixed; inset:0; z-index:400; background:rgba(7,11,20,.82); backdrop-filter:blur(10px); display:flex; align-items:center; justify-content:center; padding:24px 16px; }
       .pp-panel { max-width:480px; width:100%; background:rgba(17,24,39,.97); border:1px solid rgba(56,189,248,.22); border-radius:18px; padding:28px 26px; box-shadow:0 12px 40px rgba(0,0,0,.45); position:relative; }
@@ -94,7 +94,7 @@
       box.className = "pp-acct";
       host.appendChild(box);
     }
-    const login = document.querySelector(".header-login");
+    const login = document.querySelector(".header-auth, .header-login");
     const me = state.me;
     if (login) login.hidden = !!(me && me.enabled && me.plan);
     if (!me.enabled) {
@@ -107,7 +107,7 @@
         <button type="button" class="ghost" data-pp="portal">Manage</button>
         <button type="button" class="ghost" data-pp="logout">Log out</button>`;
     } else {
-      box.innerHTML = `<button type="button" data-pp="home">Subscribe</button>`;
+      box.innerHTML = `<button type="button" class="btn hdr-btn" data-pp="home">Subscribe</button>`;
     }
     box.querySelectorAll("[data-pp]").forEach((btn) => {
       btn.addEventListener("click", async () => {
