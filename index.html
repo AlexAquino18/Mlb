@@ -15,22 +15,11 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/assets/layout.css" />
 </head>
-<body data-billing="public">
+<body class="home" data-billing="public">
 
 <header id="header">
   <div id="header-inner">
-    <div>
-      <div class="brand-row">
-        <a href="/" class="brand-link"><h1>PROPPULSE</h1></a>
-        <nav class="sport-nav" aria-label="Sports">
-          <a href="/" class="sport-pill active">Home</a>
-          <a href="/mlb/" class="sport-pill live">MLB</a>
-          <a href="/nfl/" class="sport-pill live">NFL</a>
-          <a href="/cs2/" class="sport-pill live">CS2</a>
-          <a href="/nba/" class="sport-pill soon">NBA</a>
-        </nav>
-      </div>
-    </div>
+    <a href="/" class="brand-link"><h1>PROPPULSE</h1></a>
     <div id="header-right">
       <form class="header-login" id="restore-form">
         <input type="email" id="restore-email" required placeholder="Email" autocomplete="email" />
@@ -44,38 +33,43 @@
 <main id="main" class="home-main">
   <div class="sport-grid" id="sports">
     <a href="/mlb/" class="sport-card">
-      <div class="sport-card-icon">⚾</div>
+      <div class="sport-card-top">
+        <div class="sport-card-icon" aria-hidden="true">⚾</div>
+        <span class="tag tag-live">Live</span>
+      </div>
       <div class="sport-card-name">MLB</div>
-      <p class="sport-card-desc">NRFI/YRFI, pitcher strikeouts, hitter props, and PrizePicks +EV vs FanDuel &amp; DraftKings.</p>
-      <div class="sport-card-tags"><span class="tag tag-live">LIVE NOW</span></div>
+      <p class="sport-card-desc">Strikeouts, NRFI, hitters, +EV</p>
     </a>
     <a href="/nfl/" class="sport-card">
-      <div class="sport-card-icon">🏈</div>
+      <div class="sport-card-top">
+        <div class="sport-card-icon" aria-hidden="true">🏈</div>
+        <span class="tag tag-live">Live</span>
+      </div>
       <div class="sport-card-name">NFL</div>
-      <p class="sport-card-desc">Passing, rushing, receiving, TDs, and kicking props with PrizePicks vs FanDuel &amp; DraftKings.</p>
-      <div class="sport-card-tags"><span class="tag tag-live">LIVE NOW</span></div>
+      <p class="sport-card-desc">Passing, rushing, receiving, +EV</p>
     </a>
     <a href="/cs2/" class="sport-card">
-      <div class="sport-card-icon">🎯</div>
+      <div class="sport-card-top">
+        <div class="sport-card-icon" aria-hidden="true">🎯</div>
+        <span class="tag tag-live">Live</span>
+      </div>
       <div class="sport-card-name">CS2</div>
-      <p class="sport-card-desc">PrizePicks vs Underdog player-prop gaps, line moves, and Polymarket series odds.</p>
-      <div class="sport-card-tags"><span class="tag tag-live">LIVE NOW</span></div>
+      <p class="sport-card-desc">PrizePicks vs Underdog gaps</p>
     </a>
-    <a href="/nba/" class="sport-card">
-      <div class="sport-card-icon">🏀</div>
+    <a href="/nba/" class="sport-card soon-card">
+      <div class="sport-card-top">
+        <div class="sport-card-icon" aria-hidden="true">🏀</div>
+        <span class="tag tag-soon">Soon</span>
+      </div>
       <div class="sport-card-name">NBA</div>
-      <p class="sport-card-desc">Player points, rebounds, assists, and combo props with book lines and +EV grades.</p>
-      <div class="sport-card-tags"><span class="tag tag-soon">COMING SOON</span></div>
+      <p class="sport-card-desc">Points, rebounds, assists</p>
     </a>
   </div>
 </main>
 
 <footer id="site-footer">
   <div class="footer-inner">
-    <div class="footer-brand">PROPPULSE</div>
-    <p class="footer-disclaimer">
-      For informational purposes only — not betting advice. Bet responsibly.
-    </p>
+    <p class="footer-disclaimer">For informational purposes only — not betting advice. Bet responsibly.</p>
   </div>
 </footer>
 
