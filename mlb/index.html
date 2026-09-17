@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <script src="/assets/billing.js"></script>
+  <script src="/assets/billing.js?v=m2"></script>
   <style>
     :root {
       --bg-deep: #070b14;
@@ -40,11 +40,12 @@
       --font-display: "Bebas Neue", sans-serif;
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-behavior: smooth; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-behavior: smooth; overflow-x: hidden; }
     body {
       font-family: var(--font-ui);
       color: var(--text);
       min-height: 100vh;
+      overflow-x: hidden;
       display: flex;
       flex-direction: column;
       -webkit-overflow-scrolling: touch;
@@ -424,13 +425,14 @@
       #header { padding: 12px 14px; }
       h1 { font-size: 24px; }
       .brand-row { gap: 6px; }
-      .sport-pill { font-size: 9px; padding: 3px 7px; }
-      #subtitle { font-size: 10px; }
-      #header-right { gap: 6px; }
-      #header-right input[type=date] { font-size: 10px; padding: 5px 7px; }
-      .btn { font-size: 11px; padding: 6px 10px; }
+      .sport-pill { font-size: 10px; padding: 6px 9px; }
+      #subtitle { font-size: 11px; }
+      #header-right { gap: 6px; width: 100%; }
+      #header-right input[type=date] { font-size: 16px; padding: 8px 10px; }
+      .btn { font-size: 13px; padding: 10px 12px; min-height: 44px; }
       #main { padding: 14px 10px; }
-      .tab-btn { font-size: 11px; padding: 8px 6px; }
+      #tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .tab-btn { font-size: 11px; padding: 10px 8px; min-height: 44px; }
       #summary-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
       .sum-val { font-size: 24px; }
       .sum-lbl { font-size: 10px; }
@@ -448,8 +450,8 @@
       .analysis-txt { font-size: 12px; }
       .bar-lbl, .bar-val { font-size: 10px; }
       .lineup-batter { font-size: 11px; }
-      #filters { gap: 5px; }
-      .filter-btn { font-size: 10px; padding: 3px 9px; }
+      #filters { gap: 5px; overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+      .filter-btn { font-size: 11px; padding: 8px 12px; flex-shrink: 0; min-height: 40px; }
       .ev-thead { display: none; }
       .ev-row {
         grid-template-columns: 1fr;

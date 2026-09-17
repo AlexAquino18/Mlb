@@ -13,8 +13,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/layout.css" />
-  <script src="/assets/billing.js"></script>
+  <link rel="stylesheet" href="/assets/layout.css?v=m2" />
+  <script src="/assets/billing.js?v=m2"></script>
   <style>
     #main { padding-top: 22px; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 18px; }
@@ -66,6 +66,14 @@
     .pill.fav { border-color: rgba(52, 211, 153, 0.45); color: var(--good); }
     .empty { color: var(--muted); padding: 28px 8px; text-align: center; }
     a.poly { color: var(--accent); font-size: 12px; }
+    @media (max-width: 720px) {
+      .toolbar { flex-direction: column; align-items: stretch; }
+      select, input[type=search], .btn-go { width: 100%; font-size: 16px; min-height: 44px; }
+      .dates { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+      .filter-btn { flex-shrink: 0; min-height: 40px; }
+      .match-head { padding: 12px; }
+      .match-head h3 { font-size: 14px; }
+    }
   </style>
 </head>
 <body data-billing="base">

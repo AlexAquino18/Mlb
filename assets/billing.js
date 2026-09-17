@@ -49,6 +49,17 @@
       .pp-acct button.ghost { background:transparent; color:#8b9cb3; border-color:rgba(139,156,179,.28); }
       .pp-gate, .pp-modal-bg { position:fixed; inset:0; z-index:400; background:rgba(7,11,20,.82); backdrop-filter:blur(10px); display:flex; align-items:center; justify-content:center; padding:24px 16px; }
       .pp-panel { max-width:480px; width:100%; background:rgba(17,24,39,.97); border:1px solid rgba(56,189,248,.22); border-radius:18px; padding:28px 26px; box-shadow:0 12px 40px rgba(0,0,0,.45); position:relative; }
+      @media (max-width:720px) {
+        .pp-gate, .pp-modal-bg { padding:12px; align-items:flex-end; }
+        .pp-panel { max-height:min(92dvh, 100%); overflow:auto; -webkit-overflow-scrolling:touch; padding:22px 16px calc(18px + env(safe-area-inset-bottom)); }
+        .pp-panel h3 { font-size:28px; }
+        .pp-panel p { font-size:14px; }
+        .pp-actions { flex-direction:column; }
+        .pp-login-row { flex-direction:column; }
+        .pp-actions .pp-btn, .pp-login-row .pp-btn { width:100%; }
+        .pp-field { font-size:16px; }
+        .pp-x { top:8px; right:8px; }
+      }
       .pp-x { position:absolute; top:12px; right:12px; width:36px; height:36px; border:none; border-radius:10px; background:rgba(139,156,179,.12); color:#e8edf5; font-size:22px; line-height:1; cursor:pointer; }
       .pp-x:hover { background:rgba(139,156,179,.22); }
       .pp-login-row { display:flex; gap:8px; margin:12px 0 4px; }
