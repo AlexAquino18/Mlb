@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://proppulse01.vercel.app/sitemap.xml
