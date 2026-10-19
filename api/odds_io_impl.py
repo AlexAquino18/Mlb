@@ -226,6 +226,33 @@ def _is_nfl_event(ev: dict) -> bool:
     return False
 
 
+def _is_nba_event(ev: dict) -> bool:
+    lg = ev.get("league") if isinstance(ev.get("league"), dict) else {}
+    slug = (lg.get("slug") or "").lower()
+    name = (lg.get("name") or "").lower()
+    if any(x in slug or x in name for x in ("ncaa", "ncaab", "college", "wnba", "g-league", "gleague", "euroleague")):
+        return False
+    if "nba" in slug or slug in ("usa-nba", "us-nba") or name.strip() == "nba":
+        return True
+    if "national basketball" in name:
+        return True
+    sp = ev.get("sport") if isinstance(ev.get("sport"), dict) else {}
+    sp_slug = (sp.get("slug") or "").lower()
+    sp_name = (sp.get("name") or "").lower()
+    if "nba" in sp_slug or sp_name == "nba":
+        return True
+    blob = f"{_team_str(ev.get('home'))} {_team_str(ev.get('away'))}".lower()
+    tokens = (
+        "celtics", "nets", "knicks", "76ers", "sixers", "raptors",
+        "bulls", "cavaliers", "pistons", "pacers", "bucks",
+        "hawks", "hornets", "heat", "magic", "wizards",
+        "nuggets", "timberwolves", "thunder", "trail blazers", "blazers", "jazz",
+        "warriors", "clippers", "lakers", "suns", "kings",
+        "mavericks", "rockets", "grizzlies", "pelicans", "spurs",
+    )
+    return sum(1 for t in tokens if t in blob) >= 1
+
+
 _NON_MLB_BASEBALL = (
     "npb",
     "kbo",
@@ -620,6 +647,41 @@ def _stat_hint_nfl(raw: str) -> str:
     return ""
 
 
+def _stat_hint_nba(raw: str) -> str:
+    raw = (raw or "").lower()
+    if not raw:
+        return ""
+    if "triple" in raw and "double" in raw:
+        return "tdbl"
+    if "double" in raw and "double" in raw[raw.find("double") + 6 :]:
+        return "ddbl"
+    if "double double" in raw or "double-double" in raw:
+        return "ddbl"
+    if any(x in raw for x in ("pts+reb+ast", "pts + reb + ast", "points+rebounds+assists", "pra", "p+r+a", "pts rebs asts")):
+        return "pra"
+    if any(x in raw for x in ("pts+reb", "pts + reb", "points+rebounds", "points rebounds", "p+r")) and "ast" not in raw:
+        return "pr"
+    if any(x in raw for x in ("pts+ast", "pts + ast", "points+assists", "points assists", "p+a")):
+        return "pa"
+    if any(x in raw for x in ("reb+ast", "reb + ast", "rebounds+assists", "rebounds assists", "r+a")):
+        return "ra"
+    if "three" in raw or "3pt" in raw or "3-pt" in raw or "3 pointer" in raw or "threes" in raw:
+        return "threes"
+    if "rebound" in raw or raw in ("reb", "rebs", "rpg"):
+        return "reb"
+    if "assist" in raw or raw in ("ast", "asts", "apg"):
+        return "ast"
+    if "steal" in raw:
+        return "stl"
+    if "block" in raw:
+        return "blk"
+    if "turnover" in raw:
+        return "tov"
+    if "point" in raw or raw in ("pts", "ppg"):
+        return "pts"
+    return ""
+
+
 def _stat_hint_from_market(m: dict, sport: str = "") -> str:
     """
     Odds-API often sets market.name to only 'Player Props'. Scan other keys/values for stat text.
@@ -631,8 +693,12 @@ def _stat_hint_from_market(m: dict, sport: str = "") -> str:
         blob = ""
     if not blob:
         return ""
+    if sport == "nba":
+        nba = _stat_hint_nba(blob)
+        if nba:
+            return nba
     # NFL keyword scan on a full market JSON blob false-positives MLB strikeout markets.
-    if sport != "mlb":
+    if sport not in ("mlb", "nba"):
         nfl = _stat_hint_nfl(blob)
         if nfl:
             return nfl
@@ -673,6 +739,9 @@ def _stat_hint_from_text(text: str) -> str:
         return "strikeouts"
     if "pitcher" in raw and re.search(r"\bk'?s?\b", raw):
         return "strikeouts"
+    nba = _stat_hint_nba(raw)
+    if nba:
+        return nba
     nfl = _stat_hint_nfl(raw)
     if nfl:
         return nfl
@@ -925,6 +994,7 @@ AN_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, li
 AN_BOOK_IDS = {68: "DraftKings", 69: "FanDuel"}
 AN_MLB_SCOREBOARD = "https://api.actionnetwork.com/web/v2/scoreboard/mlb"
 AN_NFL_SCOREBOARD = "https://api.actionnetwork.com/web/v2/scoreboard/nfl"
+AN_NBA_SCOREBOARD = "https://api.actionnetwork.com/web/v2/scoreboard/nba"
 AN_MARKET_MAP = {
     "core_bet_type_37_strikeouts": ("strikeouts", "Pitcher Strikeouts"),
     "core_bet_type_42_pitching_outs": ("pitcher_outs", "Pitching Outs"),
@@ -953,6 +1023,51 @@ AN_NFL_BATCHES = [
         "core_bet_type_43_kicking_points": ("kicking_pts", "Kicking Pts"),
         "core_bet_type_213_field_goals_made": ("fg_made", "FG Made"),
         "core_bet_type_578_sacks": ("sacks", "Sacks"),
+    },
+]
+AN_NBA_BATCHES = [
+    {
+        "core_bet_type_21_points": ("pts", "Points"),
+        "core_bet_type_22_rebounds": ("reb", "Rebounds"),
+        "core_bet_type_23_assists": ("ast", "Assists"),
+        "core_bet_type_24_threes": ("threes", "Threes"),
+        "core_bet_type_25_steals": ("stl", "Steals"),
+        "core_bet_type_26_blocks": ("blk", "Blocks"),
+        "core_bet_type_27_pts_rebs_asts": ("pra", "Pts+Reb+Ast"),
+        "core_bet_type_28_pts_rebs": ("pr", "Pts+Reb"),
+        "core_bet_type_29_pts_asts": ("pa", "Pts+Ast"),
+        "core_bet_type_31_rebs_asts": ("ra", "Reb+Ast"),
+    },
+    {
+        "core_bet_type_57_points": ("pts", "Points"),
+        "core_bet_type_58_rebounds": ("reb", "Rebounds"),
+        "core_bet_type_59_assists": ("ast", "Assists"),
+        "core_bet_type_60_threes": ("threes", "Threes"),
+        "core_bet_type_61_steals": ("stl", "Steals"),
+        "core_bet_type_62_blocks": ("blk", "Blocks"),
+        "core_bet_type_63_turnovers": ("tov", "Turnovers"),
+        "core_bet_type_64_pts_rebs_asts": ("pra", "Pts+Reb+Ast"),
+        "core_bet_type_67_pts_rebs": ("pr", "Pts+Reb"),
+        "core_bet_type_68_pts_asts": ("pa", "Pts+Ast"),
+        "core_bet_type_69_rebs_asts": ("ra", "Reb+Ast"),
+        "core_bet_type_70_double_double": ("ddbl", "Double-Double"),
+    },
+    {
+        "core_bet_type_80_points": ("pts", "Points"),
+        "core_bet_type_81_rebounds": ("reb", "Rebounds"),
+        "core_bet_type_82_assists": ("ast", "Assists"),
+        "core_bet_type_83_threes": ("threes", "Threes"),
+        "core_bet_type_106_player_points": ("pts", "Points"),
+        "core_bet_type_107_player_rebounds": ("reb", "Rebounds"),
+        "core_bet_type_108_player_assists": ("ast", "Assists"),
+        "core_bet_type_109_player_threes": ("threes", "Threes"),
+        "core_bet_type_110_player_pra": ("pra", "Pts+Reb+Ast"),
+        "core_bet_type_37_points": ("pts", "Points"),
+        "player_points": ("pts", "Points"),
+        "player_rebounds": ("reb", "Rebounds"),
+        "player_assists": ("ast", "Assists"),
+        "player_threes": ("threes", "Threes"),
+        "player_points_rebounds_assists": ("pra", "Pts+Reb+Ast"),
     },
 ]
 
@@ -1002,6 +1117,7 @@ def _an_rows_from_payload(
     market_map: Dict[str, Tuple[str, str]],
     date_from: str,
     date_to: str,
+    auto_stat: bool = False,
 ) -> List[dict]:
     if not isinstance(raw, dict):
         return []
@@ -1039,6 +1155,10 @@ def _an_rows_from_payload(
                 continue
             for mkey, outcomes in event_mk.items():
                 hint_pair = market_map.get(str(mkey))
+                if not hint_pair and auto_stat:
+                    h = _stat_hint_nba(str(mkey).replace("core_bet_type_", " ").replace("_", " "))
+                    if h:
+                        hint_pair = (h, str(mkey).replace("_", " ").title())
                 if not hint_pair or not isinstance(outcomes, list):
                     continue
                 hint, mlabel = hint_pair
@@ -1089,6 +1209,7 @@ def _fetch_actionnetwork_scoreboard(
     date_to: str,
     out: Dict[str, Any],
     timeout: int = 25,
+    auto_stat: bool = False,
 ) -> List[dict]:
     pick_types = ",".join(market_map.keys())
     book_ids = ",".join(str(i) for i in AN_BOOK_IDS)
@@ -1102,7 +1223,7 @@ def _fetch_actionnetwork_scoreboard(
     if err:
         out["meta"].setdefault("actionNetworkErrors", []).append(err)
         return []
-    return _an_rows_from_payload(raw, market_map, date_from, date_to)
+    return _an_rows_from_payload(raw, market_map, date_from, date_to, auto_stat=auto_stat)
 
 
 def fetch_actionnetwork_mlb(date_key: str, out: Dict[str, Any]) -> List[dict]:
@@ -1121,6 +1242,24 @@ def fetch_actionnetwork_nfl(date_from: str, date_to: str, out: Dict[str, Any]) -
     for batch in AN_NFL_BATCHES:
         part = _fetch_actionnetwork_scoreboard(
             AN_NFL_SCOREBOARD, batch, date_from, date_to, out, timeout=28
+        )
+        for rec in part:
+            key = (rec.get("player"), rec.get("bookmaker"), rec.get("statHint"), rec.get("hdp"))
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(rec)
+    out["meta"]["actionNetworkRows"] = len(rows)
+    return rows
+
+
+def fetch_actionnetwork_nba(date_from: str, date_to: str, out: Dict[str, Any]) -> List[dict]:
+    """FanDuel / DraftKings NBA player props from Action Network (no API key)."""
+    rows: List[dict] = []
+    seen: set = set()
+    for batch in AN_NBA_BATCHES:
+        part = _fetch_actionnetwork_scoreboard(
+            AN_NBA_SCOREBOARD, batch, date_from, date_to, out, timeout=28, auto_stat=True
         )
         for rec in part:
             key = (rec.get("player"), rec.get("bookmaker"), rec.get("statHint"), rec.get("hdp"))
@@ -1483,6 +1622,125 @@ def _events_in_range(events: List[dict], date_from: str, date_to: str) -> List[d
             for d in dates
         ):
             out.append(e)
+    return out
+
+
+def fetch_nba_odds_bundle(
+    api_key: str,
+    date_from: str,
+    date_to: str = "",
+    bookmakers: str = DEFAULT_BOOKMAKERS,
+    debug_structure: bool = False,
+) -> Dict[str, Any]:
+    """NBA player props for a date. Action Network first, then Odds-API.io."""
+    start = (date_from or "")[:10]
+    end = (date_to or date_from or "")[:10]
+    cache_key = f"nba|{start}|{end}|{bookmakers}|v1"
+    now = time.time()
+    if not debug_structure and cache_key in _CACHE:
+        ts, data = _CACHE[cache_key]
+        if now - ts < CACHE_TTL_SEC and data.get("ok"):
+            return data
+
+    out: Dict[str, Any] = {
+        "ok": False,
+        "error": None,
+        "rows": [],
+        "meta": {"apiCalls": 0, "eventCount": 0, "propRows": 0, "sport": "nba"},
+    }
+    if len(start) != 10 or len(end) != 10:
+        out["error"] = "bad_date"
+        return out
+    if end < start:
+        start, end = end, start
+    io_key = (api_key or "").strip()
+    try:
+        rows: List[dict] = []
+        rows.extend(fetch_actionnetwork_nba(start, end, out))
+        skip_paid = _has_fd_dk_priced(rows)
+        out["meta"]["skippedPaidOdds"] = skip_paid
+        events: List[dict] = []
+        seen_ids: set = set()
+        if not skip_paid and io_key:
+            attempts = (
+                {"sport": "nba", "from": start, "to": end},
+                {"sport": "basketball", "league": "nba", "from": start, "to": end},
+                {"sport": "basketball", "from": start, "to": end},
+                {"sport": "nba"},
+            )
+            for attempt in attempts:
+                q_params: Dict[str, str] = {"sport": attempt["sport"], "apiKey": io_key}
+                if attempt.get("league"):
+                    q_params["league"] = str(attempt["league"])
+                if attempt.get("from"):
+                    q_params["from"] = f"{attempt['from']}T00:00:00Z"
+                if attempt.get("to"):
+                    q_params["to"] = f"{attempt['to']}T23:59:59Z"
+                events_url = f"{ODDS_BASE}/events?{urllib.parse.urlencode(q_params)}"
+                try:
+                    raw_ev = _get_json(events_url)
+                except Exception:
+                    continue
+                out["meta"]["apiCalls"] = out["meta"].get("apiCalls", 0) + 1
+                if isinstance(raw_ev, dict) and raw_ev.get("error"):
+                    continue
+                raw_all = _events_list(raw_ev)
+                on_range = (
+                    _events_in_range(raw_all, start, end)
+                    if attempt.get("from")
+                    else _events_in_range(raw_all, start, end) or raw_all
+                )
+                nba_events = [e for e in on_range if _is_nba_event(e)]
+                added = 0
+                for e in nba_events:
+                    eid = _eid_key(e.get("id"))
+                    if not eid or eid in seen_ids:
+                        continue
+                    seen_ids.add(eid)
+                    events.append(e)
+                    added += 1
+                if added:
+                    out["meta"]["eventsSport"] = attempt["sport"]
+                    out["meta"].setdefault("eventsQueries", []).append(
+                        ("ranged" if attempt.get("from") else "next_14d") + f"+{added}"
+                    )
+                if len(events) >= 8:
+                    break
+            if events:
+                events = _events_in_range(events, start, end) or events
+            out["meta"]["eventCount"] = len(events)
+            if events:
+                event_teams: Dict[str, Tuple[str, str]] = {}
+                for e in events:
+                    eid = e.get("id")
+                    if eid is None:
+                        continue
+                    event_teams[_eid_key(eid)] = (_team_str(e.get("home")), _team_str(e.get("away")))
+                event_ids = [e["id"] for e in events if e.get("id") is not None]
+                io_rows, _first = _odds_multi_rows(
+                    io_key, event_ids, bookmakers, event_teams, out,
+                    sport="nba", markets=None, debug_structure=debug_structure,
+                )
+                rows.extend(io_rows or [])
+        elif skip_paid:
+            out["meta"]["eventCount"] = 0
+        else:
+            out["meta"]["note"] = "no_nba_events_for_range"
+        out["rows"] = rows
+        out["meta"]["propRows"] = len(rows)
+        out["meta"]["dateFrom"] = start
+        out["meta"]["dateTo"] = end
+        out["ok"] = True
+        if not debug_structure:
+            _CACHE[cache_key] = (now, out)
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = str(e)
+        out["error"] = f"http_{e.code}: {body[:300]}"
+    except Exception as e:
+        out["error"] = str(e)
     return out
 
 

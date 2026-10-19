@@ -5,23 +5,377 @@
   <meta name="google-site-verification" content="i4q57Vuc_x4J6LQf1QP_MipVfAgYoKRoKg_eBeBxAjQ" />
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2561861794171820"
      crossorigin="anonymous"></script>
-  <title>PropPulse — NBA (Coming Soon)</title>
-  <meta name="description" content="NBA player prop intelligence on PropPulse — coming soon." />
+  <title>PropPulse — NBA Props</title>
+  <meta name="description" content="PropPulse NBA player props — points, rebounds, assists, combos, matchup notes, and +EV vs PrizePicks, FanDuel, and DraftKings." />
   <meta property="og:title" content="PropPulse — NBA" />
-  <meta property="og:description" content="NBA player prop intelligence on PropPulse — coming soon." />
+  <meta property="og:description" content="NBA player props, matchup projections, and +EV odds." />
   <meta property="og:type" content="website" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#070b14" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/layout.css?v=m2" />
   <script src="/assets/billing.js?v=m2"></script>
-</head>
-<body data-billing="public">
+  <style>
+    :root {
+      --bg-deep: #070b14;
+      --bg-card: rgba(17, 24, 39, 0.9);
+      --border: rgba(56, 189, 248, 0.12);
+      --border-strong: rgba(56, 189, 248, 0.28);
+      --text: #e8edf5;
+      --muted: #8b9cb3;
+      --accent: #22d3ee;
+      --accent-dim: rgba(34, 211, 238, 0.14);
+      --good: #34d399;
+      --warn: #fbbf24;
+      --bad: #fb7185;
+      --radius: 14px;
+      --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+      --font-ui: "Outfit", system-ui, sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+      --font-display: "Bebas Neue", sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; overflow-x: hidden; }
+    body {
+      font-family: var(--font-ui);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-deep);
+      background-image:
+        radial-gradient(ellipse 120% 80% at 50% -30%, rgba(34, 211, 238, 0.09), transparent 50%),
+        radial-gradient(ellipse 70% 50% at 100% 20%, rgba(99, 102, 241, 0.06), transparent 45%),
+        radial-gradient(ellipse 60% 40% at 0% 60%, rgba(52, 211, 153, 0.04), transparent 40%);
+    }
+    button, .tab-btn, .filter-btn, .card-hd, a, select { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg-deep); }
+    ::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.22); border-radius: 4px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+      html { scroll-behavior: auto; }
+    }
 
-<header id="header">
+    #header {
+      background: rgba(7, 11, 20, 0.82);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 24px;
+      padding-top: max(18px, env(safe-area-inset-top));
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    #header-inner { max-width: 1040px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; }
+    h1 {
+      font-family: var(--font-display);
+      font-size: 34px;
+      letter-spacing: 0.14em;
+      color: var(--accent);
+      line-height: 1;
+      text-shadow: 0 0 40px rgba(34, 211, 238, 0.35);
+    }
+    .brand-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .brand-link { text-decoration: none; color: inherit; }
+    .brand-link:hover h1 { filter: brightness(1.08); }
+    .sport-nav { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .sport-pill {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(139, 156, 179, 0.1);
+      border: 1px solid rgba(139, 156, 179, 0.22);
+      color: var(--muted);
+      line-height: 1;
+      text-decoration: none;
+      transition: border-color 0.2s, background 0.2s, color 0.2s;
+    }
+    .sport-pill:hover { border-color: rgba(34, 211, 238, 0.35); color: var(--text); }
+    .sport-pill.active {
+      background: rgba(52, 211, 153, 0.12);
+      border-color: rgba(52, 211, 153, 0.4);
+      color: var(--good);
+    }
+    .sport-pill.live {
+      background: rgba(52, 211, 153, 0.12);
+      border-color: rgba(52, 211, 153, 0.35);
+      color: var(--good);
+    }
+    .sport-pill.soon { opacity: 0.85; }
+    #subtitle { color: var(--muted); font-size: 12px; margin-top: 5px; font-weight: 500; letter-spacing: 0.02em; }
+    #header-right { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    select, input[type=search], input[type=date] {
+      background: rgba(17, 24, 39, 0.9);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      padding: 8px 12px;
+      color: var(--text);
+      font-size: 12px;
+      font-family: var(--font-mono);
+      cursor: pointer;
+      transition: border-color 0.2s;
+      color-scheme: dark;
+    }
+    select:hover, input[type=search]:hover, input[type=date]:hover { border-color: rgba(34, 211, 238, 0.45); }
+    input[type=search] { cursor: text; min-width: 160px; }
+    #updated { color: var(--muted); font-size: 11px; font-family: var(--font-mono); }
+
+    #main { flex: 1; width: 100%; max-width: 1040px; margin: 0 auto; padding: 28px 18px; padding-bottom: max(28px, env(safe-area-inset-bottom)); }
+    #tabs {
+      display: flex;
+      gap: 6px;
+      background: rgba(17, 24, 39, 0.55);
+      padding: 6px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      margin-bottom: 22px;
+      box-shadow: var(--shadow);
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--font-ui);
+      font-weight: 600;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      transition: color 0.2s, background 0.2s, box-shadow 0.2s;
+    }
+    .tab-btn:hover:not(.active) { color: var(--text); background: rgba(255, 255, 255, 0.04); }
+    .tab-btn.active {
+      background: linear-gradient(145deg, rgba(34, 211, 238, 0.95), rgba(56, 189, 248, 0.88));
+      color: #061016;
+      box-shadow: 0 4px 20px rgba(34, 211, 238, 0.25);
+    }
+    #filters { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; align-items: center; }
+    .filter-btn {
+      padding: 6px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(17, 24, 39, 0.4);
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      font-family: var(--font-ui);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      transition: border-color 0.2s, background 0.2s, color 0.2s;
+    }
+    .filter-btn:hover { border-color: rgba(34, 211, 238, 0.3); color: var(--text); }
+    .filter-btn.active { border-color: rgba(34, 211, 238, 0.55); background: var(--accent-dim); color: var(--accent); }
+    #game-count { color: var(--muted); font-size: 11px; font-family: var(--font-mono); margin-left: auto; }
+
+    #loader { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 56px 0; }
+    .spinner {
+      width: 46px; height: 46px;
+      border: 3px solid rgba(34, 211, 238, 0.15);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+    #load-status { color: var(--muted); font-size: 13px; font-family: var(--font-mono); }
+    #error-box { background: rgba(251, 113, 133, 0.08); border: 1px solid rgba(251, 113, 133, 0.35); border-radius: var(--radius); padding: 16px 18px; color: #fda4af; font-size: 13px; display: flex; align-items: center; gap: 12px; }
+    .btn-retry { background: none; border: 1px solid rgba(251, 113, 133, 0.55); color: #fda4af; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-family: var(--font-ui); font-size: 12px; font-weight: 600; }
+
+    #summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 22px; }
+    .sum-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 16px;
+      text-align: center;
+      box-shadow: var(--shadow);
+    }
+    .sum-val { font-family: var(--font-display); font-size: 32px; font-weight: 800; letter-spacing: 0.04em; }
+    .sum-lbl { color: var(--muted); font-size: 11px; margin-top: 4px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+
+    .game-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 14px;
+      overflow: hidden;
+      animation: fadeIn 0.35s ease;
+      box-shadow: var(--shadow);
+    }
+    .game-card.open { border-color: rgba(34, 211, 238, 0.42); box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.12), 0 12px 40px rgba(0, 0, 0, 0.45); }
+    .card-hd {
+      padding: 18px 20px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    .card-hd:hover { background: rgba(255, 255, 255, 0.02); }
+    .card-teams { color: var(--text); font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+    .card-meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .stat-chip { background: rgba(139, 156, 179, 0.12); border: 1px solid rgba(139, 156, 179, 0.22); border-radius: 6px; padding: 2px 7px; font-size: 10px; color: var(--muted); white-space: nowrap; font-family: var(--font-mono); }
+    .stat-chip.good { background: rgba(52, 211, 153, 0.12); border-color: rgba(52, 211, 153, 0.35); color: var(--good); }
+    .stat-chip.warn { background: rgba(251, 191, 36, 0.1); border-color: rgba(251, 191, 36, 0.35); color: var(--warn); }
+    .card-right { text-align: right; flex-shrink: 0; }
+    .kick-time { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--accent); }
+    .kick-day { font-size: 11px; color: var(--muted); margin-top: 3px; }
+    .score-now { font-family: var(--font-mono); font-size: 18px; font-weight: 800; color: var(--text); letter-spacing: 0.02em; }
+    .live-dot {
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: #fb7185; margin-right: 5px; box-shadow: 0 0 8px #fb7185;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse { 50% { opacity: 0.35; transform: scale(0.85); } }
+    .matchup-row { display: flex; align-items: center; gap: 10px; }
+    .team-logo { width: 28px; height: 28px; object-fit: contain; }
+    .day-head {
+      font-size: 11px; font-weight: 700; color: var(--muted);
+      letter-spacing: 0.1em; text-transform: uppercase;
+      margin: 18px 0 8px; padding-left: 2px;
+    }
+    .day-head:first-child { margin-top: 0; }
+    .btn-export {
+      background: rgba(17, 24, 39, 0.9); border: 1px solid var(--border-strong);
+      color: var(--muted); padding: 8px 12px; border-radius: 10px;
+      cursor: pointer; font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    }
+    .btn-export:hover { border-color: rgba(34, 211, 238, 0.45); color: var(--text); }
+    .prop-pill { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+    .prop-pill:hover, .prop-pill.active { border-color: rgba(34, 211, 238, 0.5); background: rgba(34, 211, 238, 0.06); }
+    .prop-pill-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+    .mov-chip { font-size: 9px; font-weight: 700; font-family: var(--font-mono); padding: 1px 5px; border-radius: 4px; }
+    .mov-chip.up { color: #fda4af; background: rgba(251, 113, 133, 0.12); }
+    .mov-chip.down { color: #6ee7b7; background: rgba(52, 211, 153, 0.12); }
+    .pp-chip { font-size: 9px; font-weight: 700; font-family: var(--font-mono); padding: 1px 5px; border-radius: 4px; color: #c4b5fd; background: rgba(167, 139, 250, 0.14); border: 1px solid rgba(167, 139, 250, 0.35); }
+    .proj-chip { font-size: 10px; font-family: var(--font-mono); color: #94a3b8; margin-top: 2px; }
+    .proj-chip.up { color: var(--good); }
+    .proj-chip.down { color: var(--bad); }
+    .inj-chip { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 4px; background: rgba(251, 113, 133, 0.14); color: #fda4af; border: 1px solid rgba(251, 113, 133, 0.35); }
+    .prop-track { margin-top: 10px; padding: 10px 12px; background: rgba(0,0,0,.28); border: 1px solid rgba(148,163,184,.18); border-radius: 10px; }
+    .game-log-table { width: 100%; border-collapse: collapse; font-size: 11px; font-family: var(--font-mono); margin-top: 8px; }
+    .game-log-table th { color: #64748b; text-align: left; padding: 4px 6px; font-size: 9px; letter-spacing: 0.06em; }
+    .game-log-table td { padding: 4px 6px; color: #94a3b8; }
+    .toolbar-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+    .card-bd { padding: 0 20px 20px; border-top: 1px solid var(--border); display: none; }
+    .card-bd.open { display: block; }
+
+    .prop-player { padding: 12px 0; border-bottom: 1px solid rgba(30, 45, 69, 0.55); }
+    .prop-player:last-child { border-bottom: none; }
+    .prop-name { font-weight: 700; font-size: 13px; }
+    .prop-team { font-size: 10px; color: #64748b; margin-left: 6px; font-family: var(--font-mono); }
+    .prop-note { font-size: 11px; color: #94a3b8; margin-top: 4px; line-height: 1.4; }
+    .prop-lines { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .prop-pill {
+      background: rgba(7, 11, 20, 0.65);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      min-width: 132px;
+    }
+    .prop-pill-stat { font-size: 10px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 700; }
+    .prop-pill-line { font-family: var(--font-mono); font-size: 15px; font-weight: 700; margin: 3px 0; }
+    .prop-pill-odds { font-size: 10px; color: #94a3b8; font-family: var(--font-mono); line-height: 1.45; }
+
+    .ev-intro { margin-bottom: 16px; }
+    .ev-intro-hd { font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 8px; }
+    .ev-intro-body { font-size: 14px; color: var(--muted); line-height: 1.65; }
+    .ev-intro-meta { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 13px; color: #64748b; font-family: var(--font-mono); }
+    .ev-thead, .ev-row {
+      display: grid;
+      grid-template-columns: minmax(170px, 1.5fr) minmax(90px, 0.7fr) minmax(120px, 0.9fr) minmax(110px, 0.8fr) minmax(80px, 0.55fr);
+      gap: 14px;
+      align-items: center;
+      padding: 18px 22px;
+    }
+    .ev-thead {
+      background: rgba(7, 11, 20, 0.55);
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #64748b;
+    }
+    .ev-row { border-bottom: 1px solid rgba(30, 45, 69, 0.55); }
+    .ev-row:hover { background: rgba(34, 211, 238, 0.03); }
+    .ev-row.pp { border-left: 3px solid #a78bfa; }
+    .ev-row.book { border-left: 3px solid rgba(34, 211, 238, 0.35); }
+    .ev-row.model { border-left: 3px solid rgba(251, 191, 36, 0.7); }
+    .ev-player { font-weight: 700; font-size: 17px; }
+    .ev-matchup { font-size: 13px; color: #94a3b8; margin-top: 4px; }
+    .ev-pick { font-size: 17px; font-weight: 800; }
+    .ev-pick.over { color: var(--good); }
+    .ev-pick.under { color: var(--bad); }
+    .ev-book-chip {
+      display: inline-block;
+      font-size: 13px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      padding: 4px 10px;
+      border-radius: 6px;
+      margin-bottom: 5px;
+    }
+    .ev-book-chip.pp { background: rgba(167, 139, 250, 0.14); border: 1px solid rgba(167, 139, 250, 0.4); color: #c4b5fd; }
+    .ev-book-chip.book { background: rgba(34, 211, 238, 0.1); border: 1px solid rgba(34, 211, 238, 0.3); color: var(--accent); }
+    .ev-detail { font-size: 13px; color: #94a3b8; }
+    .ev-fair { font-size: 15px; color: #cbd5e1; font-family: var(--font-mono); }
+    .ev-kelly { font-size: 13px; color: #94a3b8; margin-top: 3px; }
+    .ev-pct { font-size: 20px; font-weight: 800; font-family: var(--font-mono); text-align: right; }
+    .ev-empty { text-align: center; padding: 48px 20px; color: #64748b; }
+    .empty { text-align: center; padding: 56px 20px; color: #64748b; }
+    .empty h3 { color: var(--text); font-size: 16px; margin-bottom: 8px; }
+    .empty p { font-size: 13px; line-height: 1.65; max-width: 440px; margin: 0 auto; }
+
+    #site-footer {
+      border-top: 1px solid var(--border);
+      background: rgba(7, 11, 20, 0.75);
+      padding: 28px 18px;
+      padding-bottom: max(28px, env(safe-area-inset-bottom));
+      margin-top: 8px;
+    }
+    .footer-inner { max-width: 1040px; margin: 0 auto; text-align: center; }
+    .footer-brand { font-family: var(--font-display); font-size: 22px; letter-spacing: 0.12em; color: var(--accent); margin-bottom: 4px; }
+    .footer-tag { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+    .footer-disclaimer { color: #64748b; font-size: 11px; line-height: 1.65; max-width: 720px; margin: 0 auto 12px; }
+    .footer-meta { color: #475569; font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.04em; }
+
+    @media (max-width: 600px) {
+      #header { padding: 12px 14px; }
+      h1 { font-size: 24px; }
+      .sport-pill { font-size: 10px; padding: 6px 9px; }
+      #header-right { width: 100%; }
+      #header-right select, #header-right input[type=date], .btn-export { flex: 1; min-width: 0; min-height: 44px; }
+      #main { padding: 14px 10px; }
+      #tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .tab-btn { font-size: 11px; padding: 10px 8px; min-height: 44px; }
+      #summary-grid { grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+      .sum-val { font-size: 24px; }
+      .ev-thead, .ev-row { grid-template-columns: 1fr; gap: 8px; padding: 18px 18px; }
+      .ev-pct { text-align: left; }
+      input[type=search] { min-width: 0; width: 100%; font-size: 16px; }
+      .prop-pill { min-width: 0; flex: 1 1 calc(50% - 8px); }
+    }
+  </style>
+</head>
+<body data-billing="base">
+
+<div id="header">
   <div id="header-inner">
     <div>
       <div class="brand-row">
@@ -34,39 +388,1705 @@
           <a href="/nba/" class="sport-pill active">NBA</a>
         </nav>
       </div>
-      <div id="subtitle">NBA · coming soon</div>
+      <div id="subtitle">Loading NBA slate…</div>
     </div>
+    <div id="header-right">
+      <input type="date" id="date-picker" aria-label="NBA date" />
+      <button type="button" class="btn-export" id="export-btn" title="Download this slate as CSV">Export CSV</button>
+      <span id="updated"></span>
   </div>
-</header>
+  </div>
+</div>
 
-<main id="main">
-  <div class="coming-panel">
-    <div class="coming-icon">🏀</div>
-    <h2>NBA PROPS</h2>
-    <p>We're building the same prop intelligence stack for the NBA — model edges, book line matching, and +EV scanning.</p>
-    <ul class="feature-list">
-      <li>Points, rebounds, assists &amp; combo props</li>
-      <li>PrizePicks +EV vs FanDuel / DraftKings</li>
-      <li>Matchup &amp; pace-adjusted projections</li>
-      <li>Auto-refreshing daily slates</li>
-    </ul>
-    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-      <a href="/mlb/" class="btn">Explore MLB</a>
-      <a href="/nfl/" class="btn">Explore NFL</a>
-      <a href="/cs2/" class="btn">Explore CS2</a>
-    </div>
+<div id="main">
+  <div id="tabs">
+    <button class="tab-btn" data-tab="slate">Slate</button>
+    <button class="tab-btn active" data-tab="props">Player Props</button>
+    <button class="tab-btn" data-tab="ev">+EV</button>
   </div>
-</main>
+  <div id="filters" style="display:none"></div>
+  <div id="loader" style="display:none">
+    <div class="spinner"></div>
+    <div id="load-status">Fetching NBA slate…</div>
+  </div>
+  <div id="error-box" style="display:none">
+    <span id="error-msg"></span>
+    <button class="btn-retry" id="retry-btn">Retry</button>
+  </div>
+  <div id="summary-grid" style="display:none"></div>
+  <div id="cards"></div>
+</div>
 
 <footer id="site-footer">
   <div class="footer-inner">
     <div class="footer-brand">PROPPULSE</div>
-    <p class="footer-tag">Player prop intelligence · MLB, NFL &amp; CS2 live · NBA coming</p>
+    <p class="footer-tag">Player prop intelligence · MLB, NFL, NBA &amp; CS2 live</p>
     <p class="footer-disclaimer">
-      For informational purposes only — not betting advice. Verify lineups and props before wagering. Bet responsibly.
+      For informational purposes only — not betting advice. NBA schedule, rosters, and game logs from ESPN.
+      Projections blend recent form, head-to-head, minutes/role, and how that defense has allowed the same position.
+      Odds from FanDuel / DraftKings. +EV grades PrizePicks standard half-point lines at −119 vs de-vigged book prices.
+      Verify inactives and props before wagering. Bet responsibly.
     </p>
+    <p class="footer-meta">Auto-refreshes every 30 minutes · every 8 minutes while games are live · Data cached to limit API usage</p>
   </div>
 </footer>
 
+<script>
+"use strict";
+const AUTO_REFRESH_MS = 30 * 60 * 1000;
+const LIVE_REFRESH_MS = 8 * 60 * 1000;
+const ESPN = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard";
+const ESPN_INJ = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries";
+const PROXY  = "https://corsproxy.io/?url=";
+const PROXY2 = "https://api.allorigins.win/raw?url=";
+const EV_BOOKS = ["FanDuel", "DraftKings"];
+const PP_EV_DEC = 1 + 100 / 119;
+const PP_EV_BREAKEVEN = 119 / 219;
+const ODDS_CACHE_TTL = 20 * 60 * 1000;
+const STAT_META = {
+  pts:    { label: "Points",     group: "scoring" },
+  reb:    { label: "Rebounds",   group: "board" },
+  ast:    { label: "Assists",    group: "play" },
+  threes: { label: "Threes",     group: "scoring" },
+  stl:    { label: "Steals",     group: "stocks" },
+  blk:    { label: "Blocks",     group: "stocks" },
+  tov:    { label: "Turnovers",  group: "play" },
+  pra:    { label: "Pts+Reb+Ast", group: "combo" },
+  pr:     { label: "Pts+Reb",    group: "combo" },
+  pa:     { label: "Pts+Ast",    group: "combo" },
+  ra:     { label: "Reb+Ast",    group: "combo" },
+  ddbl:   { label: "Double-Dbl", group: "combo" },
+  tdbl:   { label: "Triple-Dbl", group: "combo" },
+  min:    { label: "Minutes",    group: "other" },
+  other:  { label: "Other",      group: "other" },
+};
+
+let activeTab = "props";
+let activeFilter = "all";
+let searchQ = "";
+let selected = { date: "" };
+let cache = { slate: null, props: null, ev: null };
+let lastOddsRows = [];
+let lastOddsMeta = null;
+let lastPPBoardMeta = null;
+let lastRefreshAt = 0;
+let _autoRefreshTimer = null;
+let _ppBoard = null;
+let _injuries = { ts: 0, byName: {} };
+let _nbaModel = { ts: 0, date: "", players: {}, vsPos: {}, lgPos: {} };
+let gamesState = [];
+let expandedTrack = null;
+
+function pad(n) { return String(n).padStart(2, "0"); }
+function ymd(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function addDaysYmd(s, delta) {
+  const p = String(s || "").split("-").map(Number);
+  if (p.length < 3) return s;
+  const dt = new Date(p[0], p[1] - 1, p[2] + delta);
+  return ymd(dt);
+}
+function isoToYmd(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso).slice(0, 10);
+  return ymd(d);
+}
+function formatKick(iso) {
+  if (!iso) return { time: "TBD", day: "" };
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return { time: "TBD", day: "" };
+  return {
+    time: d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+    day: d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }),
+  };
+}
+function espnSeasonType(season) {
+  const t = season && season.type;
+  if (t && typeof t === "object") {
+    const n = Number(t.type ?? t.id);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  const n = Number(t);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+function seasonLabel(type, week) {
+  const t = Number(type);
+  const w = Number(week);
+  if (t === 1) return w === 1 ? "Hall of Fame" : `Preseason Week ${w - 1}`;
+  if (t === 3) {
+    return ["", "Wild Card", "Divisional", "Conference", "Super Bowl"][w] || `Playoffs · Round ${w}`;
+  }
+  return `Week ${w}`;
+}
+function weekKey() {
+  return selected.date || ymd(new Date());
+}
+function regularSeasonFallback() {
+  selected.date = ymd(new Date());
+}
+function setStatus(msg) {
+  const el = document.getElementById("load-status");
+  if (el) el.textContent = msg;
+}
+function setLoading(on) {
+  document.getElementById("loader").style.display = on ? "flex" : "none";
+}
+function setError(msg) {
+  const b = document.getElementById("error-box");
+  b.style.display = msg ? "flex" : "none";
+  document.getElementById("error-msg").textContent = msg ? msg : "";
+}
+function updateRefreshLabel() {
+  const el = document.getElementById("updated");
+  if (!lastRefreshAt) { el.textContent = ""; return; }
+  const mins = Math.max(0, Math.round((Date.now() - lastRefreshAt) / 60000));
+  el.textContent = mins < 1 ? "just now" : `${mins}m ago`;
+}
+
+async function fetchTimeout(url, ms = 12000, opts = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(url, { ...opts, signal: ctrl.signal });
+    clearTimeout(timer);
+    return r;
+  } catch (e) {
+    clearTimeout(timer);
+    throw e;
+  }
+}
+async function fetchJson(url, timeout = 10000) {
+  const attempts = [
+    { u: url, t: timeout },
+    { u: PROXY + encodeURIComponent(url), t: Math.min(8000, timeout) },
+    { u: PROXY2 + encodeURIComponent(url), t: Math.min(8000, timeout) },
+  ];
+  for (const a of attempts) {
+    try {
+      const r = await fetchTimeout(a.u, a.t, { headers: { Accept: "application/json" } });
+      if (r.ok) return r.json();
+    } catch (_) {}
+  }
+  throw new Error("Network error fetching " + url);
+}
+
+function fillDatePicker() {
+  const el = document.getElementById("date-picker");
+  if (!el) return;
+  el.value = selected.date || ymd(new Date());
+}
+
+function parseEspnGame(ev) {
+  const comp = (ev.competitions && ev.competitions[0]) || {};
+  const homeC = (comp.competitors || []).find(c => c.homeAway === "home") || {};
+  const awayC = (comp.competitors || []).find(c => c.homeAway === "away") || {};
+  const team = (c) => ({
+    abbr: c.team?.abbreviation || "",
+    name: c.team?.displayName || "",
+    nick: c.team?.name || c.team?.shortDisplayName || "",
+    record: (c.records || []).find(r => r.type === "total")?.summary || c.records?.[0]?.summary || "",
+    score: c.score || "",
+    logo: c.team?.logo || "",
+  });
+  const odds = (comp.odds && comp.odds[0]) || {};
+  const status = comp.status || ev.status || {};
+  const venue = comp.venue || {};
+  return {
+    id: ev.id,
+    date: ev.date,
+    name: ev.name || ev.shortName || "",
+    home: team(homeC),
+    away: team(awayC),
+    venue: venue.fullName || "",
+    venueCity: [venue.address?.city, venue.address?.state].filter(Boolean).join(", "),
+    indoor: !!venue.indoor,
+    neutral: !!comp.neutralSite,
+    status: status.type?.state || "",
+    statusText: status.type?.shortDetail || status.type?.detail || "",
+    completed: !!status.type?.completed,
+    period: status.period || 0,
+    clock: status.displayClock || "",
+    spread: odds.spread,
+    overUnder: odds.overUnder,
+    oddsDetails: odds.details || "",
+    mlHome: odds.moneyline?.home?.close?.odds || "",
+    mlAway: odds.moneyline?.away?.close?.odds || "",
+    broadcast: (comp.broadcasts || []).flatMap(b => b.names || []).filter(Boolean).join(", ") || comp.broadcast || "",
+  };
+}
+
+async function loadEspnDay() {
+  const day = (selected.date || ymd(new Date())).replace(/-/g, "");
+  const json = await fetchJson(`${ESPN}?dates=${day}`, 16000);
+  let events = Array.isArray(json?.events) ? json.events : [];
+  if (!events.length) {
+    const live = await fetchJson(ESPN, 12000);
+    events = Array.isArray(live?.events) ? live.events : [];
+  }
+  return events.map(parseEspnGame).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+function weekWindow(games) {
+  const day = selected.date || ymd(new Date());
+  const days = games.map(g => isoToYmd(g.date)).filter(d => d.length === 10).sort();
+  if (days.length) {
+    return { from: days[0], to: days[days.length - 1] };
+  }
+  return { from: day, to: addDaysYmd(day, 1) };
+}
+
+function oddsIoUrl(from, to) {
+  if (typeof location === "undefined" || location.protocol === "file:") return "";
+  const qs = new URLSearchParams({ sport: "nba", from, to, rev: "20261019nbav1" });
+  const host = location.hostname;
+  const isLocal = host === "localhost" || host === "127.0.0.1";
+  if (isLocal) return `http://127.0.0.1:8080/api/odds_io?${qs}`;
+  return `${location.origin}/api/odds_io?${qs}`;
+}
+function oddsCacheKey(from, to) { return `nba_odds_v1:${from}:${to}`; }
+function oddsCacheGet(from, to) {
+  try {
+    const raw = localStorage.getItem(oddsCacheKey(from, to));
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts > ODDS_CACHE_TTL) return null;
+    return data;
+  } catch (_) { return null; }
+}
+function oddsCacheSet(from, to, data) {
+  try { localStorage.setItem(oddsCacheKey(from, to), JSON.stringify({ ts: Date.now(), data })); } catch (_) {}
+}
+
+function normName(s) {
+  return (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().trim().replace(/[^a-z\s]/g, "").split(/\s+/).sort().join(" ");
+}
+function cleanName(s) {
+  return (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, "").replace(/[^a-z\s]/g, "").trim();
+}
+function normTeamStr(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+}
+function teamBlob(t) {
+  return normTeamStr([t.abbr, t.name, t.nick].filter(Boolean).join(" "));
+}
+function looksLikeCflText(s) {
+  const n = String(s || "").toLowerCase();
+  return /cfl|roughrider|stampeder|\belks\b|blue bomber|tiger-?cat|argonaut|alouette|redblack|bc lions|b\.c\. lions|british columbia|saskatchewan|winnipeg|calgary stamp|edmonton elk|hamilton tiger|ottawa red|montreal alou|toronto argonaut/.test(n);
+}
+function looksLikeCflRow(row) {
+  return looksLikeCflText(`${row.home || ""} ${row.away || ""} ${row.league || ""} ${row.player || ""}`);
+}
+function looseTeamMatch(oddsStr, team) {
+  const o = normTeamStr(oddsStr);
+  const blob = teamBlob(team);
+  if (!o || !blob) return false;
+  if (looksLikeCflText(o)) return false;
+  if (blob.includes(o) || o.includes(blob)) return true;
+  const nick = normTeamStr(team.nick);
+  const abbr = normTeamStr(team.abbr);
+  if (abbr && (o === abbr || o.split(/\s+/).includes(abbr))) return true;
+  if (nick === "lions") {
+    return o.includes("detroit") || o === "lions" || o.includes("det");
+  }
+  if (nick && nick.length > 3 && o.includes(nick)) return true;
+  const last = (team.name || "").split(/\s+/).pop() || "";
+  const lastN = normTeamStr(last);
+  if (lastN.length > 3 && o.includes(lastN)) return true;
+  return false;
+}
+function findGameForRow(row, games) {
+  for (const g of games) {
+    const fwd = looseTeamMatch(row.home, g.home) && looseTeamMatch(row.away, g.away);
+    const swap = looseTeamMatch(row.home, g.away) && looseTeamMatch(row.away, g.home);
+    if (fwd || swap) return g;
+  }
+  return null;
+}
+
+function nbaStatHint(raw) {
+  const t = String(raw || "").toLowerCase();
+  if (!t) return "";
+  if (t.includes("triple") && t.includes("double")) return "tdbl";
+  if (t.includes("double double") || t.includes("double-double")) return "ddbl";
+  if (t.includes("pts+reb+ast") || t.includes("points+rebounds+assists") || t.includes("pra") || t.includes("p+r+a")) return "pra";
+  if ((t.includes("pts+reb") || t.includes("points+rebounds") || t.includes("pts + reb")) && !t.includes("ast")) return "pr";
+  if (t.includes("pts+ast") || t.includes("points+assists") || t.includes("pts + ast")) return "pa";
+  if (t.includes("reb+ast") || t.includes("rebounds+assists") || t.includes("reb + ast")) return "ra";
+  if (t.includes("three") || t.includes("3pt") || t.includes("3-pt") || t.includes("threes")) return "threes";
+  if (t.includes("rebound") || t === "reb" || t === "rebs") return "reb";
+  if (t.includes("assist") || t === "ast" || t === "asts") return "ast";
+  if (t.includes("steal")) return "stl";
+  if (t.includes("block")) return "blk";
+  if (t.includes("turnover")) return "tov";
+  if (t.includes("minute")) return "min";
+  if (t.includes("point") || t === "pts" || t === "ppg") return "pts";
+  return "";
+}
+function rowLine(row, statKey) {
+  const line = Number(row.hdp);
+  if (Number.isFinite(line)) return line;
+  if (statKey === "anytime_td") return 0.5;
+  return NaN;
+}
+function rowStatKey(row) {
+  const k = (row.statHint || nbaStatHint(row.market) || nbaStatHint(row.player) || "").toLowerCase();
+  if (k && STAT_META[k]) return k;
+  if (row.player && Number.isFinite(Number(row.hdp))) return "other";
+  return "";
+}
+function decToAm(dec) {
+  if (!dec || dec <= 1) return null;
+  return dec >= 2 ? Math.round((dec - 1) * 100) : Math.round(-100 / (dec - 1));
+}
+function formatAmerican(am) {
+  if (am == null || Number.isNaN(Number(am))) return "—";
+  const n = Number(am);
+  return n > 0 ? `+${n}` : `${n}`;
+}
+function normBookmakerLabel(name) {
+  const n = (name || "").toLowerCase();
+  if (n.includes("fanduel")) return "FanDuel";
+  if (n.includes("draftking")) return "DraftKings";
+  return name || "";
+}
+function parseOddsNumber(v) {
+  if (v == null || v === "" || String(v).toUpperCase() === "N/A") return null;
+  const n = parseFloat(String(v).replace(/[^0-9.\-+eE]/g, ""));
+  return Number.isNaN(n) ? null : n;
+}
+function oddsToDecimal(raw) {
+  if (raw == null || raw === "") return null;
+  const s = String(raw).trim();
+  if (/^[+\-]?\d{3,5}$/.test(s)) {
+    const am = parseInt(s, 10);
+    return am >= 100 ? 1 + am / 100 : 1 + 100 / Math.abs(am);
+  }
+  const n = parseOddsNumber(raw);
+  if (n == null || n <= 1) return null;
+  if (n >= 1.01 && n < 100) return n;
+  if (n >= 100) return 1 + n / 100;
+  if (n <= -100) return 1 + 100 / Math.abs(n);
+  return null;
+}
+function evAmerican(dec) {
+  if (!dec || dec <= 1) return "—";
+  return dec >= 2 ? `+${Math.round((dec - 1) * 100)}` : `${Math.round(-100 / (dec - 1))}`;
+}
+
+async function loadOdds(games) {
+  lastOddsRows = [];
+  lastOddsMeta = null;
+  const { from, to } = weekWindow(games);
+  try {
+    let payload = oddsCacheGet(from, to);
+    if (!payload) {
+      const url = oddsIoUrl(from, to);
+      if (!url) {
+        lastOddsMeta = { error: "file_host", dateFrom: from, dateTo: to };
+        return { ok: false, error: "file_host" };
+      }
+      const r = await fetchTimeout(url, 28000, { headers: { Accept: "application/json" } });
+      payload = await r.json();
+      if (payload?.ok) oddsCacheSet(from, to, payload);
+    }
+    lastOddsRows = Array.isArray(payload?.rows) ? payload.rows.slice() : [];
+    lastOddsMeta = { ...(payload?.meta || {}) };
+    if (payload?.error) lastOddsMeta.error = payload.error;
+    lastOddsMeta.dateFrom = lastOddsMeta.dateFrom || from;
+    lastOddsMeta.dateTo = lastOddsMeta.dateTo || to;
+    return payload || { ok: false };
+  } catch (e) {
+    lastOddsMeta = { error: String(e.message || e), dateFrom: from, dateTo: to };
+    return { ok: false, error: lastOddsMeta.error };
+  }
+}
+
+const NFL_ODDS_HIST_VER = "v1";
+function nflOddsHistKey(wk, playerNorm, statKey) {
+  return `nflOddsHist_${NFL_ODDS_HIST_VER}:${wk}:${playerNorm}|${statKey}`;
+}
+function getNflOddsHistory(wk, playerNorm, statKey) {
+  try {
+    const raw = localStorage.getItem(nflOddsHistKey(wk, playerNorm, statKey));
+    if (!raw) return [];
+    const h = JSON.parse(raw);
+    return Array.isArray(h) ? h : [];
+  } catch (_) { return []; }
+}
+function oddsPointEqual(a, b) {
+  if (!a || !b) return false;
+  return Number(a.line) === Number(b.line)
+    && a.fdOver === b.fdOver && a.dkOver === b.dkOver
+    && a.fdUnder === b.fdUnder && a.dkUnder === b.dkUnder;
+}
+function appendNflOddsHistory(wk, playerNorm, statKey, pt) {
+  if (!wk || !playerNorm || !statKey) return;
+  if (pt.line == null && pt.fdOver == null && pt.dkOver == null) return;
+  const key = nflOddsHistKey(wk, playerNorm, statKey);
+  let hist = getNflOddsHistory(wk, playerNorm, statKey);
+  const now = Date.now();
+  const row = {
+    t: now,
+    line: pt.line ?? null,
+    fdOver: pt.fdOver ?? null,
+    dkOver: pt.dkOver ?? null,
+    fdUnder: pt.fdUnder ?? null,
+    dkUnder: pt.dkUnder ?? null,
+  };
+  const last = hist[hist.length - 1];
+  if (last && oddsPointEqual(last, row)) {
+    if (now - last.t < 25 * 60 * 1000) return;
+  }
+  hist.push(row);
+  if (hist.length > 120) hist = hist.slice(-120);
+  try { localStorage.setItem(key, JSON.stringify(hist)); } catch (_) {}
+}
+function movementFromHistory(hist) {
+  if (!hist || hist.length < 2) return { lineMov: null, oddsMov: null };
+  const a = hist[0];
+  const b = hist[hist.length - 1];
+  const lineMov = a.line != null && b.line != null && Number(a.line) !== Number(b.line)
+    ? { from: a.line, to: b.line, dir: Number(b.line) > Number(a.line) ? "up" : "down" }
+    : null;
+  const side = (from, to) => (from === to || from == null || to == null) ? null
+    : { from, to, dir: to < from ? "down" : "up" };
+  const oddsMov = {
+    fd: side(a.fdOver, b.fdOver),
+    dk: side(a.dkOver, b.dkOver),
+    fdU: side(a.fdUnder, b.fdUnder),
+    dkU: side(a.dkUnder, b.dkUnder),
+  };
+  if (!oddsMov.fd && !oddsMov.dk && !oddsMov.fdU && !oddsMov.dkU) {
+    return { lineMov, oddsMov: null };
+  }
+  return { lineMov, oddsMov };
+}
+function logNflOddsHistory(games) {
+  try {
+    const wk = weekKey();
+    for (const g of games || []) {
+      for (const p of g.players || []) {
+        for (const l of p.lineList || []) {
+          const books = l.books || {};
+          const fd = books.FanDuel || {};
+          const dk = books.DraftKings || {};
+          if (!fd.over && !fd.under && !dk.over && !dk.under) {
+            l.hist = [];
+            l.lineMov = null;
+            l.oddsMov = null;
+            continue;
+          }
+          appendNflOddsHistory(wk, p.nk, l.statKey, {
+            line: l.line,
+            fdOver: decToAm(fd.over),
+            fdUnder: decToAm(fd.under),
+            dkOver: decToAm(dk.over),
+            dkUnder: decToAm(dk.under),
+          });
+          l.hist = getNflOddsHistory(wk, p.nk, l.statKey);
+          const mov = movementFromHistory(l.hist);
+          l.lineMov = mov.lineMov;
+          l.oddsMov = mov.oddsMov;
+        }
+      }
+    }
+  } catch (_) {}
+}
+function renderOddsSparkChart(hist) {
+  const rows = Array.isArray(hist) ? hist.filter(p => p && (p.fdOver != null || p.dkOver != null)) : [];
+  if (rows.length < 2) {
+    return `<div style="color:#94a3b8;font-size:11px;padding:4px 0;line-height:1.5">${
+      (hist || []).length < 1
+        ? "No samples yet — FD/DK prices are logged whenever this week loads."
+        : "Opened this print. The next change (or ~25 min) adds a movement point."
+    }</div>`;
+  }
+  const W = 360, H = 110, padL = 40, padR = 8, padT = 8, padB = 22;
+  const vals = [];
+  rows.forEach(p => { if (p.fdOver != null) vals.push(p.fdOver); if (p.dkOver != null) vals.push(p.dkOver); });
+  if (!vals.length) return "";
+  let minV = Math.min(...vals), maxV = Math.max(...vals);
+  if (minV === maxV) { minV -= 10; maxV += 10; }
+  const padY = Math.max(8, (maxV - minV) * 0.2);
+  minV -= padY; maxV += padY;
+  const xw = W - padL - padR, yh = H - padT - padB, n = rows.length;
+  const xAt = i => padL + (n <= 1 ? 0 : (i / (n - 1)) * xw);
+  const yAt = v => padT + yh - ((Number(v) - minV) / (maxV - minV || 1)) * yh;
+  function stepPath(getter) {
+    let d = "", prev = null;
+    for (let i = 0; i < n; i++) {
+      const v = getter(rows[i]);
+      if (v == null) continue;
+      const x = xAt(i), y = yAt(v);
+      if (!prev) { d = `M ${x} ${y}`; prev = { x, y }; continue; }
+      d += ` L ${x} ${prev.y} L ${x} ${y}`;
+      prev = { x, y };
+    }
+    return d;
+  }
+  const fmt = d => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return `<div style="margin-top:6px">
+    <div style="display:flex;gap:12px;font-size:11px;color:#cbd5e1;margin-bottom:4px">
+      <span><span style="color:#2B8AEB">●</span> FD Over</span>
+      <span><span style="color:#43A047">●</span> DK Over</span>
+    </div>
+    <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;max-width:100%;height:auto">
+      <path d="${stepPath(p => p.fdOver)}" fill="none" stroke="#2B8AEB" stroke-width="2"/>
+      <path d="${stepPath(p => p.dkOver)}" fill="none" stroke="#43A047" stroke-width="2"/>
+      <text x="${padL}" y="${H - 4}" fill="#94a3b8" font-size="9">${fmt(new Date(rows[0].t))}</text>
+      <text x="${W - padR}" y="${H - 4}" fill="#94a3b8" font-size="9" text-anchor="end">${fmt(new Date(rows[n - 1].t))}</text>
+    </svg>
+    <div style="font-size:10px;color:#64748b;margin-top:4px">${rows.length} prints · open ${rows[0].line ?? "—"} → now ${rows[n - 1].line ?? "—"}</div>
+  </div>`;
+}
+function renderOddsLogTable(hist) {
+  const rows = Array.isArray(hist) ? hist.slice() : [];
+  if (!rows.length) return "";
+  const shown = rows.slice().reverse().slice(0, 16);
+  const fmtT = t => new Date(t).toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const cell = v => v == null ? "—" : formatAmerican(v);
+  return `<table class="game-log-table"><thead><tr>
+    <th>TIME</th><th>LINE</th><th>FD O</th><th>FD U</th><th>DK O</th><th>DK U</th>
+  </tr></thead><tbody>${shown.map(p => `<tr>
+    <td>${fmtT(p.t)}</td>
+    <td style="color:#e2e8f0;font-weight:700">${p.line != null ? p.line : "—"}</td>
+    <td style="color:#7EC8FF">${cell(p.fdOver)}</td>
+    <td>${cell(p.fdUnder)}</td>
+    <td style="color:#7FD67A">${cell(p.dkOver)}</td>
+    <td>${cell(p.dkUnder)}</td>
+  </tr>`).join("")}</tbody></table>`;
+}
+
+async function fetchInjuries() {
+  if (_injuries.ts && Date.now() - _injuries.ts < 20 * 60 * 1000) return _injuries;
+  const byName = {};
+  try {
+    const json = await fetchJson(ESPN_INJ, 12000);
+    const teams = Array.isArray(json?.injuries) ? json.injuries : (Array.isArray(json) ? json : []);
+    for (const team of teams) {
+      for (const inj of team.injuries || team.injuries?.items || []) {
+        const ath = inj.athlete || inj;
+        const name = ath.displayName || ath.fullName || inj.athlete?.displayName || "";
+        const status = inj.status || inj.details?.type || inj.details?.fantasyStatus?.description || inj.type || "";
+        if (!name) continue;
+        byName[normName(name)] = {
+          status: String(status),
+          comment: inj.comment || inj.details || "",
+          team: team.displayName || team.team?.abbreviation || "",
+        };
+      }
+    }
+    // ESPN often nests as { injuries: [ { injuries: [...], team } ] }
+    if (!Object.keys(byName).length && json?.injuries) {
+      for (const block of json.injuries) {
+        const tname = block.displayName || "";
+        for (const inj of block.injuries || []) {
+          const name = inj.athlete?.displayName || "";
+          if (!name) continue;
+          byName[normName(name)] = { status: inj.status || "", comment: inj.comment || "", team: tname };
+        }
+      }
+    }
+  } catch (_) {}
+  _injuries = { ts: Date.now(), byName };
+  return _injuries;
+}
+function injuryFor(name) {
+  return _injuries.byName[normName(name)] || null;
+}
+function nbaModelUrl(date) {
+  if (typeof location === "undefined" || location.protocol === "file:") return "";
+  const qs = new URLSearchParams({ date: String(date || selected.date || "") });
+  const host = location.hostname;
+  const isLocal = host === "localhost" || host === "127.0.0.1";
+  if (isLocal) return `http://127.0.0.1:8080/api/nba_stats?${qs}`;
+  return `${location.origin}/api/nba_stats?${qs}`;
+}
+async function fetchNbaModel() {
+  if (_nbaModel.ts && _nbaModel.date === selected.date && Date.now() - _nbaModel.ts < 18 * 60 * 1000) {
+    return _nbaModel;
+  }
+  const url = nbaModelUrl(selected.date);
+  const empty = { ts: Date.now(), date: selected.date, players: {}, vsPos: {}, lgPos: {}, ok: false };
+  if (!url) { _nbaModel = empty; return _nbaModel; }
+  try {
+    const r = await fetchTimeout(url, 55000, { headers: { Accept: "application/json" } });
+    const j = await r.json();
+    _nbaModel = {
+      ts: Date.now(),
+      date: selected.date,
+      ok: !!j?.ok,
+      players: j?.players || {},
+      vsPos: j?.vsPos || {},
+      lgPos: j?.lgPos || {},
+      playerCount: j?.playerCount || 0,
+      error: j?.error || null,
+    };
+  } catch (e) {
+    _nbaModel = { ...empty, error: e.message };
+  }
+  return _nbaModel;
+}
+function espnRaw(nk, statKey) {
+  return _nbaModel.players[nk]?.stats?.[statKey];
+}
+function projectStat(nk, statKey, game) {
+  const pl = _nbaModel.players[nk];
+  let proj = pl?.stats?.[statKey];
+  if (proj == null || !Number.isFinite(Number(proj))) {
+    if (statKey === "pra" && pl?.stats) {
+      const a = Number(pl.stats.pts), b = Number(pl.stats.reb), c = Number(pl.stats.ast);
+      if ([a, b, c].every(Number.isFinite)) proj = a + b + c;
+    }
+  }
+  if (proj == null || !Number.isFinite(Number(proj))) return null;
+  proj = Number(proj);
+  if (game && Number(game.overUnder) > 0) {
+    proj *= 0.97 + 0.03 * (Number(game.overUnder) / 224);
+  }
+  return Math.round(proj * 10) / 10;
+}
+function erfApprox(x) {
+  const s = x < 0 ? -1 : 1;
+  const a = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * a);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-a * a);
+  return s * y;
+}
+function pOverModel(statKey, proj, line) {
+  if (proj == null || !Number.isFinite(line)) return null;
+  const countish = /threes|stl|blk|tov|ddbl|tdbl/.test(statKey);
+  if (countish) {
+    const lambda = Math.max(0.05, Number(proj));
+    const k = Math.floor(line);
+    let cdf = 0, term = Math.exp(-lambda);
+    for (let i = 0; i <= k && i < 80; i++) {
+      cdf += term;
+      term *= lambda / (i + 1);
+    }
+    return Math.min(0.97, Math.max(0.03, 1 - cdf));
+  }
+  const sd = Math.max(4.5, Math.abs(Number(proj)) * 0.38);
+  const z = (line - Number(proj)) / sd;
+  return Math.min(0.92, Math.max(0.08, 0.5 * (1 - erfApprox(z / Math.SQRT2))));
+}
+function findGameForTeamAbbr(team, games) {
+  const t = normTeamStr(team);
+  if (!t) return null;
+  for (const g of games) {
+    if (normTeamStr(g.home.abbr) === t || normTeamStr(g.away.abbr) === t) return g;
+    if (looseTeamMatch(team, g.home) || looseTeamMatch(team, g.away)) return g;
+  }
+  return null;
+}
+function ppMatchFor(nk, statKey, line) {
+  return _ppBoard?.mapByLine?.[`${nk}|${statKey}|${line}`] || null;
+}
+
+function ppDayInWindow(start, games) {
+  const raw = String(start || "");
+  if (raw.length < 10) return true;
+  const day = raw.slice(0, 10);
+  const { from, to } = weekWindow(games || gamesState || []);
+  return day >= from && day <= to;
+}
+function pickPpLines(games) {
+  const best = new Map();
+  for (const pp of _ppBoard?.allLines || []) {
+    if (!pp?.nk || !STAT_META[pp.statKey]) continue;
+    if (!ppDayInWindow(pp.start, games)) continue;
+    const k = `${pp.nk}|${pp.statKey}`;
+    const prev = best.get(k);
+    if (!prev) { best.set(k, pp); continue; }
+    const proj = projectStat(pp.nk, pp.statKey, findGameForTeamAbbr(pp.team, games));
+    if (proj != null && Number.isFinite(Number(proj))) {
+      if (Math.abs(pp.line - Number(proj)) < Math.abs(prev.line - Number(proj))) best.set(k, pp);
+    }
+  }
+  return [...best.values()];
+}
+function addPropRow(bucket, row, statKey, book, line, extra) {
+  if (!bucket) return;
+  const nk = normName(row.player);
+  if (!bucket.players.has(nk)) {
+    bucket.players.set(nk, { name: row.player, nk, team: extra?.team || "", lines: {} });
+  }
+  const pl = bucket.players.get(nk);
+  if (extra?.team && !pl.team) pl.team = extra.team;
+  const lk = `${statKey}|${line}`;
+  if (!pl.lines[lk]) pl.lines[lk] = { statKey, line, books: {} };
+  const slot = pl.lines[lk];
+  if (!slot.books[book]) slot.books[book] = {};
+  const oDec = oddsToDecimal(row.over);
+  const uDec = oddsToDecimal(row.under);
+  if (oDec != null) slot.books[book].over = Math.max(slot.books[book].over || 0, oDec);
+  if (uDec != null) slot.books[book].under = Math.max(slot.books[book].under || 0, uDec);
+}
+function playersFromBucket(bucket) {
+  return [...(bucket?.players.values() || [])]
+    .map(p => ({ ...p, lineList: Object.values(p.lines).sort((a, b) => a.statKey.localeCompare(b.statKey) || a.line - b.line) }))
+    .filter(p => p.lineList.length)
+    .sort((a, b) => b.lineList.length - a.lineList.length || a.name.localeCompare(b.name));
+}
+function groupPlayerProps(games) {
+  const byGame = new Map(games.map(g => [g.id, { game: g, players: new Map() }]));
+  const leftover = { players: new Map() };
+  for (const row of lastOddsRows) {
+    if (looksLikeCflRow(row)) continue;
+    if (/\s\+\s/.test(row.player || "")) continue;
+    const statKey = rowStatKey(row);
+    if (!statKey || !STAT_META[statKey]) continue;
+    const book = normBookmakerLabel(row.bookmaker || row.book || "");
+    if (!EV_BOOKS.includes(book)) continue;
+    const line = rowLine(row, statKey);
+    if (!Number.isFinite(line)) continue;
+    const g = findGameForRow(row, games);
+    const bucket = g ? byGame.get(g.id) : leftover;
+    addPropRow(bucket, row, statKey, book, line);
+  }
+  const haveStat = new Set();
+  for (const bucket of [...byGame.values(), leftover]) {
+    for (const pl of bucket.players.values()) {
+      for (const l of Object.values(pl.lines)) haveStat.add(`${pl.nk}|${l.statKey}`);
+    }
+  }
+  for (const pp of pickPpLines(games)) {
+    if (haveStat.has(`${pp.nk}|${pp.statKey}`)) continue;
+    haveStat.add(`${pp.nk}|${pp.statKey}`);
+    const g = findGameForTeamAbbr(pp.team, games);
+    const bucket = g ? byGame.get(g.id) : leftover;
+    addPropRow(bucket, {
+      player: pp.player,
+      over: PP_EV_DEC,
+      under: PP_EV_DEC,
+    }, pp.statKey, "PrizePicks", pp.line, { team: pp.team });
+  }
+  const out = games.map(g => {
+    const players = playersFromBucket(byGame.get(g.id)).map(p => decoratePlayer(p, g));
+    return { ...g, players, propCount: players.reduce((n, p) => n + p.lineList.length, 0) };
+  });
+  const extraPlayers = playersFromBucket(leftover)
+    .filter(p => !looksLikeCflText(p.name))
+    .map(p => decoratePlayer(p, null));
+  if (extraPlayers.length) {
+    out.push({
+      id: "unmatched",
+      date: "",
+      home: { abbr: "NBA", name: "Other", nick: "Other", logo: "", score: "", record: "" },
+      away: { abbr: "Props", name: "Unlisted", nick: "Unlisted", logo: "", score: "", record: "" },
+      venue: "",
+      status: "",
+      statusText: "",
+      completed: false,
+      players: extraPlayers,
+      propCount: extraPlayers.reduce((n, p) => n + p.lineList.length, 0),
+    });
+  }
+  logNflOddsHistory(out);
+  return out;
+}
+function decoratePlayer(p, game) {
+  const mdl = _nbaModel.players[p.nk] || {};
+  const team = p.team || mdl.team || "";
+  const pos = mdl.pos || "";
+  const lineList = (p.lineList || []).map(l => {
+    const proj = projectStat(p.nk, l.statKey, game);
+    const pOver = pOverModel(l.statKey, proj, l.line);
+    return { ...l, books: l.books || {}, proj, pOver, modelEdge: proj != null ? Math.round((proj - l.line) * 10) / 10 : null };
+  });
+  lineList.sort((a, b) => {
+    const ae = Math.abs(a.modelEdge || 0), be = Math.abs(b.modelEdge || 0);
+    if (be !== ae) return be - ae;
+    const ab = Object.keys(a.books || {}).length, bb = Object.keys(b.books || {}).length;
+    if (bb !== ab) return bb - ab;
+    return String(a.statKey).localeCompare(String(b.statKey)) || a.line - b.line;
+  });
+  if (lineList.length > 18) lineList.length = 18;
+  return { ...p, team, pos, role: mdl.role, h2h: mdl.h2h, vsDef: mdl.vsDef, lineList };
+}
+
+function ppProxyUrl(path) {
+  if (typeof location === "undefined" || location.protocol === "file:") return "";
+  const qs = "path=" + encodeURIComponent(path);
+  const host = location.hostname;
+  if (host === "localhost" || host === "127.0.0.1") return `http://127.0.0.1:8080/api/pp?${qs}`;
+  return `${location.origin}/api/pp?${qs}`;
+}
+function ppEvStatKey(statType) {
+  const st = (statType || "").toLowerCase().trim();
+  const map = {
+    "points": "pts", "pts": "pts", "player points": "pts",
+    "rebounds": "reb", "reb": "reb", "rebs": "reb",
+    "assists": "ast", "ast": "ast", "asts": "ast",
+    "3-pt made": "threes", "3pt made": "threes", "threes": "threes", "3-pointers": "threes", "made threes": "threes",
+    "steals": "stl", "stl": "stl",
+    "blocks": "blk", "blk": "blk",
+    "turnovers": "tov", "tov": "tov",
+    "pts+reb+ast": "pra", "points + rebounds + assists": "pra", "pra": "pra",
+    "pts+reb": "pr", "points + rebounds": "pr",
+    "pts+ast": "pa", "points + assists": "pa",
+    "reb+ast": "ra", "rebounds + assists": "ra",
+    "double-double": "ddbl", "double double": "ddbl",
+    "triple-double": "tdbl", "triple double": "tdbl",
+    "minutes": "min",
+  };
+  return map[st] || nbaStatHint(st) || null;
+}
+async function fetchPrizePicksStandardLines() {
+  if (_ppBoard && Date.now() - _ppBoard.ts < 10 * 60 * 1000) return _ppBoard;
+  const mapByLine = {};
+  const allLines = [];
+  const meta = { fetched: 0, standard: 0, skippedAlt: 0, error: null };
+  try {
+    const url = ppProxyUrl(`/projections?league_id=7&per_page=1000&single_stat=true`);
+    if (!url) throw new Error("no proxy on file:// host");
+    const r = await fetchTimeout(url, 25000, { headers: { Accept: "application/json" } });
+    if (!r.ok) throw new Error(`PrizePicks proxy http_${r.status}`);
+    const j = await r.json();
+    const data = Array.isArray(j?.data) ? j.data : [];
+    const players = {};
+    for (const inc of j?.included || []) {
+      if (inc.type === "new_player" || inc.type === "player") {
+        players[inc.id] = {
+          name: inc.attributes?.display_name || inc.attributes?.name || "",
+          team: inc.attributes?.team || "",
+        };
+      }
+    }
+    for (const proj of data) {
+      const attr = proj.attributes || {};
+      meta.fetched++;
+      const oddsType = (attr.odds_type || "standard").toLowerCase();
+      if (oddsType !== "standard") { meta.skippedAlt++; continue; }
+      const statKey = ppEvStatKey(attr.stat_type);
+      if (!statKey) continue;
+      const line = parseFloat(attr.line_score);
+      if (!Number.isFinite(line)) continue;
+      const pid = proj.relationships?.new_player?.data?.id || proj.relationships?.player?.data?.id;
+      const pl = pid ? players[pid] : null;
+      if (!pl || !pl.name) continue;
+      const nk = normName(pl.name);
+      if (/\s\+\s/.test(pl.name) || /\//.test(pl.name)) continue;
+      const entry = { nk, statKey, line, player: pl.name, team: pl.team || "", start: attr.start_time || "" };
+      mapByLine[`${nk}|${statKey}|${line}`] = entry;
+      allLines.push(entry);
+      meta.standard++;
+    }
+  } catch (e) {
+    meta.error = e.message;
+  }
+  _ppBoard = { ts: Date.now(), mapByLine, allLines, meta };
+  return _ppBoard;
+}
+
+function evPPSideFair(books, side) {
+  let bestP = 0, bestSrc = "";
+  const sideKey = side.toLowerCase();
+  for (const [name, b] of Object.entries(books || {})) {
+    if (!b) continue;
+    const lbl = name === "FanDuel" ? "FD" : "DK";
+    const dec = b[sideKey];
+    if (dec) {
+      const pImp = 1 / dec;
+      if (pImp > bestP) { bestP = pImp; bestSrc = `${lbl} juice`; }
+    }
+    if (b.over && b.under) {
+      const iO = 1 / b.over, iU = 1 / b.under;
+      const pDev = side === "Over" ? iO / (iO + iU) : iU / (iO + iU);
+      if (pDev > bestP) { bestP = pDev; bestSrc = `${lbl} de-vig`; }
+    }
+  }
+  if (bestP <= 0) return null;
+  return { pFair: Math.min(0.98, Math.max(0.02, bestP)), baselineSrc: bestSrc };
+}
+function bookJuiceBetterThanPP(am) {
+  return am != null && am <= -120;
+}
+/** PrizePicks voids on a whole number (exactly 1 reception, 9 carries, …). FanDuel Over 0.5 still hits. Only grade .5 lines. */
+function isHalfPointLine(line) {
+  const n = Number(line);
+  if (!Number.isFinite(n)) return false;
+  return Math.abs(Math.abs(n % 1) - 0.5) < 0.001;
+}
+function findBookGroupForPp(groups, pp) {
+  if (!isHalfPointLine(pp.line)) return null;
+  const exact = groups[`${pp.nk}|${pp.statKey}|${pp.line}`];
+  if (!exact || !isHalfPointLine(exact.line)) return null;
+  return { g: exact, usedLine: pp.line, diff: 0 };
+}
+function evFairOverFromBooks(books) {
+  const twoWay = Object.entries(books || {}).filter(([, b]) => b && b.over && b.under);
+  if (!twoWay.length) return null;
+  let pSum = 0;
+  for (const [, b] of twoWay) { const iO = 1 / b.over, iU = 1 / b.under; pSum += iO / (iO + iU); }
+  return { pOverFair: Math.min(0.98, Math.max(0.02, pSum / twoWay.length)) };
+}
+function evBookPricesTxt(books, side) {
+  const bkMap = books || {};
+  return EV_BOOKS
+    .filter(bk => bkMap[bk] && bkMap[bk][side.toLowerCase()])
+    .map(bk => `${bk === "FanDuel" ? "FD" : "DK"} ${evAmerican(bkMap[bk][side.toLowerCase()])}`)
+    .join(" / ");
+}
+function bestSideAmerican(books, side) {
+  let best = null;
+  const sideKey = side.toLowerCase();
+  for (const bk of EV_BOOKS) {
+    const dec = books?.[bk]?.[sideKey];
+    if (!dec) continue;
+    const am = Number(String(evAmerican(dec)).replace("+", ""));
+    if (!Number.isFinite(am)) continue;
+    if (best == null || am < best) best = am;
+  }
+  return best;
+}
+
+async function buildEV(games) {
+  const groups = {};
+  for (const row of lastOddsRows || []) {
+    if (looksLikeCflRow(row)) continue;
+    const statKey = rowStatKey(row);
+    if (!statKey || !STAT_META[statKey]) continue;
+    const book = normBookmakerLabel(row.bookmaker || row.book || "");
+    if (!EV_BOOKS.includes(book)) continue;
+    const line = rowLine(row, statKey);
+    if (!Number.isFinite(line)) continue;
+    const oDec = oddsToDecimal(row.over);
+    const uDec = oddsToDecimal(row.under);
+    if (oDec == null && uDec == null) continue;
+    const key = `${normName(row.player)}|${statKey}|${line}`;
+    if (!groups[key]) {
+      groups[key] = { player: row.player, statKey, line, home: row.home || "", away: row.away || "", books: {} };
+    }
+    const g = groups[key];
+    if (!g.books[book]) g.books[book] = {};
+    if (oDec != null) g.books[book].over = Math.max(g.books[book].over || 0, oDec);
+    if (uDec != null) g.books[book].under = Math.max(g.books[book].under || 0, uDec);
+  }
+
+  const board = await fetchPrizePicksStandardLines();
+  const diag = { bookGroups: Object.keys(groups).length, twoWayGroups: 0, ppExactMatches: 0, ppNearEv: 0 };
+  lastPPBoardMeta = { ...board.meta, ...diag };
+  const out = [];
+  const seen = new Set();
+  function pushEV(row) {
+    const id = `${row.player}|${row.statKey}|${row.line}|${row.side}|${row.book}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    out.push(row);
+  }
+
+  for (const pp of board.allLines || []) {
+    if (!pp?.nk || !STAT_META[pp.statKey] || pp.statKey === "other") continue;
+    if (!isHalfPointLine(pp.line)) continue;
+    if (!ppDayInWindow(pp.start, games)) continue;
+    const inj = injuryFor(pp.player);
+    if (inj && /out|\bir\b|inactive|pup/i.test(inj.status || "")) continue;
+    const hit = findBookGroupForPp(groups, pp);
+    if (!hit) continue;
+    const g = hit.g;
+    diag.ppExactMatches++;
+    const game = findGameForTeamAbbr(pp.team, games);
+    const proj = projectStat(pp.nk, pp.statKey, game);
+    const matchup = g.away && g.home
+      ? `${g.away} @ ${g.home}`
+      : (game ? `${game.away.abbr} @ ${game.home.abbr}` : (pp.team || ""));
+    for (const side of ["Over", "Under"]) {
+      const est = evPPSideFair(g.books, side);
+      if (!est) continue;
+      let { pFair, baselineSrc } = est;
+      let ev = pFair * PP_EV_DEC - 1;
+      const bestAm = bestSideAmerican(g.books, side);
+      const juiceEdge = bookJuiceBetterThanPP(bestAm);
+      if (juiceEdge && bestAm != null) {
+        const pJuice = bestAm >= 100 ? 100 / (bestAm + 100) : Math.abs(bestAm) / (Math.abs(bestAm) + 100);
+        const evJuice = pJuice * PP_EV_DEC - 1;
+        if (evJuice > ev) { pFair = pJuice; ev = evJuice; baselineSrc = "book juice"; }
+      }
+      if (ev > 0 || juiceEdge) diag.ppNearEv++;
+      if (ev < 0.001 && !juiceEdge) continue;
+      const b = PP_EV_DEC - 1;
+      const kelly = Math.max(0, (pFair * (b + 1) - 1) / b);
+      const bookTxt = evBookPricesTxt(g.books, side);
+      const bits = [
+        bookTxt,
+        hit.diff ? `book ${hit.usedLine}` : "",
+        proj != null ? `proj ${proj}` : "",
+        juiceEdge && ev < 0.001 ? "book juice worse than PP −119" : "",
+      ].filter(Boolean);
+      pushEV({
+        evRow: true, isPP: true, ppOnBoard: true, isModel: false,
+        player: pp.player, statKey: pp.statKey, statLabel: STAT_META[pp.statKey]?.label || pp.statKey,
+        line: pp.line, side, book: "PrizePicks", dec: PP_EV_DEC, proj,
+        matchup, pFair, ev, kellyQ: kelly / 4,
+        baselineSrc, detailTxt: bits.join(" · "),
+      });
+    }
+  }
+
+  const graded = new Set(out.map(r => `${normName(r.player)}|${r.statKey}|${r.line}`));
+  for (const pp of board.allLines || []) {
+    if (!pp?.nk || !STAT_META[pp.statKey] || pp.statKey === "other") continue;
+    if (!isHalfPointLine(pp.line)) continue;
+    if (!ppDayInWindow(pp.start, games)) continue;
+    if (graded.has(`${pp.nk}|${pp.statKey}|${pp.line}`)) continue;
+    const inj = injuryFor(pp.player);
+    if (inj && /out|\bir\b|inactive|pup/i.test(inj.status || "")) continue;
+    const game = findGameForTeamAbbr(pp.team, games);
+    const proj = projectStat(pp.nk, pp.statKey, game);
+    const pOver = pOverModel(pp.statKey, proj, pp.line);
+    if (pOver == null) continue;
+    const gap = Math.abs(Number(proj) - pp.line) / Math.max(Math.abs(pp.line), 1);
+    if (gap > 0.42) continue;
+    const matchup = game ? `${game.away.abbr} @ ${game.home.abbr}` : (pp.team || "");
+    for (const side of ["Over", "Under"]) {
+      const pFair = side === "Over" ? pOver : 1 - pOver;
+      const ev = pFair * PP_EV_DEC - 1;
+      if (ev < 0.03 || pFair > 0.72) continue;
+      const b = PP_EV_DEC - 1;
+      const kelly = Math.max(0, (pFair * (b + 1) - 1) / b);
+      pushEV({
+        evRow: true, isPP: true, ppOnBoard: true, isModel: true,
+        player: pp.player, statKey: pp.statKey, statLabel: STAT_META[pp.statKey]?.label || pp.statKey,
+        line: pp.line, side, book: "PrizePicks", dec: PP_EV_DEC, proj,
+        matchup, pFair, ev, kellyQ: kelly / 4,
+        baselineSrc: "model",
+        detailTxt: `proj ${proj} · no matching FD/DK number yet`,
+      });
+    }
+  }
+
+  for (const g of Object.values(groups)) {
+    if (!isHalfPointLine(g.line)) continue;
+    const fair = evFairOverFromBooks(g.books);
+    if (!fair) continue;
+    diag.twoWayGroups++;
+    const matchup = g.away && g.home ? `${g.away} @ ${g.home}` : "";
+    for (const side of ["Over", "Under"]) {
+      for (const book of EV_BOOKS) {
+        const other = book === "FanDuel" ? "DraftKings" : "FanDuel";
+        const ob = g.books[other];
+        if (!ob || !ob.over || !ob.under) continue;
+        const dec = g.books[book] && g.books[book][side.toLowerCase()];
+        if (!dec) continue;
+        const iO = 1 / ob.over, iU = 1 / ob.under;
+        const pFair = Math.min(0.98, Math.max(0.02, side === "Over" ? iO / (iO + iU) : iU / (iO + iU)));
+        const ev = pFair * dec - 1;
+        if (ev < 0.001) continue;
+        const b = dec - 1;
+        const kelly = b > 0 ? Math.max(0, (pFair * (b + 1) - 1) / b) : 0;
+        pushEV({
+          evRow: true, isPP: false,
+          player: g.player, statKey: g.statKey, statLabel: STAT_META[g.statKey]?.label || g.statKey,
+          line: g.line, side, book, dec, matchup, pFair, ev, kellyQ: kelly / 4,
+          baselineSrc: `${other === "FanDuel" ? "FD" : "DK"} de-vig`,
+          detailTxt: `${other === "FanDuel" ? "FD" : "DK"} ${evAmerican(ob.over)} / ${evAmerican(ob.under)}`,
+        });
+      }
+    }
+  }
+
+  lastPPBoardMeta = { ...board.meta, ...diag };
+  out.sort((a, b) => {
+    if (a.isPP !== b.isPP) return a.isPP ? -1 : 1;
+    return b.ev - a.ev;
+  });
+  return out.slice(0, 180);
+}
+
+function filterPropsGame(g) {
+  const q = searchQ.trim().toLowerCase();
+  let players = g.players || [];
+  if (activeFilter === "moved") {
+    players = players.map(p => ({
+      ...p,
+      lineList: p.lineList.filter(l => l.lineMov || l.oddsMov),
+    })).filter(p => p.lineList.length);
+  } else if (activeFilter === "pp") {
+    players = players.map(p => ({
+      ...p,
+      lineList: p.lineList.filter(l => ppMatchFor(p.nk, l.statKey, l.line)),
+    })).filter(p => p.lineList.length);
+  } else if (activeFilter !== "all") {
+    players = players.map(p => ({
+      ...p,
+      lineList: p.lineList.filter(l => (STAT_META[l.statKey]?.group || "") === activeFilter),
+    })).filter(p => p.lineList.length);
+  }
+  if (q) {
+    players = players.filter(p => p.name.toLowerCase().includes(q) || g.home.abbr.toLowerCase() === q || g.away.abbr.toLowerCase() === q);
+  }
+  return { ...g, players, propCount: players.reduce((n, p) => n + p.lineList.length, 0) };
+}
+
+function gameSlot(g) {
+  if (g.status === "in") return "live";
+  const d = new Date(g.date);
+  if (Number.isNaN(d.getTime())) return "other";
+  const dow = d.getDay();
+  const hour = d.getHours();
+  if (dow === 4 || (dow === 3 && hour >= 19)) return "thu";
+  if (dow === 1) return "mon";
+  if (dow === 0) return hour >= 19 ? "snf" : "sun";
+  if (dow === 5) return "fri";
+  if (dow === 6) return "sat";
+  return "other";
+}
+function isTodayGame(g) {
+  return isoToYmd(g.date) === ymd(new Date());
+}
+function filterSlateGames(games) {
+  if (activeFilter === "today") return games.filter(isTodayGame);
+  if (activeFilter === "live") return games.filter(g => g.status === "in");
+  if (activeFilter === "final") return games.filter(g => g.completed);
+  if (["thu", "sun", "snf", "mon"].includes(activeFilter)) return games.filter(g => gameSlot(g) === activeFilter || (activeFilter === "sun" && gameSlot(g) === "snf"));
+  return games;
+}
+function dayHeadLabel(g) {
+  if (g.status === "in") return "Live now";
+  if (g.completed) {
+    const kick = formatKick(g.date);
+    return `Final · ${kick.day}`;
+  }
+  const kick = formatKick(g.date);
+  const slot = gameSlot(g);
+  const tag = slot === "thu" ? "Thursday Night" : slot === "mon" ? "Monday Night" : slot === "snf" ? "Sunday Night" : slot === "sun" ? "Sunday" : kick.day;
+  return tag || kick.day;
+}
+
+function renderFilters(tab) {
+  const f = document.getElementById("filters");
+  if (tab === "slate") {
+    const opts = [["all", "All"], ["today", "Today"], ["live", "Live"], ["final", "Final"]];
+    f.innerHTML = opts.map(([id, label]) => `<button class="filter-btn${id === activeFilter ? " active" : ""}" data-filter="${id}">${label}</button>`).join("") + `<span id="game-count"></span>`;
+    f.style.display = "flex";
+    return;
+  }
+  if (tab === "ev") {
+    const opts = ["all", "pp", "strong", "over", "under"];
+    f.innerHTML = opts.map(o =>
+      `<button class="filter-btn${o === activeFilter ? " active" : ""}" data-filter="${o}">${
+        o === "strong" ? "3%+ EV" : o === "pp" ? "PrizePicks" : o.toUpperCase()
+      }</button>`
+    ).join("") + `<span id="game-count"></span>`;
+    f.style.display = "flex";
+    return;
+  }
+  const opts = [["all", "All"], ["scoring", "Scoring"], ["board", "Rebounds"], ["play", "Playmaking"], ["combo", "Combos"], ["stocks", "Stocks"], ["moved", "Moved"], ["pp", "On PP"]];
+  f.innerHTML =
+    opts.map(([id, label]) => `<button class="filter-btn${id === activeFilter ? " active" : ""}" data-filter="${id}">${label}</button>`).join("") +
+    `<input type="search" id="prop-search" placeholder="Search player or team…" value="${searchQ.replace(/"/g, "&quot;")}" />` +
+    `<span id="game-count"></span>`;
+  f.style.display = "flex";
+  const search = document.getElementById("prop-search");
+  if (search) {
+    search.addEventListener("input", (e) => {
+      searchQ = e.target.value;
+      renderCards(cache.props, "props");
+    });
+  }
+}
+
+function movedCount(games) {
+  let n = 0;
+  for (const g of games || []) {
+    for (const p of g.players || []) {
+      for (const l of p.lineList || []) {
+        if (l.lineMov || l.oddsMov) n++;
+      }
+    }
+  }
+  return n;
+}
+
+function renderSummary(data, tab) {
+  const grid = document.getElementById("summary-grid");
+  const rows = data || [];
+  const slate = tab === "slate" ? filterSlateGames(rows) : rows;
+  const live = slate.filter(g => g.status === "in").length;
+  const stats = tab === "slate"
+    ? [
+        { l: "Games", v: slate.length, c: "#34d399" },
+        { l: live ? "Live" : "Final", v: live || slate.filter(g => g.completed).length, c: live ? "#fb7185" : "#22d3ee" },
+        { l: "Tip-offs set", v: slate.filter(g => g.date).length, c: "#a78bfa" },
+      ]
+    : tab === "props"
+    ? [
+        { l: "Prop lines", v: rows.reduce((n, g) => n + (g.propCount || 0), 0), c: "#34d399" },
+        { l: "Players", v: rows.reduce((n, g) => n + (g.players?.length || 0), 0), c: "#22d3ee" },
+        { l: "Moved", v: movedCount(rows), c: "#fbbf24" },
+      ]
+    : [
+        { l: "+EV plays", v: rows.length, c: "#34d399" },
+        { l: "Strong (3%+)", v: rows.filter(r => r.ev >= 0.03).length, c: "#22d3ee" },
+        { l: "PrizePicks", v: rows.filter(r => r.isPP && r.ppOnBoard).length, c: "#a78bfa" },
+      ];
+  grid.innerHTML = stats.map(s =>
+    `<div class="sum-card"><div class="sum-val" style="color:${s.c}">${s.v}</div><div class="sum-lbl">${s.l}</div></div>`
+  ).join("");
+  grid.style.display = "grid";
+}
+
+function oddsChips(g) {
+  const chips = [];
+  const hs = Number(g.spread);
+  if (Number.isFinite(hs) && hs !== 0) {
+    const mag = Math.abs(hs);
+    const homeFav = hs < 0;
+    const fav = homeFav ? g.home : g.away;
+    const dog = homeFav ? g.away : g.home;
+    chips.push(`<span class="stat-chip">${fav.abbr} −${mag}</span>`);
+    chips.push(`<span class="stat-chip good">${dog.abbr} +${mag}</span>`);
+  } else if (g.oddsDetails) {
+    chips.push(`<span class="stat-chip">${g.oddsDetails}</span>`);
+  }
+  if (g.overUnder != null) chips.push(`<span class="stat-chip">O/U ${g.overUnder}</span>`);
+  if (g.mlAway && g.mlHome) {
+    const dogIsAway = String(g.mlAway).includes("+") || Number(String(g.mlAway).replace("+", "")) > 0;
+    chips.push(`<span class="stat-chip${dogIsAway ? " good" : ""}">${g.away.abbr} ${g.mlAway}</span>`);
+    chips.push(`<span class="stat-chip${!dogIsAway ? " good" : ""}">${g.home.abbr} ${g.mlHome}</span>`);
+  }
+  if (g.broadcast) chips.push(`<span class="stat-chip">${g.broadcast}</span>`);
+  if (g.status === "in") chips.push(`<span class="stat-chip warn"><span class="live-dot"></span>${g.statusText || "LIVE"}</span>`);
+  else if (g.completed) chips.push(`<span class="stat-chip">${g.away.score || 0}–${g.home.score || 0} F</span>`);
+  return chips.join("");
+}
+
+function teamLogos(g) {
+  const a = g.away.logo ? `<img class="team-logo" src="${g.away.logo}" alt="${g.away.abbr}" />` : "";
+  const h = g.home.logo ? `<img class="team-logo" src="${g.home.logo}" alt="${g.home.abbr}" />` : "";
+  return `<div class="matchup-row">${a}${h}</div>`;
+}
+
+function renderSlate(games) {
+  const list = filterSlateGames(games);
+  if (!games.length) {
+    return `<div class="game-card empty">
+      <h3>No games on this week yet</h3>
+      <p>ESPN has not published this slate. Pick another week from the menu, or check back when the schedule posts.</p>
+    </div>`;
+  }
+  if (!list.length) {
+    return `<div class="game-card empty"><h3>No games in this filter</h3><p>Try All, Sunday, or Final.</p></div>`;
+  }
+  const propById = new Map((cache.props || []).map(g => [g.id, g.propCount || 0]));
+  let lastHead = "";
+  return list.map((g, i) => {
+    const kick = formatKick(g.date);
+    const recA = g.away.record ? `(${g.away.record})` : "";
+    const recH = g.home.record ? `(${g.home.record})` : "";
+    const nProps = propById.get(g.id) || 0;
+    const propChip = nProps ? `<span class="stat-chip good">${nProps} prop${nProps === 1 ? "" : "s"}</span>` : "";
+    const head = dayHeadLabel(g);
+    const headHtml = head !== lastHead ? `<div class="day-head">${head}</div>` : "";
+    lastHead = head;
+    const score = (g.status === "in" || g.completed)
+      ? `<div class="score-now">${g.away.score || 0}–${g.home.score || 0}</div><div class="kick-day">${g.status === "in" ? (g.clock ? `Q${g.period || ""} ${g.clock}` : "LIVE") : "Final"}</div>`
+      : `<div class="kick-time">${kick.time}</div><div class="kick-day">${kick.day}</div>`;
+    return `${headHtml}<div class="game-card${g.status === "in" ? " open" : ""}">
+      <div class="card-hd" data-open="${i}">
+        ${teamLogos(g)}
+        <div style="flex:1;min-width:0">
+          <div class="card-teams">${g.away.abbr} ${recA} @ ${g.home.abbr} ${recH}</div>
+          <div class="card-meta">${g.away.nick} at ${g.home.nick}${g.venue ? " · " + g.venue : ""}${g.venueCity ? " · " + g.venueCity : ""} · ${oddsChips(g)}${propChip}</div>
+        </div>
+        <div class="card-right">${score}</div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function bookOddsLine(books) {
+  const parts = [];
+  const bkMap = books || {};
+  for (const bk of EV_BOOKS) {
+    const b = bkMap[bk];
+    if (!b) continue;
+    const tag = bk === "FanDuel" ? "FD" : "DK";
+    const o = b.over ? `O ${evAmerican(b.over)}` : "";
+    const u = b.under ? `U ${evAmerican(b.under)}` : "";
+    parts.push(`${tag} ${[o, u].filter(Boolean).join(" / ")}`);
+  }
+  if (bkMap.PrizePicks) parts.push("PP −119");
+  return parts.join(" · ");
+}
+
+function oddsEmptyCopy() {
+  const m = lastOddsMeta || {};
+  const err = String(m.error || "");
+  if (err === "missing_ODDS_API_KEY" || err.includes("missing_ODDS")) {
+    return "Odds API key is not configured on the server, so FanDuel / DraftKings props cannot load.";
+  }
+  if (err === "file_host") {
+    return "Open the site over http://localhost:8080 (not a file:// page) so the odds proxy can run.";
+  }
+  if (err) return `Odds feed error: ${err}`;
+  if (m.note === "no_nba_events_for_range") {
+    return `No NBA events in the odds feed for ${m.dateFrom || "this window"} to ${m.dateTo || ""}. Books usually post the morning of the slate.`;
+  }
+  if ((m.eventCount || 0) > 0 && !(m.propRows || lastOddsRows.length)) {
+    return `Found ${m.eventCount} NBA game${m.eventCount === 1 ? "" : "s"} but FanDuel / DraftKings have not posted player props yet.`;
+  }
+  return `FanDuel / DraftKings NBA props typically go up the day of the game. ${selected.date} is loaded — check back as lines drop.`;
+}
+function trackId(p, l) {
+  return `${p.nk}|${l.statKey}|${l.line}`;
+}
+function renderTrackPanel(p, l) {
+  const hist = l.hist || [];
+  const open = hist[0];
+  const last = hist[hist.length - 1];
+  const openTxt = open
+    ? `Open ${new Date(open.t).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })} · ${open.line ?? "—"} · FD ${formatAmerican(open.fdOver)} / DK ${formatAmerican(open.dkOver)}`
+    : "";
+  const nowTxt = last && hist.length > 1
+    ? `Now ${last.line ?? "—"} · FD ${formatAmerican(last.fdOver)} / DK ${formatAmerican(last.dkOver)}`
+    : "";
+  const pl = _nbaModel.players[p.nk] || {};
+  const logs = pl.logs || [];
+  const h2h = pl.h2h || {};
+  const role = pl.role?.note || "";
+  const logRows = logs.slice(0, 8).map(r =>
+    `<tr><td>${r.date || ""}</td><td>${r.opp || ""}</td><td>${r.min ?? ""}</td><td>${r.pts ?? ""}</td><td>${r.reb ?? ""}</td><td>${r.ast ?? ""}</td><td>${r.threes ?? ""}</td></tr>`
+  ).join("");
+  const h2hTxt = h2h.n
+    ? `vs ${h2h.vs}: ${h2h.n}g · ${h2h.pts ?? "—"} PTS / ${h2h.reb ?? "—"} REB / ${h2h.ast ?? "—"} AST`
+    : "";
+  const vs = pl.vsDef || p.vsDef || {};
+  const vsTxt = vs.n
+    ? `${vs.pos || pl.pos || "pos"}s vs this D: ${vs.n} similar · allowed ${vs.pts ?? "—"} PTS / ${vs.reb ?? "—"} REB / ${vs.ast ?? "—"} AST`
+    : "";
+  return `<div class="prop-track">
+    <div style="font-size:11px;color:#94a3b8;line-height:1.5">${STAT_META[l.statKey]?.label || l.statKey} ${l.line}
+      ${pl.pos ? ` · ${pl.pos}` : ""} ${pl.team ? `· ${pl.team}` : ""}
+      ${role ? `<br>${role}` : ""}
+      ${h2hTxt ? `<br>${h2hTxt}` : ""}
+      ${vsTxt ? `<br>${vsTxt}` : ""}
+      ${openTxt ? `<br>${openTxt}` : ""}
+      ${nowTxt ? `<br>${nowTxt}` : ""}
+    </div>
+    ${logRows ? `<table class="game-log-table"><thead><tr><th>Date</th><th>Opp</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>3PM</th></tr></thead><tbody>${logRows}</tbody></table>` : ""}
+    ${renderOddsSparkChart(hist)}
+    ${renderOddsLogTable(hist)}
+  </div>`;
+}
+function renderProps(games) {
+  const shown = games.map(filterPropsGame).filter(g => g.players.length);
+  if (!games.length) {
+    return `<div class="game-card empty"><h3>No slate loaded</h3><p>Pick a date to load games and sportsbook props.</p></div>`;
+  }
+  if (!lastOddsRows.length && !(_ppBoard?.allLines || []).length) {
+    return `<div class="game-card empty">
+      <h3>No book props posted yet</h3>
+      <p>${oddsEmptyCopy()}</p>
+    </div>`;
+  }
+  if (!shown.length) {
+    return `<div class="game-card empty"><h3>No matching props</h3><p>Try All / Scoring / Combos, or clear the search. ${lastOddsRows.length} book row${lastOddsRows.length === 1 ? "" : "s"} loaded.</p></div>`;
+  }
+  const sorted = shown.slice().sort((a, b) => {
+    if (a.status === "in" && b.status !== "in") return -1;
+    if (b.status === "in" && a.status !== "in") return 1;
+    if (a.completed !== b.completed) return a.completed ? 1 : -1;
+    return String(a.date).localeCompare(String(b.date));
+  });
+  return sorted.map((g, i) => {
+    const kick = formatKick(g.date);
+    const body = g.players.map(p => {
+      const inj = injuryFor(p.name);
+      const injChip = inj && /out|doubt|quest|ir\b|inactive|pup/i.test(inj.status)
+        ? `<span class="inj-chip">${inj.status || "INJ"}</span>` : "";
+      const pills = p.lineList.map(l => {
+        const tid = trackId(p, l);
+        const active = expandedTrack === tid;
+        const mov = l.lineMov;
+        const movChip = mov ? `<span class="mov-chip ${mov.dir}">${mov.from}→${mov.to}</span>` : "";
+        const pp = ppMatchFor(p.nk, l.statKey, l.line) || (l.books && l.books.PrizePicks);
+        const ppChip = pp ? `<span class="pp-chip">PP</span>` : "";
+        const edge = l.modelEdge;
+        const projLine = l.proj != null
+          ? `<div class="proj-chip${edge > 0.4 ? " up" : edge < -0.4 ? " down" : ""}">proj ${l.proj}${edge != null ? ` (${edge > 0 ? "+" : ""}${edge})` : ""}</div>`
+          : "";
+        return `<div class="prop-pill${active ? " active" : ""}" data-track="${tid}">
+          <div class="prop-pill-top">
+            <div class="prop-pill-stat">${STAT_META[l.statKey]?.label || l.statKey}</div>
+            <div>${ppChip}${movChip}</div>
+          </div>
+          <div class="prop-pill-line">${l.line}</div>
+          ${projLine}
+          <div class="prop-pill-odds">${bookOddsLine(l.books) || "line only"}</div>
+        </div>`;
+      }).join("");
+      const openLine = p.lineList.find(l => trackId(p, l) === expandedTrack);
+      const note = p.role?.note ? `<div class="prop-note">${p.role.note}</div>` : "";
+      return `<div class="prop-player">
+        <div class="prop-name">${p.name}${p.pos ? `<span class="prop-team">${p.pos}</span>` : ""}${p.team ? `<span class="prop-team">${p.team}</span>` : ""} ${injChip}</div>
+        ${note}
+        <div class="prop-lines">${pills}</div>
+        ${openLine ? renderTrackPanel(p, openLine) : ""}
+      </div>`;
+    }).join("");
+    const nProps = g.propCount;
+    const live = g.status === "in";
+    return `<div class="game-card${i < 2 || live ? " open" : ""}" data-card="${i}">
+      <div class="card-hd" data-toggle="${i}">
+        ${teamLogos(g)}
+        <div style="flex:1;min-width:0">
+          <div class="card-teams">${g.away.abbr} @ ${g.home.abbr}${live ? ' <span class="stat-chip warn"><span class="live-dot"></span>LIVE</span>' : ""}</div>
+          <div class="card-meta">${nProps} prop${nProps === 1 ? "" : "s"} · ${g.players.length} player${g.players.length === 1 ? "" : "s"}${g.oddsDetails ? " · " + g.oddsDetails : ""}${g.overUnder != null ? " · O/U " + g.overUnder : ""} · ${kick.day}</div>
+        </div>
+        <div class="card-right"><div class="kick-time">${live || g.completed ? `${g.away.score || 0}–${g.home.score || 0}` : kick.time}</div></div>
+      </div>
+      <div class="card-bd${i < 2 || live ? " open" : ""}" id="bd-${i}">${body}</div>
+    </div>`;
+  }).join("");
+}
+
+function evColor(ev) { return ev >= 0.05 ? "#34d399" : ev >= 0.03 ? "#22d3ee" : ev >= 0.015 ? "#fbbf24" : "#94a3b8"; }
+
+function renderEV(rows) {
+  const filtered = rows.filter(r => {
+    if (activeFilter === "pp") return !!r.isPP;
+    if (activeFilter === "strong") return r.ev >= 0.03;
+    if (activeFilter === "over") return r.side === "Over";
+    if (activeFilter === "under") return r.side === "Under";
+    return true;
+  });
+  const meta = lastPPBoardMeta || {};
+  const intro = `<div class="game-card ev-intro"><div style="padding:16px 18px">
+    <div class="ev-intro-hd">+EV vs FanDuel / DraftKings</div>
+    <div class="ev-intro-body">Grades PrizePicks NBA <strong>half-point (.5)</strong> lines at −119 against FanDuel and DraftKings. Whole-number lines are skipped — PrizePicks voids on the number while FanDuel Over 0.5 still hits. Stake = ¼-Kelly. Model uses recent form, head-to-head, and how that defense has allowed the same position.</div>
+    <div class="ev-intro-meta">${meta.error ? `PrizePicks unavailable (${meta.error}) — book-vs-book only.` : `${meta.standard || 0} PP standard · ${meta.ppExactMatches || 0} matched FD/DK · ${meta.twoWayGroups || 0} two-way props`}</div>
+  </div></div>`;
+  if (!filtered.length) {
+    return intro + `<div class="game-card ev-empty"><p>${meta.ppExactMatches === 0 && meta.standard ? "No PrizePicks standard line shares the same number as FanDuel / DraftKings on this slate. Model-only edges need a projection first." : "No +EV plays on this slate yet. Lines tighten the day of the game — check back closer to tip-off."}</p></div>`;
+  }
+  const rowsHtml = filtered.map(r => {
+    const c = evColor(r.ev);
+    return `<div class="ev-row ${r.isModel ? "model" : r.isPP ? "pp" : "book"}">
+      <div>
+        <div class="ev-player">${r.player}</div>
+        <div class="ev-matchup">${r.matchup || "—"}</div>
+        <span class="stat-chip">${r.statLabel}</span>
+      </div>
+      <div class="ev-pick ${r.side === "Over" ? "over" : "under"}">${r.side.toUpperCase()} ${r.line}</div>
+      <div>
+        ${r.isPP ? `<span class="ev-book-chip pp">PrizePicks −119</span>` : `<span class="ev-book-chip book">${r.book} ${evAmerican(r.dec)}</span>`}
+        <div class="ev-detail">${r.baselineSrc}${r.detailTxt ? ` · ${r.detailTxt}` : ""}</div>
+      </div>
+      <div>
+        <div class="ev-fair">${(r.pFair * 100).toFixed(1)}% fair</div>
+        <div class="ev-kelly">¼-Kelly ${(r.kellyQ * 100).toFixed(1)}%</div>
+      </div>
+      <div class="ev-pct" style="color:${c}">+${(r.ev * 100).toFixed(1)}%</div>
+    </div>`;
+  }).join("");
+  return intro + `<div class="game-card"><div class="ev-thead"><span>Player</span><span>Pick</span><span>Book</span><span>Fair / Stake</span><span>EV</span></div>${rowsHtml}</div>`;
+}
+
+function renderCards(data, tab) {
+  const el = document.getElementById("cards");
+  if (tab === "slate") el.innerHTML = renderSlate(data);
+  else if (tab === "props") el.innerHTML = renderProps(data);
+  else el.innerHTML = renderEV(data);
+
+  const count = document.getElementById("game-count");
+  if (count) {
+    if (tab === "ev") count.textContent = `${(data || []).length} plays`;
+    else if (tab === "props") count.textContent = `${(data || []).reduce((n, g) => n + (g.propCount || 0), 0)} lines`;
+    else count.textContent = `${filterSlateGames(data || []).length} games`;
+  }
+
+  el.querySelectorAll("[data-toggle]").forEach(hd => {
+    hd.addEventListener("click", () => {
+      const i = hd.getAttribute("data-toggle");
+      const card = hd.closest(".game-card");
+      const bd = document.getElementById("bd-" + i);
+      const open = bd.classList.toggle("open");
+      card.classList.toggle("open", open);
+    });
+  });
+  el.querySelectorAll("[data-track]").forEach(pill => {
+    pill.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = pill.getAttribute("data-track");
+      expandedTrack = expandedTrack === id ? null : id;
+      renderCards(cache.props, "props");
+    });
+  });
+}
+
+function refreshDelay(games) {
+  return (games || gamesState || []).some(g => g.status === "in") ? LIVE_REFRESH_MS : AUTO_REFRESH_MS;
+}
+
+function downloadCsv() {
+  const games = cache.props || [];
+  const rows = [["Player", "Away", "Home", "Stat", "Line", "FD Over", "FD Under", "DK Over", "DK Under", "Open Line", "Moved", "PrizePicks"]];
+  for (const g of games) {
+    for (const p of g.players || []) {
+      for (const l of p.lineList || []) {
+        const books = l.books || {};
+        const fd = books.FanDuel || {};
+        const dk = books.DraftKings || {};
+        const open = (l.hist && l.hist[0] && l.hist[0].line) || "";
+        rows.push([
+          p.name, g.away.abbr, g.home.abbr,
+          STAT_META[l.statKey]?.label || l.statKey, l.line,
+          evAmerican(fd.over), evAmerican(fd.under), evAmerican(dk.over), evAmerican(dk.under),
+          open, l.lineMov ? `${l.lineMov.from}->${l.lineMov.to}` : "",
+          ppMatchFor(p.nk, l.statKey, l.line) ? "Y" : "",
+        ]);
+      }
+    }
+  }
+  const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `proppulse-nba-${weekKey()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+function clearCaches() {
+  cache = { slate: null, props: null, ev: null };
+  lastOddsRows = [];
+  lastOddsMeta = null;
+  _ppBoard = null;
+  _nbaModel = { ts: 0, date: "", players: {}, vsPos: {}, lgPos: {} };
+  expandedTrack = null;
+}
+
+async function loadTab(tab) {
+  if (tab === "ev" && window.PropPulseBilling) {
+    await PropPulseBilling.ready;
+    if (!PropPulseBilling.can("ev")) {
+      PropPulseBilling.promptUpgrade();
+      setLoading(false);
+      return;
+    }
+  }
+  setLoading(true);
+  setError("");
+  document.getElementById("cards").innerHTML = "";
+  document.getElementById("summary-grid").style.display = "none";
+  document.getElementById("filters").style.display = "none";
+
+  document.getElementById("subtitle").textContent = `NBA · ${selected.date}`;
+
+  try {
+    setStatus("Fetching ESPN slate and rosters…");
+    const games = await loadEspnDay();
+    gamesState = games;
+
+    setStatus("Fetching FanDuel / DraftKings, PrizePicks, and the projection model…");
+    await Promise.allSettled([
+      loadOdds(games),
+      fetchInjuries(),
+      fetchPrizePicksStandardLines(),
+      fetchNbaModel(),
+    ]);
+
+    cache.slate = games;
+    const notes = [];
+    try {
+      cache.props = groupPlayerProps(games);
+    } catch (e) {
+      cache.props = games.map(g => ({ ...g, players: [], propCount: 0 }));
+      notes.push("Player props: " + (e.message || e));
+    }
+    try {
+      cache.ev = await buildEV(games);
+    } catch (e) {
+      cache.ev = [];
+      notes.push("+EV: " + (e.message || e));
+    }
+    if (notes.length) setError(notes.join(" · "));
+
+    const data = cache[tab];
+    renderFilters(tab);
+    renderSummary(data, tab);
+    renderCards(data, tab);
+    lastRefreshAt = Date.now();
+    updateRefreshLabel();
+    if (_autoRefreshTimer) clearTimeout(_autoRefreshTimer);
+    _autoRefreshTimer = setTimeout(() => { clearCaches(); loadTab(activeTab); }, refreshDelay(games));
+  } catch (e) {
+    setError(e.message || "Failed to load NBA slate.");
+  }
+  setLoading(false);
+}
+
+async function bootDefaultDay() {
+  selected.date = ymd(new Date());
+  try {
+    const json = await fetchJson(ESPN, 12000);
+    const events = Array.isArray(json?.events) ? json.events : [];
+    if (events.length) {
+      const first = String(events[0].date || "").slice(0, 10);
+      if (first.length === 10) selected.date = first;
+    }
+  } catch (_) {
+    regularSeasonFallback();
+  }
+  fillDatePicker();
+}
+
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    activeTab = btn.dataset.tab;
+    activeFilter = "all";
+    searchQ = "";
+    if (cache[activeTab]) {
+      renderFilters(activeTab);
+      renderSummary(cache[activeTab], activeTab);
+      renderCards(cache[activeTab], activeTab);
+    } else {
+      loadTab(activeTab);
+    }
+  });
+});
+document.getElementById("filters").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-filter]");
+  if (!btn) return;
+  activeFilter = btn.getAttribute("data-filter");
+  renderFilters(activeTab);
+  if (cache[activeTab]) {
+    renderSummary(cache[activeTab], activeTab);
+    renderCards(cache[activeTab], activeTab);
+  }
+});
+document.getElementById("retry-btn").addEventListener("click", () => {
+  clearCaches();
+  loadTab(activeTab);
+});
+document.getElementById("date-picker").addEventListener("change", (e) => {
+  selected.date = String(e.target.value || "").slice(0, 10);
+  clearCaches();
+  loadTab(activeTab);
+});
+document.getElementById("export-btn").addEventListener("click", downloadCsv);
+setInterval(updateRefreshLabel, 60000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && lastRefreshAt && Date.now() - lastRefreshAt >= refreshDelay()) {
+    clearCaches();
+    loadTab(activeTab);
+  }
+});
+
+(async function start() {
+  if (window.PropPulseBilling) await PropPulseBilling.ready;
+  if (window.PropPulseBilling && !PropPulseBilling.can("base")) return;
+  await bootDefaultDay();
+  await loadTab("props");
+})();
+</script>
 </body>
 </html>

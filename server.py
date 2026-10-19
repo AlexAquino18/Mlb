@@ -215,7 +215,7 @@ def odds_io_route():
         _apid = _os.path.join(_os.path.dirname(__file__), "api")
         if _apid not in _sys.path:
             _sys.path.insert(0, _apid)
-        from odds_io_impl import DEFAULT_BOOKMAKERS, fetch_mlb_odds_bundle, fetch_nfl_odds_bundle
+        from odds_io_impl import DEFAULT_BOOKMAKERS, fetch_mlb_odds_bundle, fetch_nba_odds_bundle, fetch_nfl_odds_bundle
 
         api_key = (
             _os.environ.get("ODDS_API_KEY")
@@ -243,6 +243,15 @@ def odds_io_route():
                 body = fetch_nfl_odds_bundle(
                     api_key or "", start, end, bookmakers, debug_structure=debug_structure
                 )
+        elif sport in ("nba", "basketball"):
+            start = (date_from or raw_date or "")[:10]
+            end = (date_to or date_from or raw_date or "")[:10]
+            if len(start) != 10:
+                body = {"ok": False, "error": "missing_from"}
+            else:
+                body = fetch_nba_odds_bundle(
+                    api_key or "", start, end, bookmakers, debug_structure=debug_structure
+                )
         elif not raw_date:
             body = {"ok": False, "error": "missing_date"}
         else:
@@ -260,6 +269,34 @@ def odds_io_route():
             json.dumps(body, default=str),
             status=200,
             headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": cache},
+        )
+    except Exception as e:
+        return Response(
+            json.dumps({"ok": False, "error": "server_error", "detail": str(e)}),
+            status=200,
+            headers={**CORS_HEADERS, "Content-Type": "application/json"},
+        )
+
+
+@app.route("/api/nba_stats")
+def nba_stats_route():
+    """ESPN NBA slate model: rosters, logs, H2H, position-vs-team."""
+    if request.method == "OPTIONS":
+        return Response(status=204, headers=CORS_HEADERS)
+    try:
+        import os as _os
+        import sys as _sys
+        _apid = _os.path.join(_os.path.dirname(__file__), "api")
+        if _apid not in _sys.path:
+            _sys.path.insert(0, _apid)
+        from nba_stats_impl import get_nba_model
+
+        date_key = (request.args.get("date") or "")[:10]
+        body = get_nba_model(date_key)
+        return Response(
+            json.dumps(body, default=str),
+            status=200,
+            headers={**CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "public, max-age=600"},
         )
     except Exception as e:
         return Response(
