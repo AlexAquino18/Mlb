@@ -43,7 +43,22 @@ _LOG_NAMES = [
     "pts",
 ]
 
-STAT_KEYS = ("pts", "reb", "ast", "threes", "stl", "blk", "tov", "min", "pra", "pr", "pa", "ra")
+STAT_KEYS = (
+    "pts", "reb", "ast", "threes", "stl", "blk", "tov", "min",
+    "pra", "pr", "pa", "ra", "stocks", "fantasy", "fgm", "ftm",
+)
+# ESPN scoreboard uses NY / SA; books and PrizePicks often use NYK / SAS.
+_ABBR_ALIAS = {
+    "NYK": "NY", "NY": "NY",
+    "SAS": "SA", "SA": "SA",
+    "GSW": "GS", "GS": "GS",
+    "NOP": "NO", "NO": "NO", "NOR": "NO",
+    "PHX": "PHX", "PHO": "PHX",
+    "WAS": "WSH", "WSH": "WSH",
+    "UTA": "UTAH", "UTAH": "UTAH",
+    "BKN": "BKN", "BRK": "BKN",
+    "CHA": "CHA", "CHO": "CHA",
+}
 
 # Map ESPN position abbreviations onto the five prop roles.
 # Roster dumps are often just G / F / C — split those with height.
@@ -131,6 +146,10 @@ def _espn_date(date_key: str) -> str:
     return date_key.replace("-", "")
 
 
+def _canon_abbr(a: str) -> str:
+    return _ABBR_ALIAS.get((a or "").upper().strip(), (a or "").upper().strip())
+
+
 def _pos_group(abbr: str, height: Optional[float] = None) -> str:
     a = (abbr or "").upper().strip().replace(" ", "")
     h = float(height or 0)
@@ -163,18 +182,26 @@ def _row_from_stats(names: List[str], stats: List[Any], extra: Optional[dict] = 
     reb = _num(by.get("totalRebounds") or by.get("reb")) or 0.0
     ast = _num(by.get("assists") or by.get("ast")) or 0.0
     threes = _made(by.get("threePointFieldGoalsMade-threePointFieldGoalsAttempted") or by.get("three")) or 0.0
+    fgm = _made(by.get("fieldGoalsMade-fieldGoalsAttempted") or by.get("fg")) or 0.0
+    ftm = _made(by.get("freeThrowsMade-freeThrowsAttempted") or by.get("ft")) or 0.0
     stl = _num(by.get("steals") or by.get("stl")) or 0.0
     blk = _num(by.get("blocks") or by.get("blk")) or 0.0
     tov = _num(by.get("turnovers") or by.get("tov")) or 0.0
+    stocks = stl + blk
+    fantasy = pts + 1.2 * reb + 1.5 * ast + 3.0 * stl + 3.0 * blk - tov
     row = {
         "min": round(min_n, 1),
         "pts": round(pts, 1),
         "reb": round(reb, 1),
         "ast": round(ast, 1),
         "threes": round(threes, 1),
+        "fgm": round(fgm, 1),
+        "ftm": round(ftm, 1),
         "stl": round(stl, 1),
         "blk": round(blk, 1),
         "tov": round(tov, 1),
+        "stocks": round(stocks, 1),
+        "fantasy": round(fantasy, 1),
         "pra": round(pts + reb + ast, 1),
         "pr": round(pts + reb, 1),
         "pa": round(pts + ast, 1),
@@ -196,6 +223,19 @@ def _avg_rows(rows: List[dict], n: Optional[int] = None) -> Dict[str, float]:
         if vals:
             out[k] = round(sum(vals) / len(vals), 2)
     out["n"] = float(len(use))
+    return out
+
+
+def _pmin(rows: List[dict]) -> Dict[str, float]:
+    """Minutes-weighted per-minute rates. More stable when role/minutes move."""
+    tm = 0.0
+    for r in rows:
+        tm += float(r.get("min") or 0)
+    if tm < 10 or not rows:
+        return {}
+    out: Dict[str, float] = {"n": float(len(rows)), "min": round(tm / len(rows), 2), "tm": tm}
+    for k in ("pts", "reb", "ast", "threes", "stl", "blk", "tov", "fgm", "ftm"):
+        out[k] = sum(float(r.get(k) or 0) for r in rows) / tm
     return out
 
 
@@ -411,7 +451,7 @@ def _fetch_gamelog(athlete_id: str, season: int) -> List[dict]:
                     {
                         "eventId": eid,
                         "date": str(meta.get("gameDate") or "")[:10],
-                        "opp": str(opp.get("abbreviation") or "").upper(),
+                        "opp": _canon_abbr(str(opp.get("abbreviation") or "")),
                         "team": str(team.get("abbreviation") or "").upper(),
                         "result": str(meta.get("gameResult") or ""),
                         "home": str(meta.get("atVs") or "") != "@",
@@ -486,6 +526,8 @@ def _project_player(
     lg_pos: dict,
     *,
     b2b: bool = False,
+    three_in_4: bool = False,
+    extra_rest: bool = False,
     over_under: Optional[float] = None,
     is_home: bool = False,
 ) -> dict:
@@ -494,10 +536,17 @@ def _project_player(
     last5 = _avg_rows(qualified[:5])
     recent = _avg_rows(qualified[:10])
     season = _avg_rows(qualified[:50])
-    h2h_rows = [r for r in qualified if r.get("opp") == opp_abbr]
+    last5_r = _pmin(qualified[:5])
+    recent_r = _pmin(qualified[:10])
+    season_r = _pmin(qualified[:50])
+    opp_key = _canon_abbr(opp_abbr)
+    h2h_rows = [r for r in qualified if _canon_abbr(str(r.get("opp") or "")) == opp_key]
     h2h = _avg_rows(h2h_rows[:8])
+    h2h_r = _pmin(h2h_rows[:8])
+    split_rows = [r for r in qualified[:40] if bool(r.get("home")) == is_home]
+    split_r = _pmin(split_rows) if len(split_rows) >= 6 else {}
     pos = pl.get("pos") or "SF"
-    def_vs, lg, vs_label = _def_bucket(vs_pos, lg_pos, opp_abbr, pos)
+    def_vs, lg, vs_label = _def_bucket(vs_pos, lg_pos, opp_key, pos)
     role_min = _num(last5.get("min")) or _num(recent.get("min")) or _num(season.get("min")) or 22.0
     status = str(pl.get("injStatus") or pl.get("rosterInj") or "").lower()
     if any(x in status for x in ("out", "inactive", "ir", "susp")):
@@ -506,35 +555,45 @@ def _project_player(
         role_min *= 0.55
     elif "question" in status:
         role_min *= 0.82
-    if b2b:
+    if three_in_4:
+        role_min *= 0.90
+    elif b2b:
         role_min *= 0.93
-    min_factor = 1.0
-    base_min = _num(recent.get("min")) or role_min
-    if base_min > 1:
-        min_factor = max(0.70, min(1.20, role_min / base_min))
+    elif extra_rest:
+        role_min *= 1.03
     pace = 1.0
     if over_under and over_under > 0:
         pace = max(0.92, min(1.08, 0.97 + 0.03 * (over_under / 224.0)))
-    loc = 1.02 if is_home else 0.99
+    loc = 1.015 if is_home else 0.992
     proj: Dict[str, Any] = {"min": round(role_min, 1)}
     notes = []
     if h2h.get("n"):
         notes.append(f"H2H {int(h2h['n'])}g vs {opp_abbr}")
-    if b2b:
+    if three_in_4:
+        notes.append("3rd in 4 nights")
+    elif b2b:
         notes.append("back-to-back")
-    for key in ("pts", "reb", "ast", "threes", "stl", "blk", "tov"):
-        base = _blend(season, recent, last5, h2h, key)
-        if base is None:
-            continue
-        allowed = _num(def_vs.get(key))
-        lg_avg = _num(lg.get(key))
+    elif extra_rest:
+        notes.append("2+ days rest")
+    for key in ("pts", "reb", "ast", "threes", "stl", "blk", "tov", "fgm", "ftm"):
+        rate = _blend(season_r, recent_r, last5_r, h2h_r, key)
+        if rate is None:
+            base = _blend(season, recent, last5, h2h, key)
+            if base is None:
+                continue
+            val = base
+        else:
+            if split_r.get(key) is not None and split_r.get("n", 0) >= 6:
+                rate = 0.88 * rate + 0.12 * float(split_r[key])
+            val = rate * role_min
+        allowed = _num(def_vs.get("pmin_" + key) if def_vs.get("pmin_" + key) is not None else def_vs.get(key))
+        lg_avg = _num(lg.get("pmin_" + key) if lg.get("pmin_" + key) is not None else lg.get(key))
         tilt = 1.0
-        if allowed is not None and lg_avg and lg_avg > 0.4:
+        if allowed is not None and lg_avg and lg_avg > 0:
             tilt = 1.0 + 0.38 * ((allowed / lg_avg) - 1.0)
             tilt = max(0.82, min(1.22, tilt))
-        loc_k = loc if key in ("pts", "threes", "ast") else 1.0
-        val = base * min_factor * tilt * pace * loc_k
-        proj[key] = round(val, 1)
+        loc_k = loc if key in ("pts", "threes", "ast", "fgm") else 1.0
+        proj[key] = round(val * tilt * pace * loc_k, 1)
     if "pts" in proj:
         if "reb" in proj:
             proj["pr"] = round(proj["pts"] + proj["reb"], 1)
@@ -543,6 +602,14 @@ def _project_player(
         if "reb" in proj and "ast" in proj:
             proj["pra"] = round(proj["pts"] + proj["reb"] + proj["ast"], 1)
             proj["ra"] = round(proj["reb"] + proj["ast"], 1)
+    if "stl" in proj and "blk" in proj:
+        proj["stocks"] = round(proj["stl"] + proj["blk"], 1)
+    if all(k in proj for k in ("pts", "reb", "ast", "stl", "blk", "tov")):
+        proj["fantasy"] = round(
+            proj["pts"] + 1.2 * proj["reb"] + 1.5 * proj["ast"] + 3 * proj["stl"] + 3 * proj["blk"] - proj["tov"],
+            1,
+        )
+    min_factor = max(0.55, min(1.15, role_min / max(_num(recent.get("min")) or role_min, 1)))
     dd = _dd_rate(qualified, 2)
     td = _dd_rate(qualified, 3)
     if dd is not None:
@@ -552,8 +619,8 @@ def _project_player(
     if def_vs:
         hot = []
         for k, label in (("pts", "PTS"), ("reb", "REB"), ("ast", "AST"), ("threes", "3PM")):
-            a = _num(def_vs.get(k))
-            l = _num(lg.get(k))
+            a = _num(def_vs.get("pmin_" + k) or def_vs.get(k))
+            l = _num(lg.get("pmin_" + k) or lg.get(k))
             if a is not None and l and l > 0:
                 pct = (a / l - 1) * 100
                 if abs(pct) >= 6:
@@ -571,6 +638,7 @@ def _project_player(
         "threes": h2h.get("threes"),
         "min": h2h.get("min"),
         "pra": h2h.get("pra"),
+        "stocks": h2h.get("stocks"),
     }
     pl["proj"] = proj
     pl["vsDef"] = {
@@ -579,6 +647,7 @@ def _project_player(
         "pts": def_vs.get("pts"),
         "reb": def_vs.get("reb"),
         "ast": def_vs.get("ast"),
+        "threes": def_vs.get("threes"),
     }
     pl["role"] = {
         "minutes": round(role_min, 1),
@@ -593,7 +662,7 @@ def get_nba_model(date_key: str = "") -> Dict[str, Any]:
     day = (date_key or _ymd_now())[:10]
     if len(day) != 10:
         day = _ymd_now()
-    cache_key = f"nba|{day}|v3"
+    cache_key = f"nba|{day}|v4"
     now = time.time()
     if cache_key in _CACHE:
         ts, data = _CACHE[cache_key]
@@ -641,15 +710,23 @@ def get_nba_model(date_key: str = "") -> Dict[str, Any]:
             except Exception:
                 rosters[tid] = []
 
-    # Yesterday's board — back-to-backs crush minutes and counting stats.
+    # Rest: back-to-backs and 3-in-4 nights crush minutes.
     yday = (datetime.strptime(day, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+    yday2 = (datetime.strptime(day, "%Y-%m-%d") - timedelta(days=2)).strftime("%Y-%m-%d")
     ygames, _, _ = _fetch_scoreboard(yday, fallback_live=False)
+    ygames2, _, _ = _fetch_scoreboard(yday2, fallback_live=False)
     played_yest: set = set()
+    played_2: set = set()
     for g in ygames or []:
         for side in ("home", "away"):
-            ab = str(((g.get(side) or {}).get("abbr") or "")).upper()
+            ab = _canon_abbr(str(((g.get(side) or {}).get("abbr") or "")))
             if ab:
                 played_yest.add(ab)
+    for g in ygames2 or []:
+        for side in ("home", "away"):
+            ab = _canon_abbr(str(((g.get(side) or {}).get("abbr") or "")))
+            if ab:
+                played_2.add(ab)
 
     game_of: Dict[str, dict] = {}
     opp_of: Dict[str, str] = {}
@@ -660,11 +737,11 @@ def get_nba_model(date_key: str = "") -> Dict[str, Any]:
         ha = str((g.get("home") or {}).get("abbr") or "")
         aa = str((g.get("away") or {}).get("abbr") or "")
         if hid:
-            opp_of[hid] = aa
+            opp_of[hid] = _canon_abbr(aa)
             game_of[hid] = g
             home_ids.add(hid)
         if aid:
-            opp_of[aid] = ha
+            opp_of[aid] = _canon_abbr(ha)
             game_of[aid] = g
 
     n_teams = max(1, len(team_ids))
@@ -728,36 +805,53 @@ def get_nba_model(date_key: str = "") -> Dict[str, Any]:
     with ThreadPoolExecutor(max_workers=10) as ex:
         list(ex.map(_load_logs, pool))
 
-    # Position-vs-team uses every fetched rotation log, including guys we later drop.
-    vs_acc: Dict[str, Dict[str, Dict[str, List[float]]]] = {}
+    # Position-vs-team: minutes-weighted so a 12-minute bench PF doesn't look like a starter.
+    vs_acc: Dict[str, Dict[str, Dict[str, float]]] = {}
     for pl in pool:
         pos = pl.get("pos") or "SF"
         fam = _POS_FAM.get(pos, pos)
         for row in pl.get("logs") or []:
-            if (row.get("min") or 0) < 10:
+            mins = float(row.get("min") or 0)
+            if mins < 12:
                 continue
-            opp = row.get("opp") or ""
+            opp = _canon_abbr(str(row.get("opp") or ""))
             if not opp:
                 continue
-            for bucket_pos in (pos, fam):
+            for bucket_pos in {pos, fam}:
                 bucket = vs_acc.setdefault(opp, {}).setdefault(bucket_pos, {})
+                bucket["n"] = bucket.get("n", 0) + 1
+                bucket["min"] = bucket.get("min", 0.0) + mins
                 for k in ("pts", "reb", "ast", "threes", "stl", "blk", "tov"):
-                    bucket.setdefault(k, []).append(float(row.get(k) or 0))
+                    bucket[k] = bucket.get(k, 0.0) + float(row.get(k) or 0)
 
     vs_pos: Dict[str, dict] = {}
     lg_pos: Dict[str, Dict[str, List[float]]] = {}
+    lg_min: Dict[str, float] = {}
     for opp, by_pos in vs_acc.items():
         vs_pos[opp] = {}
-        for pos, stats in by_pos.items():
-            rec = {"n": len(next(iter(stats.values()), []))}
-            for k, vals in stats.items():
-                if vals:
-                    rec[k] = round(sum(vals) / len(vals), 2)
-                    lg_pos.setdefault(pos, {}).setdefault(k, []).extend(vals)
+        for pos, acc in by_pos.items():
+            n = int(acc.get("n") or 0)
+            tot_min = float(acc.get("min") or 0)
+            rec: Dict[str, float] = {"n": n}
+            if n and tot_min > 0:
+                rec["min"] = round(tot_min / n, 1)
+                for k in ("pts", "reb", "ast", "threes", "stl", "blk", "tov"):
+                    rec[k] = round(acc.get(k, 0.0) / n, 2)
+                    rec["pmin_" + k] = acc.get(k, 0.0) / tot_min
+                    lg_pos.setdefault(pos, {}).setdefault(k, []).append(acc.get(k, 0.0))
+                lg_min[pos] = lg_min.get(pos, 0.0) + tot_min
             vs_pos[opp][pos] = rec
     lg_avg: Dict[str, dict] = {}
     for pos, stats in lg_pos.items():
-        lg_avg[pos] = {k: round(sum(v) / len(v), 2) for k, v in stats.items() if v}
+        rec: Dict[str, float] = {}
+        tot_min = lg_min.get(pos) or 0.0
+        for k, vals in stats.items():
+            if not vals:
+                continue
+            rec[k] = round(sum(vals) / len(vals), 2)
+            if tot_min > 0:
+                rec["pmin_" + k] = sum(vals) / tot_min
+        lg_avg[pos] = rec
 
     # Keep the actual rotation — minutes last, not veteran years.
     keep_n = max(6, min(per_team, max_proj // n_teams))
@@ -780,12 +874,15 @@ def get_nba_model(date_key: str = "") -> Dict[str, Any]:
         tid = str(pl.get("teamId") or "")
         opp = opp_of.get(tid, "")
         g = game_of.get(tid) or {}
+        team_ab = _canon_abbr(str(pl.get("team") or ""))
         _project_player(
             pl,
             opp,
             vs_pos,
             lg_avg,
-            b2b=str(pl.get("team") or "").upper() in played_yest,
+            b2b=team_ab in played_yest,
+            three_in_4=team_ab in played_yest and team_ab in played_2,
+            extra_rest=bool(played_yest or played_2) and team_ab not in played_yest and team_ab not in played_2,
             over_under=_num(g.get("overUnder")),
             is_home=tid in home_ids,
         )

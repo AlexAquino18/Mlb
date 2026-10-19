@@ -659,6 +659,10 @@ def _stat_hint_nba(raw: str) -> str:
         return "ddbl"
     if any(x in raw for x in ("pts+reb+ast", "pts + reb + ast", "points+rebounds+assists", "pra", "p+r+a", "pts rebs asts")):
         return "pra"
+    if ("steal" in raw and "block" in raw) or "stocks" in raw:
+        return "stocks"
+    if "fantasy" in raw:
+        return "fantasy"
     if any(x in raw for x in ("pts+reb", "pts + reb", "points+rebounds", "points rebounds", "p+r")) and "ast" not in raw:
         return "pr"
     if any(x in raw for x in ("pts+ast", "pts + ast", "points+assists", "points assists", "p+a")):
@@ -667,6 +671,10 @@ def _stat_hint_nba(raw: str) -> str:
         return "ra"
     if "three" in raw or "3pt" in raw or "3-pt" in raw or "3 pointer" in raw or "threes" in raw:
         return "threes"
+    if "field goal" in raw or raw in ("fgm", "fg made"):
+        return "fgm"
+    if "free throw" in raw or raw in ("ftm", "ft made"):
+        return "ftm"
     if "rebound" in raw or raw in ("reb", "rebs", "rpg"):
         return "reb"
     if "assist" in raw or raw in ("ast", "asts", "apg"):
@@ -677,6 +685,8 @@ def _stat_hint_nba(raw: str) -> str:
         return "blk"
     if "turnover" in raw:
         return "tov"
+    if "minute" in raw:
+        return "min"
     if "point" in raw or raw in ("pts", "ppg"):
         return "pts"
     return ""
@@ -1051,6 +1061,15 @@ AN_NBA_BATCHES = [
         "core_bet_type_68_pts_asts": ("pa", "Pts+Ast"),
         "core_bet_type_69_rebs_asts": ("ra", "Reb+Ast"),
         "core_bet_type_70_double_double": ("ddbl", "Double-Double"),
+        "core_bet_type_30_steals_blocks": ("stocks", "Steals+Blocks"),
+        "core_bet_type_32_triple_double": ("tdbl", "Triple-Double"),
+        "core_bet_type_33_minutes": ("min", "Minutes"),
+        "core_bet_type_34_fantasy": ("fantasy", "Fantasy"),
+        "player_steals_blocks": ("stocks", "Steals+Blocks"),
+        "player_turnovers": ("tov", "Turnovers"),
+        "player_steals": ("stl", "Steals"),
+        "player_blocks": ("blk", "Blocks"),
+        "player_fantasy": ("fantasy", "Fantasy"),
     },
     {
         "core_bet_type_80_points": ("pts", "Points"),

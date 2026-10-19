@@ -457,6 +457,10 @@ const STAT_META = {
   ra:     { label: "Reb+Ast",    group: "combo" },
   ddbl:   { label: "Double-Dbl", group: "combo" },
   tdbl:   { label: "Triple-Dbl", group: "combo" },
+  stocks: { label: "Stl+Blk",    group: "stocks" },
+  fantasy:{ label: "Fantasy",    group: "combo" },
+  fgm:    { label: "FG Made",    group: "scoring" },
+  ftm:    { label: "FT Made",    group: "scoring" },
   min:    { label: "Minutes",    group: "other" },
   other:  { label: "Other",      group: "other" },
 };
@@ -478,7 +482,13 @@ let gamesState = [];
 let expandedTrack = null;
 
 function pad(n) { return String(n).padStart(2, "0"); }
-function ymd(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function ymd(d) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(d);
+  const g = Object.fromEntries(parts.map(p => [p.type, p.value]));
+  return `${g.year}-${g.month}-${g.day}`;
+}
 function addDaysYmd(s, delta) {
   const p = String(s || "").split("-").map(Number);
   if (p.length < 3) return s;
@@ -628,7 +638,14 @@ async function loadEspnDay() {
 
 function weekWindow(games) {
   const day = selected.date || ymd(new Date());
-  const days = games.map(g => isoToYmd(g.date)).filter(d => d.length === 10).sort();
+  const days = [];
+  for (const g of games || []) {
+    const utc = String(g.date || "").slice(0, 10);
+    if (utc.length === 10) days.push(utc);
+    const loc = isoToYmd(g.date);
+    if (loc.length === 10) days.push(loc);
+  }
+  days.sort();
   if (days.length) {
     return { from: days[0], to: days[days.length - 1] };
   }
@@ -637,13 +654,13 @@ function weekWindow(games) {
 
 function oddsIoUrl(from, to) {
   if (typeof location === "undefined" || location.protocol === "file:") return "";
-  const qs = new URLSearchParams({ sport: "nba", from, to, rev: "20261019nbav1" });
+  const qs = new URLSearchParams({ sport: "nba", from, to, rev: "20261019nbav2" });
   const host = location.hostname;
   const isLocal = host === "localhost" || host === "127.0.0.1";
   if (isLocal) return `http://127.0.0.1:8080/api/odds_io?${qs}`;
   return `${location.origin}/api/odds_io?${qs}`;
 }
-function oddsCacheKey(from, to) { return `nba_odds_v1:${from}:${to}`; }
+function oddsCacheKey(from, to) { return `nba_odds_v2:${from}:${to}`; }
 function oddsCacheGet(from, to) {
   try {
     const raw = localStorage.getItem(oddsCacheKey(from, to));
@@ -668,6 +685,46 @@ function cleanName(s) {
 function normTeamStr(s) {
   return (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
 }
+const NBA_TEAM_KEYS = {
+  atl: "atl", hawks: "atl", atlanta: "atl",
+  bos: "bos", celtics: "bos", boston: "bos",
+  bkn: "bkn", brk: "bkn", nets: "bkn", brooklyn: "bkn", njn: "bkn",
+  cha: "cha", cho: "cha", hornets: "cha", charlotte: "cha",
+  chi: "chi", bulls: "chi", chicago: "chi",
+  cle: "cle", cavaliers: "cle", cavs: "cle", cleveland: "cle",
+  dal: "dal", mavericks: "dal", mavs: "dal", dallas: "dal",
+  den: "den", nuggets: "den", denver: "den",
+  det: "det", pistons: "det", detroit: "det",
+  gs: "gsw", gsw: "gsw", warriors: "gsw", goldenstate: "gsw",
+  hou: "hou", rockets: "hou", houston: "hou",
+  ind: "ind", pacers: "ind", indiana: "ind",
+  lac: "lac", clippers: "lac",
+  lal: "lal", lakers: "lal",
+  mem: "mem", grizzlies: "mem", memphis: "mem",
+  mia: "mia", heat: "mia", miami: "mia",
+  mil: "mil", bucks: "mil", milwaukee: "mil",
+  min: "min", wolves: "min", timberwolves: "min", minnesota: "min",
+  no: "nop", nop: "nop", nor: "nop", pelicans: "nop", neworleans: "nop",
+  ny: "nyk", nyk: "nyk", knicks: "nyk", newyork: "nyk",
+  okc: "okc", thunder: "okc", oklahoma: "okc",
+  orl: "orl", magic: "orl", orlando: "orl",
+  phi: "phi", sixers: "phi", "76ers": "phi", philadelphia: "phi",
+  pho: "phx", phx: "phx", suns: "phx", phoenix: "phx",
+  por: "por", blazers: "por", portland: "por",
+  sac: "sac", kings: "sac", sacramento: "sac",
+  sa: "sas", sas: "sas", spurs: "sas", sanantonio: "sas",
+  tor: "tor", raptors: "tor", toronto: "tor",
+  utah: "uta", uta: "uta", jazz: "uta",
+  was: "was", wsh: "was", wizards: "was", washington: "was",
+};
+function nbaTeamKey(s) {
+  const compact = normTeamStr(s).replace(/\s+/g, "");
+  if (NBA_TEAM_KEYS[compact]) return NBA_TEAM_KEYS[compact];
+  for (const p of normTeamStr(s).split(/\s+/)) {
+    if (NBA_TEAM_KEYS[p]) return NBA_TEAM_KEYS[p];
+  }
+  return compact;
+}
 function teamBlob(t) {
   return normTeamStr([t.abbr, t.name, t.nick].filter(Boolean).join(" "));
 }
@@ -683,13 +740,13 @@ function looseTeamMatch(oddsStr, team) {
   const blob = teamBlob(team);
   if (!o || !blob) return false;
   if (looksLikeCflText(o)) return false;
+  const ok = nbaTeamKey(oddsStr);
+  const tk = nbaTeamKey([team.abbr, team.nick, team.name].filter(Boolean).join(" "));
+  if (ok && tk && ok === tk) return true;
   if (blob.includes(o) || o.includes(blob)) return true;
   const nick = normTeamStr(team.nick);
   const abbr = normTeamStr(team.abbr);
   if (abbr && (o === abbr || o.split(/\s+/).includes(abbr))) return true;
-  if (nick === "lions") {
-    return o.includes("detroit") || o === "lions" || o.includes("det");
-  }
   if (nick && nick.length > 3 && o.includes(nick)) return true;
   const last = (team.name || "").split(/\s+/).pop() || "";
   const lastN = normTeamStr(last);
@@ -711,10 +768,14 @@ function nbaStatHint(raw) {
   if (t.includes("triple") && t.includes("double")) return "tdbl";
   if (t.includes("double double") || t.includes("double-double")) return "ddbl";
   if (t.includes("pts+reb+ast") || t.includes("points+rebounds+assists") || t.includes("pra") || t.includes("p+r+a")) return "pra";
+  if ((t.includes("steal") && t.includes("block")) || t.includes("stocks")) return "stocks";
+  if (t.includes("fantasy")) return "fantasy";
   if ((t.includes("pts+reb") || t.includes("points+rebounds") || t.includes("pts + reb")) && !t.includes("ast")) return "pr";
   if (t.includes("pts+ast") || t.includes("points+assists") || t.includes("pts + ast")) return "pa";
   if (t.includes("reb+ast") || t.includes("rebounds+assists") || t.includes("reb + ast")) return "ra";
   if (t.includes("three") || t.includes("3pt") || t.includes("3-pt") || t.includes("threes")) return "threes";
+  if (t.includes("field goal") || t === "fgm") return "fgm";
+  if (t.includes("free throw") || t === "ftm") return "ftm";
   if (t.includes("rebound") || t === "reb" || t === "rebs") return "reb";
   if (t.includes("assist") || t === "ast" || t === "asts") return "ast";
   if (t.includes("steal")) return "stl";
@@ -1032,21 +1093,27 @@ async function fetchNbaModel() {
 function espnRaw(nk, statKey) {
   return _nbaModel.players[nk]?.stats?.[statKey];
 }
+function modelPlayer(nk, name) {
+  if (nk && _nbaModel.players[nk]) return _nbaModel.players[nk];
+  const stripped = normName(String(name || "").replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, ""));
+  return _nbaModel.players[stripped] || {};
+}
 function projectStat(nk, statKey, game) {
-  const pl = _nbaModel.players[nk];
+  const pl = modelPlayer(nk);
   let proj = pl?.stats?.[statKey];
   if (proj == null || !Number.isFinite(Number(proj))) {
-    if (statKey === "pra" && pl?.stats) {
-      const a = Number(pl.stats.pts), b = Number(pl.stats.reb), c = Number(pl.stats.ast);
-      if ([a, b, c].every(Number.isFinite)) proj = a + b + c;
+    const s = pl?.stats || {};
+    if (statKey === "pra" && [s.pts, s.reb, s.ast].every(v => Number.isFinite(Number(v)))) proj = Number(s.pts) + Number(s.reb) + Number(s.ast);
+    else if (statKey === "pr" && [s.pts, s.reb].every(v => Number.isFinite(Number(v)))) proj = Number(s.pts) + Number(s.reb);
+    else if (statKey === "pa" && [s.pts, s.ast].every(v => Number.isFinite(Number(v)))) proj = Number(s.pts) + Number(s.ast);
+    else if (statKey === "ra" && [s.reb, s.ast].every(v => Number.isFinite(Number(v)))) proj = Number(s.reb) + Number(s.ast);
+    else if (statKey === "stocks" && [s.stl, s.blk].every(v => Number.isFinite(Number(v)))) proj = Number(s.stl) + Number(s.blk);
+    else if (statKey === "fantasy" && [s.pts, s.reb, s.ast, s.stl, s.blk, s.tov].every(v => Number.isFinite(Number(v)))) {
+      proj = Number(s.pts) + 1.2 * Number(s.reb) + 1.5 * Number(s.ast) + 3 * Number(s.stl) + 3 * Number(s.blk) - Number(s.tov);
     }
   }
   if (proj == null || !Number.isFinite(Number(proj))) return null;
-  proj = Number(proj);
-  if (game && Number(game.overUnder) > 0) {
-    proj *= 0.97 + 0.03 * (Number(game.overUnder) / 224);
-  }
-  return Math.round(proj * 10) / 10;
+  return Math.round(Number(proj) * 10) / 10;
 }
 function erfApprox(x) {
   const s = x < 0 ? -1 : 1;
@@ -1057,7 +1124,7 @@ function erfApprox(x) {
 }
 function pOverModel(statKey, proj, line) {
   if (proj == null || !Number.isFinite(line)) return null;
-  const countish = /threes|stl|blk|tov|ddbl|tdbl/.test(statKey);
+  const countish = /threes|stl|blk|tov|ddbl|tdbl|stocks|fgm|ftm/.test(statKey);
   if (countish) {
     const lambda = Math.max(0.05, Number(proj));
     const k = Math.floor(line);
@@ -1073,10 +1140,10 @@ function pOverModel(statKey, proj, line) {
   return Math.min(0.92, Math.max(0.08, 0.5 * (1 - erfApprox(z / Math.SQRT2))));
 }
 function findGameForTeamAbbr(team, games) {
-  const t = normTeamStr(team);
+  const t = nbaTeamKey(team);
   if (!t) return null;
   for (const g of games) {
-    if (normTeamStr(g.home.abbr) === t || normTeamStr(g.away.abbr) === t) return g;
+    if (nbaTeamKey(g.home.abbr) === t || nbaTeamKey(g.away.abbr) === t) return g;
     if (looseTeamMatch(team, g.home) || looseTeamMatch(team, g.away)) return g;
   }
   return null;
@@ -1087,16 +1154,26 @@ function ppMatchFor(nk, statKey, line) {
 
 function ppDayInWindow(start, games) {
   const raw = String(start || "");
-  if (raw.length < 10) return true;
+  if (raw.length < 10) return false;
   const day = raw.slice(0, 10);
   const { from, to } = weekWindow(games || gamesState || []);
   return day >= from && day <= to;
+}
+function ppGameFor(pp, games) {
+  return findGameForTeamAbbr(pp.team, games)
+    || findGameForTeamAbbr(modelPlayer(pp.nk, pp.player).team, games)
+    || null;
+}
+function ppOnThisSlate(pp, games) {
+  if (ppGameFor(pp, games)) return true;
+  if (!(games || []).length) return ppDayInWindow(pp.start, games);
+  return false;
 }
 function pickPpLines(games) {
   const best = new Map();
   for (const pp of _ppBoard?.allLines || []) {
     if (!pp?.nk || !STAT_META[pp.statKey]) continue;
-    if (!ppDayInWindow(pp.start, games)) continue;
+    if (!ppOnThisSlate(pp, games)) continue;
     const k = `${pp.nk}|${pp.statKey}`;
     const prev = best.get(k);
     if (!prev) { best.set(k, pp); continue; }
@@ -1155,13 +1232,27 @@ function groupPlayerProps(games) {
   for (const pp of pickPpLines(games)) {
     if (haveStat.has(`${pp.nk}|${pp.statKey}`)) continue;
     haveStat.add(`${pp.nk}|${pp.statKey}`);
-    const g = findGameForTeamAbbr(pp.team, games);
+    const mdl = modelPlayer(pp.nk, pp.player);
+    const g = findGameForTeamAbbr(pp.team, games) || findGameForTeamAbbr(mdl.team, games);
     const bucket = g ? byGame.get(g.id) : leftover;
     addPropRow(bucket, {
       player: pp.player,
       over: PP_EV_DEC,
       under: PP_EV_DEC,
-    }, pp.statKey, "PrizePicks", pp.line, { team: pp.team });
+    }, pp.statKey, "PrizePicks", pp.line, { team: pp.team || mdl.team });
+  }
+  for (const [nk, pl] of [...leftover.players.entries()]) {
+    const mdl = modelPlayer(nk, pl.name);
+    const g = findGameForTeamAbbr(pl.team, games) || findGameForTeamAbbr(mdl.team, games);
+    if (!g || !byGame.has(g.id)) continue;
+    leftover.players.delete(nk);
+    const bucket = byGame.get(g.id);
+    if (!bucket.players.has(nk)) bucket.players.set(nk, pl);
+    else {
+      const dest = bucket.players.get(nk);
+      dest.lines = { ...dest.lines, ...pl.lines };
+      if (!dest.team) dest.team = pl.team;
+    }
   }
   const out = games.map(g => {
     const players = playersFromBucket(byGame.get(g.id)).map(p => decoratePlayer(p, g));
@@ -1188,7 +1279,7 @@ function groupPlayerProps(games) {
   return out;
 }
 function decoratePlayer(p, game) {
-  const mdl = _nbaModel.players[p.nk] || {};
+  const mdl = modelPlayer(p.nk, p.name);
   const team = p.team || mdl.team || "";
   const pos = mdl.pos || "";
   const lineList = (p.lineList || []).map(l => {
@@ -1230,6 +1321,10 @@ function ppEvStatKey(statType) {
     "reb+ast": "ra", "rebounds + assists": "ra",
     "double-double": "ddbl", "double double": "ddbl",
     "triple-double": "tdbl", "triple double": "tdbl",
+    "steals+blocks": "stocks", "steals + blocks": "stocks", "stl+blk": "stocks", "stocks": "stocks",
+    "fantasy score": "fantasy", "fantasy": "fantasy", "fan pts": "fantasy",
+    "fg made": "fgm", "field goals": "fgm", "field goals made": "fgm",
+    "ft made": "ftm", "free throws": "ftm", "free throws made": "ftm",
     "minutes": "min",
   };
   return map[st] || nbaStatHint(st) || null;
@@ -1381,14 +1476,14 @@ async function buildEV(games) {
   for (const pp of board.allLines || []) {
     if (!pp?.nk || !STAT_META[pp.statKey] || pp.statKey === "other") continue;
     if (!isHalfPointLine(pp.line)) continue;
-    if (!ppDayInWindow(pp.start, games)) continue;
+    if (!ppOnThisSlate(pp, games)) continue;
     const inj = injuryFor(pp.player);
     if (inj && /out|\bir\b|inactive|pup/i.test(inj.status || "")) continue;
     const hit = findBookGroupForPp(groups, pp);
     if (!hit) continue;
     const g = hit.g;
     diag.ppExactMatches++;
-    const game = findGameForTeamAbbr(pp.team, games);
+    const game = ppGameFor(pp, games);
     const proj = projectStat(pp.nk, pp.statKey, game);
     const matchup = g.away && g.home
       ? `${g.away} @ ${g.home}`
@@ -1430,11 +1525,11 @@ async function buildEV(games) {
   for (const pp of board.allLines || []) {
     if (!pp?.nk || !STAT_META[pp.statKey] || pp.statKey === "other") continue;
     if (!isHalfPointLine(pp.line)) continue;
-    if (!ppDayInWindow(pp.start, games)) continue;
+    if (!ppOnThisSlate(pp, games)) continue;
     if (graded.has(`${pp.nk}|${pp.statKey}|${pp.line}`)) continue;
     const inj = injuryFor(pp.player);
     if (inj && /out|\bir\b|inactive|pup/i.test(inj.status || "")) continue;
-    const game = findGameForTeamAbbr(pp.team, games);
+    const game = ppGameFor(pp, games);
     const proj = projectStat(pp.nk, pp.statKey, game);
     const pOver = pOverModel(pp.statKey, proj, pp.line);
     if (pOver == null) continue;
@@ -1664,12 +1759,12 @@ function renderSlate(games) {
   const list = filterSlateGames(games);
   if (!games.length) {
     return `<div class="game-card empty">
-      <h3>No games on this week yet</h3>
-      <p>ESPN has not published this slate. Pick another week from the menu, or check back when the schedule posts.</p>
+      <h3>No games on this date yet</h3>
+      <p>ESPN has not published this slate. Pick another date, or check back when the schedule posts.</p>
     </div>`;
   }
   if (!list.length) {
-    return `<div class="game-card empty"><h3>No games in this filter</h3><p>Try All, Sunday, or Final.</p></div>`;
+    return `<div class="game-card empty"><h3>No games in this filter</h3><p>Try All, Today, Live, or Final.</p></div>`;
   }
   const propById = new Map((cache.props || []).map(g => [g.id, g.propCount || 0]));
   let lastHead = "";
@@ -1744,7 +1839,7 @@ function renderTrackPanel(p, l) {
   const nowTxt = last && hist.length > 1
     ? `Now ${last.line ?? "—"} · FD ${formatAmerican(last.fdOver)} / DK ${formatAmerican(last.dkOver)}`
     : "";
-  const pl = _nbaModel.players[p.nk] || {};
+  const pl = modelPlayer(p.nk, p.name);
   const logs = pl.logs || [];
   const h2h = pl.h2h || {};
   const role = pl.role?.note || "";
